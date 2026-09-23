@@ -1361,37 +1361,7 @@ document.addEventListener('change', async e => {
   sel.disabled = false;
 });
 
-async function openSubModal(){
-  const host = location.hostname;
-  const port = location.port ? ':' + location.port : '';
-  const proto = location.protocol;
-  let token = '';
-  try {
-    const tokenRes = await api('/api/cred/token');
-    if (tokenRes && tokenRes.token) token = tokenRes.token;
-  } catch(e) {}
-
-  const tokenQuery = token ? '?token=' + encodeURIComponent(token) : '';
-  const subBase = proto + '//' + host + port + '/sub' + tokenQuery;
-  const clashSep = tokenQuery ? '&format=clash' : '?format=clash';
-  const subClash = proto + '//' + host + port + '/sub' + tokenQuery + clashSep;
-
-  $('#subUrlBase64').value = subBase;
-  $('#subUrlClash').value = subClash;
-  $('#copySubBase64').onclick = () => copy(subBase);
-  $('#copySubClash').onclick = () => copy(subClash);
-  $('#importClashBtn').onclick = () => {
-    window.location.href = 'clash://install-config?url=' + encodeURIComponent(subClash) + '&name=fanout';
-  };
-  openModal('submodal');
-}
-
 document.addEventListener('click', async e => {
-  if(e.target.closest('#subBtn')){
-    openSubModal();
-    return;
-  }
-
   const link = e.target.closest('[data-detail]');
   if(link) return openDetail(link.dataset.detail);
 
@@ -1773,6 +1743,8 @@ async function scanCustomOvpn(btn){
   }finally{
     if(btn) btn.disabled = false;
   }
+}
+
 // ---- 全平台聚合订阅 ----
 async function openSubModal(){
   openModal('submodal');
