@@ -1809,7 +1809,7 @@ $('#settingsBtn').onclick = async () => {
     $('#updCheck').textContent = '检查更新';
   }).catch(err => {
     $('#setPathHint').textContent = '界面挂在当前路径下。' + (err.message ? '提示: ' + err.message : '');
-    $('#updCur').textContent = 'v0.2.9-enhanced';
+    $('#updCur').textContent = 'v0.3.0-enhanced';
     $('#updCheck').disabled = false;
   });
 

@@ -126,12 +126,25 @@ func (m *Manager) ExitsOf() ExitsView {
 				intel = nodeIntel
 			}
 		}
+		region := t.Node.CountryCode
+		country := t.Node.Country
+		isp := t.Node.ISP
+		if intel.ISP != "" && intel.ISP != "Unknown" && !strings.EqualFold(intel.ISP, "Public Proxy") {
+			isp = intel.ISP
+		}
+		if intel.CountryCode != "" && intel.CountryCode != "GLOBAL" {
+			region = intel.CountryCode
+			country = intel.Country
+		}
+		if isp == "" || strings.EqualFold(isp, "Public Proxy") {
+			isp = "优质网络"
+		}
 		view.Exits = append(view.Exits, Exit{
 			Slot: t.Slot, Port: t.Port, Host: t.Node.HostName,
-			Region: t.Node.CountryCode, Country: t.Node.Country,
+			Region: region, Country: country,
 			ExitIP: t.ExitIP, Status: t.Status, Err: t.Err, Since: t.Since,
 			SocksUser: cred.User, SocksPass: cred.Pass,
-			IPType: intel.IPType, PurityScore: intel.PurityScore, ISP: intel.ISP,
+			IPType: intel.IPType, PurityScore: intel.PurityScore, ISP: isp,
 		})
 	}
 
@@ -146,8 +159,26 @@ func (m *Manager) ExitsOf() ExitsView {
 			ID: ib.ID, Port: ib.Port, Remark: ib.Remark,
 			Protocol: ib.Protocol, Enable: ib.Enable, Tag: ib.Tag,
 		}
-		if i, ok := byHost[ib.BoundTo]; ib.BoundTo != "" && ok {
-			view.Exits[i].Inbounds = append(view.Exits[i].Inbounds, row)
+		matchedIdx := -1
+		if ib.BoundTo != "" {
+			if idx, ok := byHost[ib.BoundTo]; ok {
+				matchedIdx = idx
+			} else if idx, ok := byHost[sanitizeTag(ib.BoundTo)]; ok {
+				matchedIdx = idx
+			} else {
+				for h, idx := range byHost {
+					if strings.Contains(ib.BoundTo, h) || strings.Contains(h, ib.BoundTo) {
+						matchedIdx = idx
+						break
+					}
+				}
+			}
+		}
+		if matchedIdx == -1 && len(view.Exits) == 1 {
+			matchedIdx = 0
+		}
+		if matchedIdx >= 0 && matchedIdx < len(view.Exits) {
+			view.Exits[matchedIdx].Inbounds = append(view.Exits[matchedIdx].Inbounds, row)
 			continue
 		}
 		view.Direct = append(view.Direct, row)

@@ -74,7 +74,7 @@ func apiSubscription(m *Manager, a *Auth) http.HandlerFunc {
 			strings.Contains(ua, "mihomo") ||
 			strings.Contains(ua, "meta")
 
-		// 建立已连接出站绑定的映射：Node.HostName -> *Tunnel
+		// 建立已连接出站绑定的映射：支持 HostName, sanitizeTag, IP, slot 等全方位匹配
 		tunnels := m.Tunnels()
 		boundTunnel := make(map[string]*Tunnel)
 		var upTunnels []*Tunnel
@@ -82,7 +82,42 @@ func apiSubscription(m *Manager, a *Auth) http.HandlerFunc {
 			if t.Status == "up" {
 				upTunnels = append(upTunnels, t)
 				boundTunnel[t.Node.HostName] = t
+				boundTunnel[sanitizeTag(t.Node.HostName)] = t
+				if t.Node.IP != "" {
+					boundTunnel[t.Node.IP] = t
+				}
+				boundTunnel[fmt.Sprintf("exit-%d", t.Slot)] = t
+				boundTunnel[fmt.Sprintf("%d", t.Slot)] = t
 			}
+		}
+
+		findTunnel := func(boundTo string) *Tunnel {
+			if boundTo == "" {
+				if len(upTunnels) == 1 {
+					return upTunnels[0]
+				}
+				return nil
+			}
+			if t, ok := boundTunnel[boundTo]; ok && t != nil {
+				return t
+			}
+			clean := sanitizeTag(boundTo)
+			if t, ok := boundTunnel[clean]; ok && t != nil {
+				return t
+			}
+			for _, t := range upTunnels {
+				s := sanitizeTag(t.Node.HostName)
+				if strings.Contains(boundTo, s) || strings.Contains(s, boundTo) {
+					return t
+				}
+				if t.Node.IP != "" && strings.Contains(boundTo, t.Node.IP) {
+					return t
+				}
+			}
+			if len(upTunnels) == 1 {
+				return upTunnels[0]
+			}
+			return nil
 		}
 
 		// 收集所有 3x-ui 入站及其分享链接
@@ -97,14 +132,19 @@ func apiSubscription(m *Manager, a *Auth) http.HandlerFunc {
 				if dErr == nil && d != nil {
 					details = append(details, d)
 					// 处理链接名称：改成国家表情和企业名称
-					t := boundTunnel[d.BoundTo]
+					t := findTunnel(d.BoundTo)
 					for _, rawLink := range d.Links {
+						idx := strings.LastIndex(rawLink, "#")
+						var cleanName string
 						if t != nil {
-							idx := strings.LastIndex(rawLink, "#")
-							if idx != -1 {
-								cleanName := formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP, fmt.Sprintf("%s :%d", strings.ToUpper(d.Protocol), d.Port))
-								rawLink = rawLink[:idx] + "#" + url.QueryEscape(cleanName)
-							}
+							cleanName = formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP, fmt.Sprintf("%s :%d", strings.ToUpper(d.Protocol), d.Port))
+						} else {
+							cleanName = fmt.Sprintf("🚀 聚合出海 · %s :%d", strings.ToUpper(d.Protocol), d.Port)
+						}
+						if idx != -1 {
+							rawLink = rawLink[:idx] + "#" + url.QueryEscape(cleanName)
+						} else {
+							rawLink = rawLink + "#" + url.QueryEscape(cleanName)
 						}
 						allLinks = append(allLinks, rawLink)
 					}
@@ -154,10 +194,44 @@ func generateClashConfig(details []*InboundDetail, tunnels []*Tunnel, host strin
 	}
 	var proxies []proxyItem
 
-	// 建立 boundTo 对应关系
+	// 建立 boundTo 对应关系：支持 HostName, sanitizeTag, IP, slot 等全方位匹配
 	boundTunnel := make(map[string]*Tunnel)
 	for _, t := range tunnels {
 		boundTunnel[t.Node.HostName] = t
+		boundTunnel[sanitizeTag(t.Node.HostName)] = t
+		if t.Node.IP != "" {
+			boundTunnel[t.Node.IP] = t
+		}
+		boundTunnel[fmt.Sprintf("exit-%d", t.Slot)] = t
+		boundTunnel[fmt.Sprintf("%d", t.Slot)] = t
+	}
+	findTunnel := func(boundTo string) *Tunnel {
+		if boundTo == "" {
+			if len(tunnels) == 1 {
+				return tunnels[0]
+			}
+			return nil
+		}
+		if t, ok := boundTunnel[boundTo]; ok && t != nil {
+			return t
+		}
+		clean := sanitizeTag(boundTo)
+		if t, ok := boundTunnel[clean]; ok && t != nil {
+			return t
+		}
+		for _, t := range tunnels {
+			s := sanitizeTag(t.Node.HostName)
+			if strings.Contains(boundTo, s) || strings.Contains(s, boundTo) {
+				return t
+			}
+			if t.Node.IP != "" && strings.Contains(boundTo, t.Node.IP) {
+				return t
+			}
+		}
+		if len(tunnels) == 1 {
+			return tunnels[0]
+		}
+		return nil
 	}
 
 	seenNames := make(map[string]int)
@@ -173,7 +247,7 @@ func generateClashConfig(details []*InboundDetail, tunnels []*Tunnel, host strin
 	// 1. 处理 3x-ui 入站（节点名称采用：国家表情 + 企业名称）
 	for _, d := range details {
 		proto := strings.ToLower(d.Protocol)
-		t := boundTunnel[d.BoundTo]
+		t := findTunnel(d.BoundTo)
 
 		for idx, c := range d.Clients {
 			clientEmail := c.Email

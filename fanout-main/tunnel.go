@@ -334,10 +334,13 @@ func (t *Tunnel) probeExitIP() (string, error) {
 			resp2.Body.Close()
 		}
 
+		if err != nil && err2 != nil {
+			return "", fmt.Errorf("上游代理连通测试失败 (trace: %v, ipify: %v)", err, err2)
+		}
 		if t.Node.IP != "" && net.ParseIP(t.Node.IP) != nil {
 			return t.Node.IP, nil
 		}
-		return "", fmt.Errorf("上游代理连通测试失败: %v", err)
+		return "", fmt.Errorf("上游代理未返回有效公网 IP")
 	}
 
 	if t.Node.IP != "" && net.ParseIP(t.Node.IP) != nil {
@@ -365,6 +368,15 @@ func (t *Tunnel) stop() {
 	t.Status = "stopped"
 }
 
+type bufferedConn struct {
+	net.Conn
+	r io.Reader
+}
+
+func (b *bufferedConn) Read(p []byte) (int, error) {
+	return b.r.Read(p)
+}
+
 // makeUpstreamDialer 为上游公开 SOCKS5 或 HTTP 代理构造出站直连拨号器
 func makeUpstreamDialer(proto, upstreamAddr string, timeout time.Duration) func(network, addr string) (net.Conn, error) {
 	if proto == "http" {
@@ -373,7 +385,23 @@ func makeUpstreamDialer(proto, upstreamAddr string, timeout time.Duration) func(
 			if err != nil {
 				return nil, err
 			}
-			req := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\nProxy-Connection: Keep-Alive\r\n\r\n", addr, addr)
+			_ = conn.SetDeadline(time.Now().Add(timeout))
+
+			targetAddr := addr
+			h, p, splitErr := net.SplitHostPort(addr)
+			if splitErr == nil && net.ParseIP(h) == nil {
+				// 尝试解析域名为 IPv4，极大增强公网 HTTP 代理的访问兼容性
+				if ips, lErr := net.LookupIP(h); lErr == nil {
+					for _, ipItem := range ips {
+						if ip4 := ipItem.To4(); ip4 != nil {
+							targetAddr = net.JoinHostPort(ip4.String(), p)
+							break
+						}
+					}
+				}
+			}
+
+			req := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\nProxy-Connection: Keep-Alive\r\n\r\n", targetAddr, targetAddr)
 			if _, err := conn.Write([]byte(req)); err != nil {
 				conn.Close()
 				return nil, err
@@ -394,6 +422,10 @@ func makeUpstreamDialer(proto, upstreamAddr string, timeout time.Duration) func(
 					break
 				}
 			}
+			_ = conn.SetDeadline(time.Time{})
+			if br.Buffered() > 0 {
+				return &bufferedConn{Conn: conn, r: io.MultiReader(br, conn)}, nil
+			}
 			return conn, nil
 		}
 	}
@@ -404,6 +436,8 @@ func makeUpstreamDialer(proto, upstreamAddr string, timeout time.Duration) func(
 		if err != nil {
 			return nil, err
 		}
+		_ = conn.SetDeadline(time.Now().Add(timeout))
+
 		// 1. 协商无认证
 		if _, err := conn.Write([]byte{0x05, 0x01, 0x00}); err != nil {
 			conn.Close()
@@ -418,6 +452,7 @@ func makeUpstreamDialer(proto, upstreamAddr string, timeout time.Duration) func(
 			conn.Close()
 			return nil, fmt.Errorf("upstream socks5 auth rejected: %v", resp)
 		}
+
 		// 2. CONNECT 请求
 		host, portStr, err := net.SplitHostPort(addr)
 		if err != nil {
@@ -429,13 +464,29 @@ func makeUpstreamDialer(proto, upstreamAddr string, timeout time.Duration) func(
 			conn.Close()
 			return nil, err
 		}
-		var buf []byte
-		ip := net.ParseIP(host)
-		if ip4 := ip.To4(); ip4 != nil {
-			buf = append([]byte{0x05, 0x01, 0x00, 0x01}, ip4...)
-		} else if ip6 := ip.To16(); ip != nil && ip6 != nil {
-			buf = append([]byte{0x05, 0x01, 0x00, 0x04}, ip6...)
+
+		// 先本地解析域名为 IPv4，绝大多数公网 SOCKS5 代理仅支持 IPv4 (ATYP 0x01)，不支持域名 (ATYP 0x03)
+		var targetIP net.IP
+		if ip := net.ParseIP(host); ip != nil {
+			targetIP = ip
 		} else {
+			if ips, err := net.LookupIP(host); err == nil {
+				for _, ipItem := range ips {
+					if ip4 := ipItem.To4(); ip4 != nil {
+						targetIP = ip4
+						break
+					}
+				}
+			}
+		}
+
+		var buf []byte
+		if targetIP != nil && targetIP.To4() != nil {
+			buf = append([]byte{0x05, 0x01, 0x00, 0x01}, targetIP.To4()...)
+		} else if targetIP != nil && targetIP.To16() != nil {
+			buf = append([]byte{0x05, 0x01, 0x00, 0x04}, targetIP.To16()...)
+		} else {
+			// 无法解析时降级传域名
 			buf = append([]byte{0x05, 0x01, 0x00, 0x03, byte(len(host))}, []byte(host)...)
 		}
 		buf = append(buf, byte(port>>8), byte(port&0xff))
@@ -443,6 +494,7 @@ func makeUpstreamDialer(proto, upstreamAddr string, timeout time.Duration) func(
 			conn.Close()
 			return nil, err
 		}
+
 		// 3. 读取应答头 [0x05, rep, 0x00, atyp, ...]
 		repHead := make([]byte, 4)
 		if _, err := io.ReadFull(conn, repHead); err != nil {
@@ -475,6 +527,9 @@ func makeUpstreamDialer(proto, upstreamAddr string, timeout time.Duration) func(
 			conn.Close()
 			return nil, err
 		}
+
+		// 握手成功，清空超时，转入全双工流转发
+		_ = conn.SetDeadline(time.Time{})
 		return conn, nil
 	}
 }

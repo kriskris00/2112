@@ -16,7 +16,7 @@ import (
 )
 
 // version 由构建时通过 -ldflags 注入。
-var version = "v0.2.9-enhanced"
+var version = "v0.3.0-enhanced"
 
 func main() {
 	var (
@@ -136,7 +136,7 @@ func main() {
 	mux.HandleFunc("/api/xui/inbounds", apiXUIInbounds(mgr))
 	mux.HandleFunc("/api/xui/bind", apiXUIBind(mgr))
 	mux.HandleFunc("/api/xui/clone", apiXUIClone(mgr))
-	mux.HandleFunc("/api/xui/detail", apiXUIDetail)
+	mux.HandleFunc("/api/xui/detail", apiXUIDetail(mgr))
 	mux.HandleFunc("/api/xui/links", apiXUILinks)
 	mux.HandleFunc("/api/xui/delete", apiXUIDelete(mgr))
 	mux.HandleFunc("/api/panel/inbound/new", apiInboundCreate(mgr))
@@ -739,28 +739,64 @@ func apiXUIClone(m *Manager) http.HandlerFunc {
 	}
 }
 
-// apiXUIDetail 返回某个入站的详情，含客户端与可直接复制的分享链接。
-func apiXUIDetail(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.Atoi(r.URL.Query().Get("id"))
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id 参数无效"})
-		return
+// apiXUIDetail 返回某个入站的详情，含客户端与可直接复制的分享链接（带国旗表情与企业名称）。
+func apiXUIDetail(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.Atoi(r.URL.Query().Get("id"))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id 参数无效"})
+			return
+		}
+		x, err := openPanel()
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+			return
+		}
+		host := r.URL.Query().Get("host")
+		if host == "" {
+			host = publicHost(r)
+		}
+		detail, err := x.InboundDetail(id, host)
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+			return
+		}
+
+		// 格式化分享链接名称：国旗表情 + 企业名称
+		if detail != nil && len(detail.Links) > 0 {
+			tunnels := mgr.Tunnels()
+			var matchedTunnel *Tunnel
+			for _, t := range tunnels {
+				if t.Status == "up" {
+					if t.Node.HostName == detail.BoundTo || sanitizeTag(t.Node.HostName) == detail.BoundTo || t.Node.IP == detail.BoundTo {
+						matchedTunnel = t
+						break
+					}
+					sTag := sanitizeTag(t.Node.HostName)
+					if strings.Contains(detail.BoundTo, sTag) || strings.Contains(sTag, detail.BoundTo) {
+						matchedTunnel = t
+						break
+					}
+				}
+			}
+			if matchedTunnel == nil && len(tunnels) == 1 && tunnels[0].Status == "up" {
+				matchedTunnel = tunnels[0]
+			}
+			if matchedTunnel != nil {
+				cleanName := formatProxyName(matchedTunnel.Node.CountryCode, matchedTunnel.Node.Country, matchedTunnel.Node.ISP, fmt.Sprintf("%s :%d", strings.ToUpper(detail.Protocol), detail.Port))
+				for i, rawLink := range detail.Links {
+					idx := strings.LastIndex(rawLink, "#")
+					if idx != -1 {
+						detail.Links[i] = rawLink[:idx] + "#" + url.QueryEscape(cleanName)
+					} else {
+						detail.Links[i] = rawLink + "#" + url.QueryEscape(cleanName)
+					}
+				}
+			}
+		}
+
+		writeJSON(w, http.StatusOK, detail)
 	}
-	x, err := openPanel()
-	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
-		return
-	}
-	host := r.URL.Query().Get("host")
-	if host == "" {
-		host = publicHost(r)
-	}
-	detail, err := x.InboundDetail(id, host)
-	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, detail)
 }
 
 // publicHost 决定分享链接里的连接地址。母机公网 IPv4 才是客户端真正能连上

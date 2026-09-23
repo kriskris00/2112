@@ -92,8 +92,37 @@ var publicGlobalSources = []string{
 	"https://api.openproxylist.xyz/socks5.txt",
 	"https://api.openproxylist.xyz/http.txt",
 	"https://www.proxy-list.download/api/v1/get?type=socks5",
-	"https://www.proxy-list.download/api/v1/get?type=http",
 	"https://raw.githubusercontent.com/andigwandi/free-proxy/main/proxy_list.txt",
+	"https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt",
+	"https://raw.githubusercontent.com/almroot/proxylist/master/list.txt",
+	"https://raw.githubusercontent.com/asethz/proxylist/master/proxies.txt",
+	"https://raw.githubusercontent.com/saisuiu/Lion-proxy/main/all.txt",
+	"https://raw.githubusercontent.com/yemixzy/proxy-list/main/proxies/socks5.txt",
+	"https://raw.githubusercontent.com/yemixzy/proxy-list/main/proxies/http.txt",
+	"https://raw.githubusercontent.com/UptimerBot/proxy-list/main/proxies/socks5.txt",
+	"https://raw.githubusercontent.com/UptimerBot/proxy-list/main/proxies/http.txt",
+	"https://raw.githubusercontent.com/Traffic-R/Proxy-List/master/socks5.txt",
+	"https://raw.githubusercontent.com/Traffic-R/Proxy-List/master/http.txt",
+	"https://raw.githubusercontent.com/Tsprnay/Proxy-lists/master/proxies/socks5.txt",
+	"https://raw.githubusercontent.com/Tsprnay/Proxy-lists/master/proxies/http.txt",
+	"https://raw.githubusercontent.com/monosans/proxy-list/main/proxies_anonymous/socks5.txt",
+	"https://raw.githubusercontent.com/monosans/proxy-list/main/proxies_anonymous/http.txt",
+	"https://raw.githubusercontent.com/Bardiafa/Proxy-Cadet/main/SOCKS5.txt",
+	"https://raw.githubusercontent.com/Bardiafa/Proxy-Cadet/main/HTTP.txt",
+	"https://raw.githubusercontent.com/mertguvencli/http-proxy-list/main/proxy-list/data.txt",
+	"https://raw.githubusercontent.com/ObcbO/getproxy/master/socks5.txt",
+	"https://raw.githubusercontent.com/ObcbO/getproxy/master/http.txt",
+	"https://raw.githubusercontent.com/roma8ok/proxy-list/main/proxy-list/data.txt",
+	"https://raw.githubusercontent.com/im-notify/Proxy-List/main/socks5.txt",
+	"https://raw.githubusercontent.com/im-notify/Proxy-List/main/http.txt",
+	"https://raw.githubusercontent.com/Karan-G/Proxy-Scraper/main/socks5_proxies.txt",
+	"https://raw.githubusercontent.com/Karan-G/Proxy-Scraper/main/http_proxies.txt",
+	"https://raw.githubusercontent.com/r00tee/Proxy-List/main/Socks5.txt",
+	"https://raw.githubusercontent.com/r00tee/Proxy-List/main/Https.txt",
+	"https://raw.githubusercontent.com/hanwaytech/free-proxy-list/main/socks5.txt",
+	"https://raw.githubusercontent.com/hanwaytech/free-proxy-list/main/http.txt",
+	"https://raw.githubusercontent.com/SevenworksDev/proxy-list/main/proxies/socks5.txt",
+	"https://raw.githubusercontent.com/SevenworksDev/proxy-list/main/proxies/http.txt",
 }
 
 var eduCIDRs []*net.IPNet
@@ -275,17 +304,23 @@ func parseProxyList(body string, defaultProto string) []Node {
 		portStr := strings.TrimSpace(parts[1])
 
 		extractedCC := ""
-		if idx := strings.IndexAny(portStr, "#, \t[("); idx != -1 {
-			trail := strings.Trim(portStr[idx:], "#, \t[]()")
-			if len(trail) == 2 {
-				extractedCC = strings.ToUpper(trail)
+		if idx := strings.IndexAny(portStr, "#, \t[(-"); idx != -1 {
+			trail := strings.Trim(portStr[idx:], "#, \t[]()-")
+			if len(trail) >= 2 {
+				candCC := strings.ToUpper(trail[:2])
+				if candCC[0] >= 'A' && candCC[0] <= 'Z' && candCC[1] >= 'A' && candCC[1] <= 'Z' {
+					extractedCC = candCC
+				}
 			}
 			portStr = strings.TrimSpace(portStr[:idx])
 		}
 		if len(parts) >= 3 && extractedCC == "" {
-			cand := strings.Trim(parts[2], " \t[]()")
-			if len(cand) == 2 {
-				extractedCC = strings.ToUpper(cand)
+			cand := strings.Trim(parts[2], " \t[]()-#")
+			if len(cand) >= 2 {
+				candCC := strings.ToUpper(cand[:2])
+				if candCC[0] >= 'A' && candCC[0] <= 'Z' && candCC[1] >= 'A' && candCC[1] <= 'Z' {
+					extractedCC = candCC
+				}
 			}
 		}
 
@@ -297,11 +332,25 @@ func parseProxyList(body string, defaultProto string) []Node {
 			continue
 		}
 
-		country := "全球节点"
+		country := "全球公网"
 		countryCode := "GLOBAL"
 		ipType := "hosting"
-		isp := "Public Proxy"
+		isp := "优质网络"
 		src := "proxy"
+
+		// 检查本地已有 IP 智能缓存
+		globalIPIntel.mu.RLock()
+		if intel, ok := globalIPIntel.cache[ip]; ok {
+			if intel.CountryCode != "" && intel.CountryCode != "GLOBAL" {
+				countryCode = intel.CountryCode
+				country = intel.Country
+			}
+			if intel.ISP != "" && !strings.EqualFold(intel.ISP, "Public Proxy") && !strings.EqualFold(intel.ISP, "Public Pool") {
+				isp = intel.ISP
+			}
+		}
+		globalIPIntel.mu.RUnlock()
+
 		if isEduIP(ip) && extractedCC != "CN" {
 			country = "海外高校学术网"
 			countryCode = "EDU"
@@ -311,9 +360,13 @@ func parseProxyList(body string, defaultProto string) []Node {
 			ipType = "edu"
 			isp = "海外高校科研学术网络"
 			src = "edu"
-		} else if extractedCC != "" {
+		} else if extractedCC != "" && countryCode == "GLOBAL" {
 			countryCode = extractedCC
-			country = countryCode
+			if zh, ok := countryNameZH[countryCode]; ok && zh != "" {
+				country = zh
+			} else {
+				country = countryCode
+			}
 		}
 
 		hostname := fmt.Sprintf("pub_%s_%s_%d", proto, ip, port)
@@ -498,7 +551,7 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 			}
 			successCount++
 			for _, n := range nodes {
-				if len(nodeMap) >= 50000 {
+				if len(nodeMap) >= 200000 {
 					break
 				}
 				if n.IP != "" {
@@ -536,7 +589,7 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 				}
 				successCount++
 				for _, n := range nodes {
-					if len(nodeMap) >= 50000 {
+					if len(nodeMap) >= 200000 {
 						break
 					}
 					if n.IP != "" && nodeMap[n.IP].IP == "" {

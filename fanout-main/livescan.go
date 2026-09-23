@@ -178,9 +178,40 @@ func probeNodeLive(n Node, timeout time.Duration) (bool, int64, string, error) {
 		if err != nil || !strings.Contains(statusLine, "200") {
 			return false, 0, "", fmt.Errorf("HTTP 代理隧道建立失败")
 		}
+		for {
+			line, err := br.ReadString('\n')
+			if err != nil || strings.TrimSpace(line) == "" {
+				break
+			}
+		}
+
+		// 发起实际 GET 请求，验证隧道是否真正通畅并能够回传 HTTP 数据
+		httpReq := "GET /cdn-cgi/trace HTTP/1.1\r\nHost: 1.1.1.1\r\nConnection: close\r\n\r\n"
+		if _, err := conn.Write([]byte(httpReq)); err != nil {
+			return false, 0, "", err
+		}
+		buf := make([]byte, 512)
+		nBytes, err := br.Read(buf)
+		if err != nil || nBytes == 0 {
+			return false, 0, "", fmt.Errorf("HTTP 代理数据传输失败")
+		}
+		content := string(buf[:nBytes])
+		if !strings.Contains(content, "HTTP/") && !strings.Contains(content, "ip=") {
+			return false, 0, "", fmt.Errorf("HTTP 代理回包异常")
+		}
+
+		exitIP := n.IP
+		for _, line := range strings.Split(content, "\n") {
+			if strings.HasPrefix(line, "ip=") {
+				parsedIP := strings.TrimSpace(strings.TrimPrefix(line, "ip="))
+				if net.ParseIP(parsedIP) != nil {
+					exitIP = parsedIP
+				}
+			}
+		}
 
 		rtt := time.Since(start).Milliseconds()
-		return true, rtt, n.IP, nil
+		return true, rtt, exitIP, nil
 	}
 
 	return false, 0, "", fmt.Errorf("不支持的协议类型: %s", n.Proto)
@@ -356,6 +387,7 @@ func (ls *LiveScanner) runScan(source, region string, maxCandidates int) {
 				if exitIP != "" {
 					node.IP = exitIP
 				}
+				EnrichNodeWithIntel(&node)
 
 				outMu.Lock()
 				verifiedList = append(verifiedList, node)

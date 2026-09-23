@@ -415,6 +415,10 @@ func (m *Manager) tryNode(t *Tunnel) error {
 			return err
 		}
 		t.ExitIP = ip
+		if t.Node.IP == "" {
+			t.Node.IP = ip
+		}
+		EnrichNodeWithIntel(&t.Node)
 		return nil
 	}
 
@@ -434,6 +438,10 @@ func (m *Manager) tryNode(t *Tunnel) error {
 		return err
 	}
 	t.ExitIP = ip
+	if t.Node.IP == "" {
+		t.Node.IP = ip
+	}
+	EnrichNodeWithIntel(&t.Node)
 	return nil
 }
 

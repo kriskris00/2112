@@ -205,6 +205,169 @@ func enrichSingleIPAsync(ip string) {
 	saveIPIntel()
 }
 
+// ResolveIPIntel 同步或从缓存获取 IP 情报（支持本地海外学术网段、ip-api 与 ipwho.is 双重在线容灾）
+func ResolveIPIntel(ip string) IPIntel {
+	if ip == "" || ip == "127.0.0.1" {
+		return IPIntel{IP: ip, CountryCode: "GLOBAL", Country: "全球公网", ISP: "公网代理"}
+	}
+
+	// 1. 先查内存缓存
+	globalIPIntel.mu.RLock()
+	if item, ok := globalIPIntel.cache[ip]; ok {
+		if item.CountryCode != "" && item.CountryCode != "GLOBAL" && item.ISP != "" && !strings.EqualFold(item.ISP, "Public Proxy") {
+			globalIPIntel.mu.RUnlock()
+			return item
+		}
+	}
+	globalIPIntel.mu.RUnlock()
+
+	// 2. 海外学术高校科研网段检测 (日本筑波大学/SINET、韩国KOREN、台湾TANet、欧美名校等)
+	if isEduIP(ip) {
+		cCode := "JP"
+		cName := "日本"
+		isp := "日本筑波大学 (SINET学术骨干)"
+		if strings.HasPrefix(ip, "140.11") || strings.HasPrefix(ip, "163.13") || strings.HasPrefix(ip, "192.83") {
+			cCode = "TW"
+			cName = "中国台湾"
+			isp = "台湾学术网络 (TANet)"
+		} else if strings.HasPrefix(ip, "134.75") || strings.HasPrefix(ip, "143.248") || strings.HasPrefix(ip, "147.46") {
+			cCode = "KR"
+			cName = "韩国"
+			isp = "韩国高校学术网络 (KOREN)"
+		} else if strings.HasPrefix(ip, "18.") || strings.HasPrefix(ip, "128.") || strings.HasPrefix(ip, "169.228") || strings.HasPrefix(ip, "171.64") {
+			cCode = "US"
+			cName = "美国"
+			isp = "美国著名高校 (Internet2)"
+		} else if strings.HasPrefix(ip, "155.69") || strings.HasPrefix(ip, "137.132") {
+			cCode = "SG"
+			cName = "新加坡"
+			isp = "新加坡先进科研网 (SingAREN)"
+		} else if strings.HasPrefix(ip, "138.25") || strings.HasPrefix(ip, "139.130") {
+			cCode = "AU"
+			cName = "澳大利亚"
+			isp = "澳大利亚学术网络 (AARNet)"
+		}
+		res := IPIntel{
+			IP:          ip,
+			IPType:      "edu",
+			PurityScore: 99,
+			ISP:         isp,
+			Country:     cName,
+			CountryCode: cCode,
+			UpdatedAt:   time.Now().Unix(),
+		}
+		globalIPIntel.mu.Lock()
+		globalIPIntel.cache[ip] = res
+		globalIPIntel.mu.Unlock()
+		saveIPIntel()
+		return res
+	}
+
+	// 3. 在线接口查询 (首选 ip-api.com，备用 ipwho.is)
+	client := &http.Client{Timeout: 1800 * time.Millisecond}
+
+	var cc, country, ispName string
+	// 尝试 ip-api.com
+	url1 := fmt.Sprintf("http://ip-api.com/json/%s?fields=status,country,countryCode,isp,org", ip)
+	resp1, err1 := client.Get(url1)
+	if err1 == nil && resp1.StatusCode == http.StatusOK {
+		var d1 struct {
+			Status      string `json:"status"`
+			Country     string `json:"country"`
+			CountryCode string `json:"countryCode"`
+			ISP         string `json:"isp"`
+			Org         string `json:"org"`
+		}
+		if json.NewDecoder(resp1.Body).Decode(&d1) == nil && d1.Status == "success" {
+			cc = strings.ToUpper(strings.TrimSpace(d1.CountryCode))
+			ispName = strings.TrimSpace(d1.ISP)
+			if ispName == "" {
+				ispName = strings.TrimSpace(d1.Org)
+			}
+			country = strings.TrimSpace(d1.Country)
+		}
+		resp1.Body.Close()
+	}
+
+	// 备用：尝试 ipwho.is
+	if cc == "" || ispName == "" {
+		url2 := fmt.Sprintf("http://ipwho.is/%s", ip)
+		resp2, err2 := client.Get(url2)
+		if err2 == nil && resp2.StatusCode == http.StatusOK {
+			var d2 struct {
+				Success     bool   `json:"success"`
+				Country     string `json:"country"`
+				CountryCode string `json:"country_code"`
+				Connection  struct {
+					ISP string `json:"isp"`
+					Org string `json:"org"`
+				} `json:"connection"`
+			}
+			if json.NewDecoder(resp2.Body).Decode(&d2) == nil && d2.Success {
+				if cc == "" {
+					cc = strings.ToUpper(strings.TrimSpace(d2.CountryCode))
+				}
+				if country == "" {
+					country = strings.TrimSpace(d2.Country)
+				}
+				if ispName == "" {
+					ispName = strings.TrimSpace(d2.Connection.ISP)
+					if ispName == "" {
+						ispName = strings.TrimSpace(d2.Connection.Org)
+					}
+				}
+			}
+			resp2.Body.Close()
+		}
+	}
+
+	// 4. 规范化国家中文名
+	if zh, ok := countryNameZH[cc]; ok && zh != "" {
+		country = zh
+	}
+	if country == "" {
+		country = cc
+	}
+	if country == "" {
+		country = "全球公网"
+		cc = "GLOBAL"
+	}
+	if ispName == "" || strings.EqualFold(ispName, "Public Proxy") || strings.EqualFold(ispName, "Public Pool") {
+		ispName = "优质网络"
+	}
+
+	res := IPIntel{
+		IP:          ip,
+		IPType:      "hosting",
+		PurityScore: 80,
+		ISP:         ispName,
+		Country:     country,
+		CountryCode: cc,
+		UpdatedAt:   time.Now().Unix(),
+	}
+
+	globalIPIntel.mu.Lock()
+	globalIPIntel.cache[ip] = res
+	globalIPIntel.mu.Unlock()
+	saveIPIntel()
+	return res
+}
+
+// EnrichNodeWithIntel 根据 IP 情报为节点填充准确的国家、国旗代码与企业/运营商名称
+func EnrichNodeWithIntel(node *Node) {
+	if node == nil || node.IP == "" {
+		return
+	}
+	intel := ResolveIPIntel(node.IP)
+	if intel.CountryCode != "" && intel.CountryCode != "GLOBAL" {
+		node.CountryCode = intel.CountryCode
+		node.Country = intel.Country
+	}
+	if intel.ISP != "" && !strings.EqualFold(intel.ISP, "Public Proxy") && !strings.EqualFold(intel.ISP, "Public Pool") {
+		node.ISP = intel.ISP
+	}
+}
+
 // BatchEnrichNodes 异步批量解析节点列表的 IP 纯净度与类型（100 个一批）
 func BatchEnrichNodes(nodes []Node) {
 	if len(nodes) == 0 {
