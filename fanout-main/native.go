@@ -437,8 +437,11 @@ type NewInboundSpec struct {
 	Fingerprint string
 }
 
-// nativeProtocols 是自建模式支持的协议，与前端下拉保持一致。
-var nativeProtocols = map[string]bool{"vless": true, "vmess": true, "trojan": true}
+// nativeProtocols 声明支持的协议，与前端下拉保持一致。
+var nativeProtocols = map[string]bool{
+	"vless": true, "vmess": true, "trojan": true,
+	"shadowsocks": true, "socks": true, "http": true, "wireguard": true,
+}
 
 // CreateInbound 新建一个入站，端口留空时随机分配。
 func (n *Native) CreateInbound(spec NewInboundSpec, tunnels []*Tunnel) (*CreatedInbound, error) {

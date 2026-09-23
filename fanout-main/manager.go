@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -32,16 +33,25 @@ func NewManager(maxSlots int, workDir string) *Manager {
 
 // RefreshNodes 重新拉取节点列表。
 func (m *Manager) RefreshNodes() (int, error) {
-	nodes, err := fetchNodes(60 * time.Second)
-	// 扫描加载本地自定义 .ovpn 节点并合并
 	customDir := filepath.Join(m.workDir, "custom_nodes")
 	if envDir := os.Getenv("FANOUT_CUSTOM_NODES_DIR"); envDir != "" {
 		customDir = envDir
 	}
+	_ = os.MkdirAll(customDir, 0755)
+
+	nodes, err := fetchNodes(m.workDir, 45*time.Second)
+	// 扫描加载本地自定义 .ovpn 节点并合并
 	customNodes := loadLocalOvpnNodes(customDir)
 	if len(customNodes) > 0 {
 		nodes = append(customNodes, nodes...)
 	}
+
+	sourceInfoMu.Lock()
+	globalSourceInfo.CustomDir = customDir
+	globalSourceInfo.CustomNodes = len(customNodes)
+	globalSourceInfo.TotalNodes = len(nodes)
+	sourceInfoMu.Unlock()
+
 	if err != nil && len(nodes) == 0 {
 		return 0, err
 	}
@@ -50,6 +60,39 @@ func (m *Manager) RefreshNodes() (int, error) {
 	m.fetched = time.Now()
 	m.mu.Unlock()
 	return len(nodes), nil
+}
+
+// ScanLocalNodes 仅扫描本地自定义 .ovpn 目录并合并到现有节点中
+func (m *Manager) ScanLocalNodes() (int, error) {
+	customDir := filepath.Join(m.workDir, "custom_nodes")
+	if envDir := os.Getenv("FANOUT_CUSTOM_NODES_DIR"); envDir != "" {
+		customDir = envDir
+	}
+	_ = os.MkdirAll(customDir, 0755)
+	customNodes := loadLocalOvpnNodes(customDir)
+
+	m.mu.Lock()
+	var remoteNodes []Node
+	for _, n := range m.nodes {
+		if n.CountryCode != "CUSTOM" && !strings.HasPrefix(n.HostName, "custom_") {
+			remoteNodes = append(remoteNodes, n)
+		}
+	}
+	m.nodes = append(customNodes, remoteNodes...)
+	m.fetched = time.Now()
+	total := len(m.nodes)
+	m.mu.Unlock()
+
+	sourceInfoMu.Lock()
+	globalSourceInfo.CustomDir = customDir
+	globalSourceInfo.CustomNodes = len(customNodes)
+	globalSourceInfo.TotalNodes = total
+	sourceInfoMu.Unlock()
+
+	if len(customNodes) > 0 {
+		go BatchEnrichNodes(customNodes)
+	}
+	return len(customNodes), nil
 }
 
 func (m *Manager) Nodes() ([]Node, time.Time) {

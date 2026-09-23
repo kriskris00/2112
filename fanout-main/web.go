@@ -229,6 +229,10 @@ textarea:focus{outline:none;border-color:var(--accent)}
       <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
       全部停止
     </button>
+    <button id="sourcesBtn" title="管理节点源与抓取镜像">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+      节点源
+    </button>
     <button id="newnode" title="新建一个节点（协议与端口）">
       <svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h10"/></svg>
       新建节点
@@ -303,6 +307,10 @@ textarea:focus{outline:none;border-color:var(--accent)}
           <option value="vless">VLESS</option>
           <option value="vmess">VMess</option>
           <option value="trojan">Trojan</option>
+          <option value="shadowsocks">Shadowsocks</option>
+          <option value="socks">Socks5</option>
+          <option value="http">HTTP</option>
+          <option value="wireguard">WireGuard</option>
         </select>
       </label>
       <label class="f">
@@ -487,6 +495,68 @@ textarea:focus{outline:none;border-color:var(--accent)}
   </div>
 </div>
 
+<div class="modal" id="sourcesModal">
+  <div class="sheet">
+    <div class="head">
+      <h2>节点源与镜像管理</h2>
+      <span class="spacer"></span>
+      <button class="icon" data-close="sourcesModal" title="关闭">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+    </div>
+    <div class="body">
+      <div style="background:var(--subtle);padding:14px;border-radius:8px;margin-bottom:16px;border:1px solid var(--border)">
+        <div style="display:flex;align-items:center;margin-bottom:8px">
+          <span style="font-weight:600">当前活跃源：</span>
+          <span id="srcActive" style="color:var(--accent);font-family:monospace;margin-left:6px">-</span>
+        </div>
+        <div style="display:flex;gap:12px;font-size:12px;color:var(--dim);flex-wrap:wrap">
+          <span>总节点：<b id="srcTotal" style="color:var(--text)">0</b></span>
+          <span>本地 .ovpn：<b id="srcCustomCount" style="color:var(--text)">0</b></span>
+          <span>离线缓存：<b id="srcCachedCount" style="color:var(--text)">0</b></span>
+          <span>上次刷新：<span id="srcLastFetch">-</span></span>
+        </div>
+        <div id="srcErr" class="hint bad" style="margin-top:8px" hidden></div>
+      </div>
+
+      <div style="margin-bottom:16px">
+        <h3 style="margin-bottom:8px;font-size:14px">自定义在线节点源</h3>
+        <div style="display:flex;gap:8px">
+          <input id="customSrcUrl" type="url" placeholder="https://... 或 http://... (VPN Gate CSV 订阅地址)" style="flex:1">
+          <button class="primary" id="saveCustomSrc">保存并拉取</button>
+        </div>
+        <div class="hint">可输入您自己的 VPN Gate 镜像、反代或自建 API。留空则恢复默认官方与内置镜像。</div>
+      </div>
+
+      <div style="margin-bottom:16px">
+        <h3 style="margin-bottom:8px;font-size:14px">内置可用镜像源池（自动故障转移）</h3>
+        <div style="font-size:12px;color:var(--dim);line-height:1.6;background:var(--card-bg);padding:10px;border-radius:6px;border:1px solid var(--border);margin-bottom:8px">
+          <div>• 筑波大学 IP 镜像 1：<code>150.40.105.19:35399</code></div>
+          <div>• 筑波大学 IP 镜像 2：<code>150.40.105.6:11803</code></div>
+          <div>• 筑波大学 IP 镜像 3：<code>150.40.105.23:64629</code></div>
+          <div>• 筑波大学 IP 镜像 4：<code>194.156.89.134:47774</code></div>
+          <div>• 官方直连：<code>www.vpngate.net</code></div>
+        </div>
+        <button id="refreshMirrors">🔄 立即轮询抓取所有源</button>
+      </div>
+
+      <div>
+        <h3 style="margin-bottom:8px;font-size:14px">本地自定义 .ovpn 节点</h3>
+        <div class="hint" style="margin-bottom:8px">
+          您可以把任意商业/私有 VPN 的 <code>.ovpn</code> 配置文件上传到服务器目录：<br>
+          <code id="srcCustomDir" style="color:var(--accent)">/var/lib/fanout/custom_nodes</code><br>
+          （支持以国家码命名如 <code>US_server1.ovpn</code>、<code>JP_fast.ovpn</code>，扫描后将直接加入节点池，自动识别纯净度与机房/住宅）
+        </div>
+        <button id="scanLocalOvpn">📁 扫描本地 .ovpn 目录</button>
+      </div>
+    </div>
+    <div class="foot">
+      <span class="spacer"></span>
+      <button data-close="sourcesModal">关闭</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -566,14 +636,6 @@ function renderExits(){
   $('#exportAll').disabled = !view.exits.some(e => e.inbounds && e.inbounds.length);
   $('#stopall').disabled = !n;
 
-  if(!n){
-    list.innerHTML = '<div class="empty">还没有出口'
-      + '<div><button class="primary" id="newexit2">'
-      + '<svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg>'
-      + '新建出口</button></div></div>';
-    return;
-  }
-
   const resCount = view.exits.filter(e => e.ip_type === 'residential').length;
   const purities = view.exits.map(e => e.purity_score || 55);
   const avgPurity = purities.length ? Math.round(purities.reduce((a, b) => a + b, 0) / purities.length) : 0;
@@ -581,9 +643,17 @@ function renderExits(){
   const summaryBar = '<div class="stats-summary">'
     + '<span class="stat-pill">运行出口<b>' + n + '</b></span>'
     + '<span class="stat-pill">🏡 住宅出口<b style="color:#3fa66b">' + resCount + '</b></span>'
-    + '<span class="stat-pill">平均纯净度<b style="color:' + (avgPurity>=80?'#3fa66b':'#c9903a') + '">' + avgPurity + '%</b></span>'
+    + '<span class="stat-pill">平均纯净度<b style="color:' + (avgPurity>=80?'#3fa66b':'#c9903a') + '">' + (n ? avgPurity + '%' : '—') + '</b></span>'
     + '<span class="stat-pill">联动后端<b>' + esc(backendName()) + '</b></span>'
     + '</div>';
+
+  if(!n){
+    list.innerHTML = summaryBar + '<div class="empty">还没有出口'
+      + '<div><button class="primary" id="newexit2">'
+      + '<svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg>'
+      + '新建出口</button></div></div>';
+    return;
+  }
 
   list.innerHTML = summaryBar + view.exits.map(e => {
     const label = e.exit_ip || (e.status === 'starting' ? '连接中…' : '—');
@@ -712,6 +782,19 @@ function renderRegions(){
   const kw = $('#rgfilter').value.trim().toLowerCase();
   const list = regions.filter(r => !kw
     || r.code.toLowerCase().includes(kw) || r.name.toLowerCase().includes(kw));
+
+  if(!regions.length){
+    $('#regions').innerHTML = '<div style="padding:14px;background:var(--subtle);border-radius:8px;border:1px dashed var(--border);margin-top:6px">'
+      + '<div style="font-weight:600;color:var(--bad);margin-bottom:6px">⚠️ 暂未获取到在线节点列表</div>'
+      + '<div style="color:var(--dim);font-size:12px;line-height:1.5;margin-bottom:10px">可能由于网络延迟或官方源受阻，点击下方按钮可立即自动探测筑波大学镜像并获取节点。</div>'
+      + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+      + '<button class="primary" id="wzRefreshBtn" type="button" style="font-size:12px;padding:6px 12px">🔄 立即拉取节点源</button>'
+      + '<button id="wzSourcesBtn" type="button" style="font-size:12px;padding:6px 12px">🌐 节点源管理</button>'
+      + '</div></div>';
+    updateAvail();
+    return;
+  }
+
   $('#regions').innerHTML = ['<button class="rg' + (region === '' ? ' sel' : '')
       + '" data-rg=""><b>不限地区</b><em>速度优先</em></button>']
     .concat(list.map(r => {
@@ -732,6 +815,13 @@ function availOf(code){
 }
 
 function updateAvail(){
+  if(!regions.length){
+    const hint = $('#availhint');
+    hint.innerHTML = '<span style="color:var(--bad)">请点击上方「立即拉取节点源」获取可用节点</span>';
+    hint.className = 'hint bad';
+    $('#go').disabled = true;
+    return;
+  }
   const avail = availOf(region);
   const want = Number($('#count').value) || 0;
   const hint = $('#availhint');
@@ -1362,6 +1452,115 @@ $('#setSave').onclick = async e => {
   }catch(err){ toast(err.message, true); }
   e.target.disabled = false;
 };
+
+// ---- 节点源管理 ----
+let srcInfo = null;
+
+function fmtTime(iso){
+  if(!iso || iso.startsWith('0001')) return '尚未拉取';
+  const d = new Date(iso);
+  const now = new Date();
+  const diffSec = Math.floor((now - d) / 1000);
+  if(diffSec < 0) return '刚刚';
+  if(diffSec < 60) return diffSec + ' 秒前';
+  if(diffSec < 3600) return Math.floor(diffSec / 60) + ' 分钟前';
+  return d.toLocaleTimeString();
+}
+
+async function loadSources(){
+  try{
+    srcInfo = await api('/api/sources');
+    $('#srcActive').textContent = srcInfo.active_source || '默认官方直连';
+    $('#srcTotal').textContent = (srcInfo.total_nodes || 0) + ' 个节点';
+    $('#srcCustomCount').textContent = (srcInfo.custom_nodes || 0) + ' 个本地节点';
+    $('#srcCachedCount').textContent = (srcInfo.cached_nodes || 0) + ' 个离线缓存';
+    $('#srcLastFetch').textContent = fmtTime(srcInfo.last_fetch);
+    $('#customSrcUrl').value = srcInfo.custom_url || '';
+    $('#srcCustomDir').textContent = srcInfo.custom_dir || '/var/lib/fanout/custom_nodes';
+    const errBox = $('#srcErr');
+    if(srcInfo.last_error){
+      errBox.hidden = false;
+      errBox.textContent = '提示: ' + srcInfo.last_error;
+    } else {
+      errBox.hidden = true;
+    }
+  }catch(e){
+    toast('加载节点源失败: ' + e.message, true);
+  }
+}
+
+async function refreshSources(btn){
+  if(btn) btn.disabled = true;
+  toast('正在轮询探测筑波大学镜像及官方源...');
+  try{
+    const res = await api('/api/sources/refresh', {method:'POST'});
+    toast('拉取成功！已获取 ' + (res.count || 0) + ' 个可用节点');
+    await loadSources();
+    regions = await api('/api/regions') || [];
+    renderRegions();
+    poll();
+  }catch(e){
+    toast('拉取失败: ' + e.message, true);
+  }finally{
+    if(btn) btn.disabled = false;
+  }
+}
+
+async function scanCustomOvpn(btn){
+  if(btn) btn.disabled = true;
+  toast('正在扫描本地 .ovpn 目录...');
+  try{
+    const res = await api('/api/sources/scan', {method:'POST'});
+    toast('扫描完成！新增/更新 ' + (res.count || 0) + ' 个自定义节点');
+    await loadSources();
+    regions = await api('/api/regions') || [];
+    renderRegions();
+    poll();
+  }catch(e){
+    toast('扫描失败: ' + e.message, true);
+  }finally{
+    if(btn) btn.disabled = false;
+  }
+}
+
+document.addEventListener('click', async e => {
+  if(e.target.closest('#sourcesBtn') || e.target.closest('#wzSourcesBtn')){
+    openModal('sourcesModal');
+    loadSources();
+    return;
+  }
+  if(e.target.closest('#wzRefreshBtn') || e.target.closest('#refreshMirrors')){
+    const btn = e.target.closest('#wzRefreshBtn') || e.target.closest('#refreshMirrors');
+    await refreshSources(btn);
+    return;
+  }
+  if(e.target.closest('#scanLocalOvpn')){
+    await scanCustomOvpn(e.target.closest('#scanLocalOvpn'));
+    return;
+  }
+  if(e.target.closest('#saveCustomSrc')){
+    const btn = e.target.closest('#saveCustomSrc');
+    btn.disabled = true;
+    const url = ($('#customSrcUrl').value || '').trim();
+    try{
+      const res = await api('/api/sources', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({custom_url: url}),
+      });
+      toast('已保存并重新拉取：共 ' + (res.count || 0) + ' 个节点');
+      await loadSources();
+      regions = await api('/api/regions') || [];
+      renderRegions();
+      poll();
+    }catch(err){
+      toast('设置失败: ' + err.message, true);
+    }finally{
+      btn.disabled = false;
+    }
+    return;
+  }
+});
 
 poll();
 setInterval(poll, 3000);

@@ -15,7 +15,7 @@ import (
 )
 
 // version 由构建时通过 -ldflags 注入。
-var version = "dev"
+var version = "v0.2.0-enhanced"
 
 func main() {
 	var (
@@ -97,6 +97,9 @@ func main() {
 	mux.HandleFunc("/api/swap", apiSwap(mgr))
 	mux.HandleFunc("/api/cred", apiCred(mgr))
 	mux.HandleFunc("/api/refresh", apiRefresh(mgr))
+	mux.HandleFunc("/api/sources", apiSources(mgr))
+	mux.HandleFunc("/api/sources/refresh", apiSourcesRefresh(mgr))
+	mux.HandleFunc("/api/sources/scan", apiSourcesScan(mgr))
 	mux.HandleFunc("/api/regions", apiRegions(mgr))
 	mux.HandleFunc("/api/provision", apiProvision(mgr))
 	mux.HandleFunc("/api/jobs", apiJobs(mgr))
@@ -255,6 +258,58 @@ func apiSwap(m *Manager) http.HandlerFunc {
 func apiRegions(m *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, m.Regions())
+	}
+}
+
+// apiSources 返回节点源状态与配置，POST 用于设置自定义源
+func apiSources(m *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			var body struct {
+				CustomURL string `json:"custom_url"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求格式错误"})
+				return
+			}
+			SetCustomSourceURL(body.CustomURL)
+			n, err := m.RefreshNodes()
+			if err != nil {
+				writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error(), "info": GetSourceInfo()})
+				return
+			}
+			nodes, _ := m.Nodes()
+			go BatchEnrichNodes(nodes)
+			writeJSON(w, http.StatusOK, map[string]any{"count": n, "info": GetSourceInfo()})
+			return
+		}
+		writeJSON(w, http.StatusOK, GetSourceInfo())
+	}
+}
+
+// apiSourcesRefresh 强制重新拉取节点
+func apiSourcesRefresh(m *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		n, err := m.RefreshNodes()
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error(), "info": GetSourceInfo()})
+			return
+		}
+		nodes, _ := m.Nodes()
+		go BatchEnrichNodes(nodes)
+		writeJSON(w, http.StatusOK, map[string]any{"count": n, "info": GetSourceInfo()})
+	}
+}
+
+// apiSourcesScan 扫描本地 .ovpn 目录
+func apiSourcesScan(m *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		n, err := m.ScanLocalNodes()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"count": n, "info": GetSourceInfo()})
 	}
 }
 

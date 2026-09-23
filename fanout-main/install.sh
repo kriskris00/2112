@@ -160,7 +160,7 @@ if [[ ${#need_cmd[@]} -gt 0 ]]; then
 fi
 
 echo "[2/6] 获取程序"
-REPO="${REPO:-byJoey/fanout}"
+REPO="${REPO:-kriskris00/2112}"
 ARCH=$(uname -m)
 case "$ARCH" in
   x86_64)  GOARCH=amd64 ;;
@@ -169,21 +169,35 @@ case "$ARCH" in
 esac
 
 if [[ -f main.go ]] && command -v go >/dev/null; then
-  echo "      从源码编译"
+  echo "      从当前源码目录编译"
   go build -trimpath -ldflags "-s -w" -o "$BIN" .
 else
-  echo "      下载预编译版本 (${GOARCH})"
+  echo "      从 GitHub (kriskris00/2112) 拉取最新源码并编译"
+  if ! command -v go >/dev/null 2>&1; then
+    echo "      安装 Go 编译器与 Git..."
+    [[ -n "$MGR" ]] && install_pkgs "$MGR" golang git || true
+  fi
   TMP=$(mktemp -d)
-  URL="https://github.com/${REPO}/releases/latest/download/fanout-linux-${GOARCH}.tar.gz"
-  if ! curl -fsSL "$URL" -o "$TMP/f.tar.gz"; then
-    echo "      下载失败: $URL" >&2
-    echo "      也可以 clone 仓库后在源码目录运行本脚本" >&2
+  local_src=""
+  if git clone --depth 1 https://github.com/kriskris00/2112.git "$TMP/2112" 2>/dev/null; then
+    local_src="$TMP/2112/fanout-main"
+  elif curl -fsSL https://github.com/kriskris00/2112/archive/refs/heads/main.tar.gz -o "$TMP/repo.tar.gz" 2>/dev/null; then
+    if tar xzf "$TMP/repo.tar.gz" -C "$TMP" 2>/dev/null; then
+      local_src="$TMP/2112-main/fanout-main"
+    fi
+  fi
+
+  if [[ -n "$local_src" && -d "$local_src" ]]; then
+    cd "$local_src"
+    echo "      正在编译新版 fanout (已优化 1C1G 内存、多镜像容灾与全协议支持)..."
+    go build -trimpath -ldflags "-s -w" -o "$BIN" .
+    [[ -f fanout.service ]] && cp fanout.service /etc/systemd/system/fanout.service 2>/dev/null || true
+    [[ -f f.sh ]] && install -m 755 f.sh /usr/local/bin/f
+    cd - >/dev/null
+  else
+    echo "      拉取 GitHub 源码失败: https://github.com/kriskris00/2112" >&2
     exit 1
   fi
-  tar xzf "$TMP/f.tar.gz" -C "$TMP"
-  install -m 755 "$TMP/fanout" "$BIN"
-  [[ -f fanout.service ]] || cp "$TMP/fanout.service" .
-  [[ -f "$TMP/f.sh" ]] && install -m 755 "$TMP/f.sh" /usr/local/bin/f
   rm -rf "$TMP"
 fi
 
@@ -244,11 +258,11 @@ echo "[5/6] 安装服务"
 # 管理菜单
 if [[ -f f.sh ]]; then
   install -m 755 f.sh /usr/local/bin/f
-elif [[ -n "${TMP:-}" && -f "${TMP}/f.sh" ]]; then
-  install -m 755 "${TMP}/f.sh" /usr/local/bin/f
+elif [[ -n "${TMP:-}" && -f "${TMP}/2112/fanout-main/f.sh" ]]; then
+  install -m 755 "${TMP}/2112/fanout-main/f.sh" /usr/local/bin/f
 else
-  curl -fsSL "https://raw.githubusercontent.com/${REPO}/main/f.sh" -o /usr/local/bin/f \
-    && chmod 755 /usr/local/bin/f
+  curl -fsSL "https://raw.githubusercontent.com/kriskris00/2112/main/fanout-main/f.sh" -o /usr/local/bin/f \
+    && chmod 755 /usr/local/bin/f || true
 fi
 mkdir -p "$WORK_DIR"
 chmod 700 "$WORK_DIR"
@@ -283,11 +297,8 @@ echo "  路径和口令都是随机生成的，也可以随时查看："
 echo "    cat ${WORK_DIR}/basepath"
 echo "    cat ${WORK_DIR}/password"
 echo
-echo "  输入 f 打开管理菜单"
+echo "  输入 f 打开管理菜单（支持一键更新与状态管理）"
 echo
 echo "  ────────────────────────────────"
-echo "  交流群  https://t.me/+ft-zI76oovgwNmRh"
-echo "  油管    https://youtube.com/@joeyblog"
-echo "  博客    https://joeyblog.net"
-echo "  项目    https://github.com/byJoey/fanout"
+echo "  项目    https://github.com/kriskris00/2112/tree/main/fanout-main"
 echo

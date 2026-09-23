@@ -110,7 +110,7 @@ func certFingerprint(certFile string) (string, error) {
 
 // 支持的取值。集中在这里，前后端校验共用一份。
 var (
-	nativeNetworks   = map[string]bool{"tcp": true, "ws": true, "grpc": true, "httpupgrade": true, "xhttp": true}
+	nativeNetworks   = map[string]bool{"tcp": true, "ws": true, "grpc": true, "httpupgrade": true, "xhttp": true, "udp": true}
 	nativeSecurities = map[string]bool{"none": true, "tls": true, "reality": true}
 )
 

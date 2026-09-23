@@ -642,10 +642,7 @@ func (x *XUI) CloneToTunnels(templateID int, hosts []string, tunnels []*Tunnel) 
 		return nil, err
 	}
 
-	emails, err := clientEmails(raw)
-	if err != nil {
-		return nil, err
-	}
+	emails, _ := clientEmails(raw)
 
 	created := []int{}
 	for _, host := range hosts {
@@ -670,7 +667,7 @@ func (x *XUI) CloneToTunnels(templateID int, hosts []string, tunnels []*Tunnel) 
 		}
 		if len(emails) > 0 {
 			if err := x.attachClients(emails, newID); err != nil {
-				return created, err
+				log.Printf("附加客户端至新入站 %d 出现提示: %v (入站已创建，保持原配置)", newID, err)
 			}
 		}
 		created = append(created, port)
@@ -747,9 +744,16 @@ func cloneInboundPayload(tpl map[string]any, port int, t *Tunnel) (map[string]an
 		label = base + "-" + label
 	}
 
-	// 客户端不重新生成：建成空入站后用 attach 把模板的客户端挂过来，
-	// 这样同一套 UUID 能走所有出口，客户端那边只改端口即可。
-	settings["clients"] = []any{}
+	proto := strings.ToLower(strings.TrimSpace(fmt.Sprint(tpl["protocol"])))
+
+	// 客户端挂载策略：
+	// 只有对于依赖 clients 数组且能通过 attach 共享凭据的协议（如 vless、vmess，或带有 email 数组的 trojan），
+	// 才在新建时清空 clients 数组，以便后续调 attachClients 关联；
+	// 对于 shadowsocks、socks、http、wireguard 等协议，必须保留模板原有的认证与密码配置，绝不能注入空 clients！
+	emails, _ := clientEmails(tpl)
+	if (proto == "vless" || proto == "vmess" || proto == "trojan") && len(emails) > 0 {
+		settings["clients"] = []any{}
+	}
 
 	stream, err := asObject(tpl["streamSettings"])
 	if err != nil {
@@ -1038,9 +1042,13 @@ func (x *XUI) InboundDetail(id int, publicHost string) (*InboundDetail, error) {
 		if !ok {
 			continue
 		}
+		idVal := fmt.Sprint(orEmpty(cm["id"]))
+		if idVal == "" {
+			idVal = fmt.Sprint(orEmpty(cm["password"]))
+		}
 		info := ClientInfo{
 			Email:  fmt.Sprint(orEmpty(cm["email"])),
-			ID:     fmt.Sprint(orEmpty(cm["id"])),
+			ID:     idVal,
 			Enable: cm["enable"] != false,
 		}
 		detail.Clients = append(detail.Clients, info)
@@ -1053,6 +1061,72 @@ func (x *XUI) InboundDetail(id int, publicHost string) (*InboundDetail, error) {
 			}
 		}
 	}
+
+	proto := strings.ToLower(detail.Protocol)
+	if len(detail.Clients) == 0 {
+		switch proto {
+		case "shadowsocks":
+			method := fmt.Sprint(orEmpty(settings["method"]))
+			password := fmt.Sprint(orEmpty(settings["password"]))
+			if method != "" || password != "" {
+				detail.Clients = append(detail.Clients, ClientInfo{
+					Email:  "default",
+					ID:     fmt.Sprintf("%s : %s", method, password),
+					Enable: true,
+				})
+				rawAuth := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s", method, password)))
+				link := fmt.Sprintf("ss://%s@%s:%d#%s", rawAuth, publicHost, port, url.QueryEscape(detail.Remark))
+				detail.Links = append(detail.Links, link)
+			}
+		case "trojan":
+			password := fmt.Sprint(orEmpty(settings["password"]))
+			if password != "" {
+				detail.Clients = append(detail.Clients, ClientInfo{
+					Email:  "default",
+					ID:     password,
+					Enable: true,
+				})
+				link := fmt.Sprintf("trojan://%s@%s:%d?security=%s&type=%s#%s",
+					password, publicHost, port, detail.TLS, detail.Network, url.QueryEscape(detail.Remark))
+				detail.Links = append(detail.Links, link)
+			}
+		case "socks":
+			accs, _ := settings["accounts"].([]any)
+			if len(accs) > 0 {
+				if am, ok := accs[0].(map[string]any); ok {
+					u := fmt.Sprint(orEmpty(am["user"]))
+					p := fmt.Sprint(orEmpty(am["pass"]))
+					detail.Clients = append(detail.Clients, ClientInfo{Email: u, ID: p, Enable: true})
+					detail.Links = append(detail.Links, fmt.Sprintf("socks5://%s:%s@%s:%d#%s", u, p, publicHost, port, url.QueryEscape(detail.Remark)))
+				}
+			} else {
+				detail.Clients = append(detail.Clients, ClientInfo{Email: "无认证", ID: "-", Enable: true})
+				detail.Links = append(detail.Links, fmt.Sprintf("socks5://%s:%d#%s", publicHost, port, url.QueryEscape(detail.Remark)))
+			}
+		case "http":
+			accs, _ := settings["accounts"].([]any)
+			if len(accs) > 0 {
+				if am, ok := accs[0].(map[string]any); ok {
+					u := fmt.Sprint(orEmpty(am["user"]))
+					p := fmt.Sprint(orEmpty(am["pass"]))
+					detail.Clients = append(detail.Clients, ClientInfo{Email: u, ID: p, Enable: true})
+					detail.Links = append(detail.Links, fmt.Sprintf("http://%s:%s@%s:%d", u, p, publicHost, port))
+				}
+			} else {
+				detail.Clients = append(detail.Clients, ClientInfo{Email: "无认证", ID: "http", Enable: true})
+				detail.Links = append(detail.Links, fmt.Sprintf("http://%s:%d", publicHost, port))
+			}
+		case "wireguard":
+			secretKey := fmt.Sprint(orEmpty(settings["secretKey"]))
+			detail.Clients = append(detail.Clients, ClientInfo{Email: "wireguard", ID: secretKey, Enable: true})
+		}
+	} else if len(detail.Links) == 0 && proto == "trojan" && len(detail.Clients) > 0 {
+		pwd := detail.Clients[0].ID
+		link := fmt.Sprintf("trojan://%s@%s:%d?security=%s&type=%s#%s",
+			pwd, publicHost, port, detail.TLS, detail.Network, url.QueryEscape(detail.Remark))
+		detail.Links = append(detail.Links, link)
+	}
+
 	return detail, nil
 }
 
@@ -1596,16 +1670,41 @@ func (x *XUI) CreateInbound(spec NewInboundSpec, tunnels []*Tunnel) (*CreatedInb
 		ib.Reality = conf
 	}
 
-	client := newClientEntry(ns.Protocol, fmt.Sprintf("%s-%d", ns.Protocol, ns.Port))
-	if ns.Protocol == "vless" {
-		client["flow"] = ns.Flow
-	}
-	settings := map[string]any{
-		"clients":   []any{client},
-		"fallbacks": []any{},
-	}
-	if ns.Protocol == "vless" {
-		settings["decryption"] = "none"
+	var settings map[string]any
+	switch ns.Protocol {
+	case "shadowsocks":
+		settings = map[string]any{
+			"method":   "aes-128-gcm",
+			"password": randomHex(8),
+			"network":  "tcp,udp",
+		}
+	case "socks":
+		settings = map[string]any{
+			"auth":     "password",
+			"accounts": []any{map[string]any{"user": "user", "pass": randomHex(6)}},
+			"udp":      true,
+		}
+	case "http":
+		settings = map[string]any{
+			"accounts": []any{map[string]any{"user": "user", "pass": randomHex(6)}},
+		}
+	case "wireguard":
+		settings = map[string]any{
+			"secretKey": randomHex(16),
+			"peers":     []any{},
+		}
+	default:
+		client := newClientEntry(ns.Protocol, fmt.Sprintf("%s-%d", ns.Protocol, ns.Port))
+		if ns.Protocol == "vless" {
+			client["flow"] = ns.Flow
+		}
+		settings = map[string]any{
+			"clients":   []any{client},
+			"fallbacks": []any{},
+		}
+		if ns.Protocol == "vless" {
+			settings["decryption"] = "none"
+		}
 	}
 
 	payload := map[string]any{
