@@ -79,6 +79,21 @@ func serveSocks(client net.Conn, cred *SocksCred, dial func(network, addr string
 	relay(client, remote)
 }
 
+func isLocalhost(addr net.Addr) bool {
+	if addr == nil {
+		return false
+	}
+	host, _, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		host = addr.String()
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return host == "localhost"
+	}
+	return ip.IsLoopback()
+}
+
 // socksHandshake 完成方法协商，需要认证时接着跑一轮 RFC1929。
 func socksHandshake(c net.Conn, cred *SocksCred) error {
 	head := make([]byte, 2)
@@ -93,24 +108,37 @@ func socksHandshake(c net.Conn, cred *SocksCred) error {
 		return err
 	}
 
+	fromLocal := isLocalhost(c.RemoteAddr())
+
 	if cred == nil || cred.User == "" {
+		_, err := c.Write([]byte{socksVer5, authNone})
+		return err
+	}
+
+	// 本机连接（如母机上的 Xray / 3x-ui 本地分流）：
+	// 若支持免密 (authNone)，直接协商通过，避免凭据刷新不同步导致分流断流
+	if fromLocal && bytes.ContainsRune(methods, rune(authNone)) {
 		_, err := c.Write([]byte{socksVer5, authNone})
 		return err
 	}
 
 	// 客户端没提用户名口令就直接拒绝，不退回无认证
 	if !bytes.ContainsRune(methods, rune(authUserPass)) {
+		if fromLocal {
+			_, err := c.Write([]byte{socksVer5, authNone})
+			return err
+		}
 		_, _ = c.Write([]byte{socksVer5, authNoAccept})
 		return errors.New("客户端不支持用户名口令认证")
 	}
 	if _, err := c.Write([]byte{socksVer5, authUserPass}); err != nil {
 		return err
 	}
-	return socksAuth(c, cred)
+	return socksAuth(c, cred, fromLocal)
 }
 
 // socksAuth 跑一轮 RFC1929 用户名/口令子协商。
-func socksAuth(c net.Conn, cred *SocksCred) error {
+func socksAuth(c net.Conn, cred *SocksCred, allowLocalBypass bool) error {
 	ver := make([]byte, 1)
 	if _, err := io.ReadFull(c, ver); err != nil {
 		return err
@@ -131,6 +159,11 @@ func socksAuth(c net.Conn, cred *SocksCred) error {
 	okUser := subtle.ConstantTimeCompare(user, []byte(cred.User)) == 1
 	okPass := subtle.ConstantTimeCompare(pass, []byte(cred.Pass)) == 1
 	if !okUser || !okPass {
+		if allowLocalBypass {
+			// 本机 Xray 进程即使历史凭据未及时刷新，也放行
+			_, err = c.Write([]byte{authSubVer, 0x00})
+			return err
+		}
 		_, _ = c.Write([]byte{authSubVer, 0x01})
 		return errors.New("用户名或口令不对")
 	}
@@ -234,24 +267,30 @@ func socksReplyWith(c net.Conn, code byte, ip net.IP, port int) error {
 	return err
 }
 
+type closeWriter interface {
+	CloseWrite() error
+}
+
+func closeWrite(c net.Conn) {
+	if cw, ok := c.(closeWriter); ok {
+		_ = cw.CloseWrite()
+	}
+}
+
 func relay(a, b net.Conn) {
 	done := make(chan struct{}, 2)
 	go func() {
 		_, _ = io.Copy(a, b)
-		if tc, ok := a.(*net.TCPConn); ok {
-			_ = tc.CloseWrite()
-		}
+		closeWrite(a)
 		done <- struct{}{}
 	}()
 	go func() {
 		_, _ = io.Copy(b, a)
-		if tc, ok := b.(*net.TCPConn); ok {
-			_ = tc.CloseWrite()
-		}
+		closeWrite(b)
 		done <- struct{}{}
 	}()
 	<-done
-	_ = a.SetDeadline(time.Now().Add(5 * time.Second))
-	_ = b.SetDeadline(time.Now().Add(5 * time.Second))
+	_ = a.SetDeadline(time.Now().Add(60 * time.Second))
+	_ = b.SetDeadline(time.Now().Add(60 * time.Second))
 	<-done
 }

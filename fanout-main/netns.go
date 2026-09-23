@@ -24,9 +24,10 @@ var netnsResolver = &net.Resolver{
 	},
 }
 
-// resolveTargetAddress 预先将目标地址解析为 IPv4。
-// 若地址已为 IP:port 则直接返回；若是 domain:port，则优先用公共 DNS 解析，
-// 失败时回退到母机系统 DNS，确保进入 netns 拨号时绝不会因为 127.0.0.53 无法访问而卡死。
+// resolveTargetAddress 预先在母机网络环境中将目标地址解析为 IPv4。
+// 若地址已为 IP:port 则直接返回；若是 domain:port，则优先使用母机系统 DNS 高速解析，
+// 失败时回退到公共 DNS (8.8.8.8 / 1.1.1.1)。
+// 这样在进入 netns 拨号时绝不会因为 netns 内部无法访问母机 127.0.0.53 而发生 10 秒超时卡死！
 func resolveTargetAddress(addr string) string {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -36,17 +37,18 @@ func resolveTargetAddress(addr string) string {
 		return addr
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	// 1. 尝试公共 DNS
-	ips, err := netnsResolver.LookupIP(ctx, "ip4", host)
+	// 1. 优先使用母机系统 DNS（在母机主线程环境中只需 1~2ms 即可瞬间解析）
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	ips, err := net.DefaultResolver.LookupIP(ctx, "ip4", host)
+	cancel()
 	if err == nil && len(ips) > 0 {
 		return net.JoinHostPort(ips[0].String(), port)
 	}
 
-	// 2. 回退到母机系统 DNS
-	ips, err = net.DefaultResolver.LookupIP(ctx, "ip4", host)
+	// 2. 回退到公共 DNS (8.8.8.8 / 1.1.1.1)
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 2*time.Second)
+	ips, err = netnsResolver.LookupIP(ctx2, "ip4", host)
+	cancel2()
 	if err == nil && len(ips) > 0 {
 		return net.JoinHostPort(ips[0].String(), port)
 	}

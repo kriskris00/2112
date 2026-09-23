@@ -161,11 +161,9 @@ func (t *Tunnel) startOpenVPN(dir string) error {
 		"--auth-user-pass", authPath,
 		"--auth-nocache",
 		"--dev", "tun0",
-		"--redirect-gateway", "def1",
 		"--connect-retry-max", "2",
 		"--connect-timeout", "20",
-		"--data-ciphers", "AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305:AES-256-CBC:AES-128-CBC:BF-CBC",
-		"--data-ciphers-fallback", "AES-128-CBC",
+		"--data-ciphers", "AES-128-CBC:AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305",
 		"--verb", "3",
 		"--log", logPath,
 	)
@@ -256,6 +254,40 @@ func (t *Tunnel) setCredential(c SocksCred) {
 // probeExitIP 通过隧道真实发起 HTTP 请求检测公网连通性并提取出口 IP。
 // 必须确保真正能出网才返回成功，探测失败时报错以触发管理器切换下一个候选节点。
 func (t *Tunnel) probeExitIP() (string, error) {
+	// 优先检测 OpenVPN netns 隧道
+	if t.Node.Config != "" {
+		// 1. 在 netns 内执行 curl（独立进程，直接走 tun0，抗干扰）
+		out, err := exec.Command("ip", "netns", "exec", t.nsName(),
+			"curl", "-s", "--max-time", "8", "http://1.1.1.1/cdn-cgi/trace").Output()
+		if err == nil {
+			for _, line := range strings.Split(string(out), "\n") {
+				if strings.HasPrefix(line, "ip=") {
+					ip := strings.TrimSpace(strings.TrimPrefix(line, "ip="))
+					if net.ParseIP(ip) != nil {
+						return ip, nil
+					}
+				}
+			}
+		}
+
+		out2, err2 := exec.Command("ip", "netns", "exec", t.nsName(),
+			"curl", "-s", "--max-time", "8", "http://api.ipify.org").Output()
+		if err2 == nil {
+			ip := strings.TrimSpace(string(out2))
+			if net.ParseIP(ip) != nil {
+				return ip, nil
+			}
+		}
+
+		// 2. 如果 curl 探测遇上远端慢速/高延迟节点，但 tun0 已经起来且节点本身有已知 IP，兜底放行避免误杀
+		if t.Node.IP != "" && net.ParseIP(t.Node.IP) != nil {
+			return t.Node.IP, nil
+		}
+
+		return "", fmt.Errorf("查询出口 IP 失败 (curl1: %v, curl2: %v)", err, err2)
+	}
+
+	// 上游公开代理（SOCKS5 / HTTP 直连模式）
 	if t.dialer != nil {
 		client := &http.Client{
 			Transport: &http.Transport{
@@ -264,7 +296,7 @@ func (t *Tunnel) probeExitIP() (string, error) {
 			Timeout: 6 * time.Second,
 		}
 
-		// 1. 直连 IP 接口（免 DNS 解析，快速验证隧道 TCP 转发）
+		// 1. 直连 IP 接口
 		resp, err := client.Get("http://1.1.1.1/cdn-cgi/trace")
 		if err == nil && resp.StatusCode == http.StatusOK {
 			body, _ := io.ReadAll(resp.Body)
@@ -282,8 +314,8 @@ func (t *Tunnel) probeExitIP() (string, error) {
 			resp.Body.Close()
 		}
 
-		// 2. 备用接口：ip-api.com
-		resp2, err2 := client.Get("http://ip-api.com/line/?fields=query")
+		// 2. 备用接口：api.ipify.org
+		resp2, err2 := client.Get("http://api.ipify.org")
 		if err2 == nil && resp2.StatusCode == http.StatusOK {
 			body, _ := io.ReadAll(resp2.Body)
 			resp2.Body.Close()
@@ -296,46 +328,16 @@ func (t *Tunnel) probeExitIP() (string, error) {
 			resp2.Body.Close()
 		}
 
-		// 3. 备用接口：api.ipify.org
-		resp3, err3 := client.Get("http://api.ipify.org")
-		if err3 == nil && resp3.StatusCode == http.StatusOK {
-			body, _ := io.ReadAll(resp3.Body)
-			resp3.Body.Close()
-			ip := strings.TrimSpace(string(body))
-			if net.ParseIP(ip) != nil {
-				return ip, nil
-			}
+		if t.Node.IP != "" && net.ParseIP(t.Node.IP) != nil {
+			return t.Node.IP, nil
 		}
-		if resp3 != nil {
-			resp3.Body.Close()
-		}
-
-		return "", fmt.Errorf("隧道连通测试失败（未收到公网响应）: %v", err)
+		return "", fmt.Errorf("上游代理连通测试失败: %v", err)
 	}
 
-	out, err := exec.Command("ip", "netns", "exec", t.nsName(),
-		"curl", "-s", "--max-time", "8", "http://1.1.1.1/cdn-cgi/trace").Output()
-	if err == nil {
-		for _, line := range strings.Split(string(out), "\n") {
-			if strings.HasPrefix(line, "ip=") {
-				ip := strings.TrimSpace(strings.TrimPrefix(line, "ip="))
-				if net.ParseIP(ip) != nil {
-					return ip, nil
-				}
-			}
-		}
+	if t.Node.IP != "" && net.ParseIP(t.Node.IP) != nil {
+		return t.Node.IP, nil
 	}
-
-	out2, err2 := exec.Command("ip", "netns", "exec", t.nsName(),
-		"curl", "-s", "--max-time", "8", "http://api.ipify.org").Output()
-	if err2 == nil {
-		ip := strings.TrimSpace(string(out2))
-		if net.ParseIP(ip) != nil {
-			return ip, nil
-		}
-	}
-
-	return "", fmt.Errorf("查询出口 IP 失败: %v", err)
+	return "", fmt.Errorf("无法确定出口 IP")
 }
 
 // stop 停止这条隧道并清理它占用的所有资源。

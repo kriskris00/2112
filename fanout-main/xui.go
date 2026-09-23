@@ -645,8 +645,11 @@ func (x *XUI) Bind(inboundTag string, hostname string, tunnels []*Tunnel) error 
 		if tagPort > 0 {
 			tagsToAdd = append(tagsToAdd,
 				fmt.Sprintf("in-%d-tcp", tagPort),
+				fmt.Sprintf("in-%d-udp", tagPort),
 				fmt.Sprintf("in-%d-ws", tagPort),
+				fmt.Sprintf("in-%d-grpc", tagPort),
 				fmt.Sprintf("inbound-%d", tagPort),
+				fmt.Sprintf("%d", tagPort),
 			)
 		}
 		dedupTags := make([]any, 0, len(tagsToAdd))

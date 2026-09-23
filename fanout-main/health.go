@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"net/http"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -48,7 +49,36 @@ func (m *Manager) WatchHealth() {
 // openvpn 死掉后照样能出网，只是出口变回了母机 IP。
 // 所以要比对出口 IP 是否仍是建立隧道时拿到的那个。
 func (m *Manager) tunnelHealthy(t *Tunnel) bool {
-	// 1. 直连 IP 探测（无需域名解析，抗限流）
+	// 1. 上游公开代理（无 netns，通过 dialer 探测连通性）
+	if t.Node.Proto == "socks5" || t.Node.Proto == "http" || t.Node.Config == "" {
+		if t.dialer == nil {
+			return false
+		}
+		client := &http.Client{
+			Transport: &http.Transport{Dial: t.dialer},
+			Timeout:   healthTimeout,
+		}
+		resp, err := client.Get("http://1.1.1.1/cdn-cgi/trace")
+		if err == nil && resp.StatusCode == http.StatusOK {
+			resp.Body.Close()
+			return true
+		}
+		if resp != nil {
+			resp.Body.Close()
+		}
+		resp2, err2 := client.Get("http://api.ipify.org")
+		if err2 == nil && resp2.StatusCode == http.StatusOK {
+			resp2.Body.Close()
+			return true
+		}
+		if resp2 != nil {
+			resp2.Body.Close()
+		}
+		return false
+	}
+
+	// 2. OpenVPN netns 隧道探测
+	// 直连 IP 探测（无需域名解析，抗限流）
 	out, err := exec.Command("ip", "netns", "exec", t.nsName(),
 		"curl", "-s", "--max-time", strconv.Itoa(int(healthTimeout.Seconds())),
 		"http://1.1.1.1/cdn-cgi/trace").Output()
@@ -63,7 +93,7 @@ func (m *Manager) tunnelHealthy(t *Tunnel) bool {
 		}
 	}
 
-	// 2. 备用通过 ipify 探测
+	// 备用通过 ipify 探测
 	out2, err2 := exec.Command("ip", "netns", "exec", t.nsName(),
 		"curl", "-s", "--max-time", strconv.Itoa(int(healthTimeout.Seconds())),
 		"http://api.ipify.org").Output()
