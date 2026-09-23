@@ -252,26 +252,32 @@ func fetchNodesFrom(url, key string, timeout time.Duration) ([]Node, error) {
 // parseNodeCSV 解析 VPN Gate 的 CSV。首行是 "*vpn_servers"，
 // 第二行是以 '#' 开头的表头，末行是 "*"。
 func parseNodeCSV(body string) ([]Node, error) {
-	var kept []string
-	for _, line := range strings.Split(body, "\n") {
-		line = strings.TrimRight(line, "\r")
-		if line == "" || strings.HasPrefix(line, "*") {
-			continue
-		}
-		kept = append(kept, strings.TrimPrefix(line, "#"))
-	}
-	if len(kept) < 2 {
-		return nil, fmt.Errorf("节点列表格式异常: 有效行不足")
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return nil, fmt.Errorf("节点列表为空")
 	}
 
-	r := csv.NewReader(strings.NewReader(strings.Join(kept, "\n")))
+	// 找到表头起始位置。VPN Gate 表头通常为 "#HostName" 或 "HostName"
+	headerIdx := strings.Index(body, "HostName")
+	if headerIdx == -1 {
+		return nil, fmt.Errorf("未找到有效 CSV 表头")
+	}
+	// 截取自 HostName 开始的部分，完美剔除前导的 "*vpn_servers\r\n" 和 '#'
+	body = body[headerIdx:]
+
+	// 去除尾部的 "*" 及末尾换行与空格
+	body = strings.TrimRight(body, "\r\n *")
+
+	// 标准 CSV Reader 解析：开启 LazyQuotes 允许字段中出现未转义的引号，设置可变列数
+	r := csv.NewReader(strings.NewReader(body))
 	r.FieldsPerRecord = -1
-	records, err := r.ReadAll()
+	r.LazyQuotes = true
+
+	header, err := r.Read()
 	if err != nil {
-		return nil, fmt.Errorf("解析节点 CSV 失败: %w", err)
+		return nil, fmt.Errorf("解析节点 CSV 表头失败: %w", err)
 	}
 
-	header := records[0]
 	idx := map[string]int{}
 	for i, name := range header {
 		idx[strings.TrimSpace(name)] = i
@@ -284,13 +290,22 @@ func parseNodeCSV(body string) ([]Node, error) {
 	}
 
 	var nodes []Node
-	for _, rec := range records[1:] {
+	for {
+		rec, err := r.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			// 单行若有格式异常（如个别志愿者服务器的特殊备注），安全跳过该坏行，继续解析其余正常节点
+			continue
+		}
+
 		get := func(k string) string {
 			i := idx[k]
 			if i >= len(rec) {
 				return ""
 			}
-			return rec[i]
+			return strings.TrimSpace(rec[i])
 		}
 		cfgB64 := get("OpenVPN_ConfigData_Base64")
 		if cfgB64 == "" || get("HostName") == "" {
@@ -315,7 +330,7 @@ func parseNodeCSV(body string) ([]Node, error) {
 		})
 	}
 	if len(nodes) == 0 {
-		return nil, fmt.Errorf("节点列表为空")
+		return nil, fmt.Errorf("未能成功解析出任何有效节点")
 	}
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].SpeedMbps > nodes[j].SpeedMbps })
 	return nodes, nil

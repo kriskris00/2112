@@ -170,6 +170,7 @@ esac
 
 if [[ -f main.go ]] && command -v go >/dev/null; then
   echo "      从当前源码目录编译"
+  go mod tidy 2>/dev/null || true
   go build -trimpath -ldflags "-s -w" -o "$BIN" .
 else
   echo "      从 GitHub (kriskris00/2112) 拉取最新源码并编译"
@@ -189,7 +190,8 @@ else
 
   if [[ -n "$local_src" && -d "$local_src" ]]; then
     cd "$local_src"
-    echo "      正在编译新版 fanout (已优化 1C1G 内存、多镜像容灾与全协议支持)..."
+    echo "      正在整理依赖并编译新版 fanout..."
+    go mod tidy 2>/dev/null || true
     go build -trimpath -ldflags "-s -w" -o "$BIN" .
     [[ -f fanout.service ]] && cp fanout.service /etc/systemd/system/fanout.service 2>/dev/null || true
     [[ -f f.sh ]] && install -m 755 f.sh /usr/local/bin/f
