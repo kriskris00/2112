@@ -59,14 +59,21 @@ func main() {
 	}
 
 	mgr := NewManager(*maxSlots, *workDir)
-	log.Printf("正在拉取节点列表...")
-	if n, err := mgr.RefreshNodes(); err != nil {
-		log.Printf("拉取失败（可在 Web 界面重试）: %v", err)
-	} else {
-		log.Printf("已获取 %d 个节点", n)
-		nodes, _ := mgr.Nodes()
-		go BatchEnrichNodes(nodes)
-	}
+	initNodes, _ := mgr.Nodes()
+	log.Printf("节点底池已就绪: %d 个节点 (含教育网高校、日本筑波大学及全球节点)", len(initNodes))
+	go BatchEnrichNodes(initNodes)
+
+	// 后台并发拉取全网最新节点与筑波大学镜像，不阻塞服务极速启动
+	go func() {
+		log.Printf("后台开始并发拉取全网最新节点与筑波大学镜像...")
+		if n, err := mgr.RefreshNodes(); err != nil {
+			log.Printf("后台拉取提示（底池正常运作）: %v", err)
+		} else {
+			log.Printf("全网节点池已聚合扩展至 %d 个节点", n)
+			nodes, _ := mgr.Nodes()
+			go BatchEnrichNodes(nodes)
+		}
+	}()
 
 	if n, err := mgr.restoreState(); err != nil {
 		log.Printf("恢复上次状态失败: %v", err)

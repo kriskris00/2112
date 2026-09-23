@@ -24,8 +24,11 @@ type Manager struct {
 }
 
 func NewManager(maxSlots int, workDir string) *Manager {
+	initial := loadInitialNodes(workDir)
 	return &Manager{
 		tunnels:  map[int]*Tunnel{},
+		nodes:    initial,
+		fetched:  time.Now(),
 		workDir:  workDir,
 		maxSlots: maxSlots,
 	}

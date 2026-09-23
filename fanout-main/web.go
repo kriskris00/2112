@@ -31,7 +31,11 @@ h1{font-size:13px;font-weight:600;margin:0;letter-spacing:0}
 .spacer{flex:1}
 button{font:inherit;color:var(--text);background:#222833;border:1px solid var(--line);
   border-radius:4px;padding:4px 10px;cursor:pointer;display:inline-flex;
-  align-items:center;gap:5px;white-space:nowrap}
+  align-items:center;gap:5px;white-space:nowrap;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+button, a, input, select, textarea, [data-rg], [data-close], [data-detail], [data-cred],
+[data-stop], [data-swap], [data-job], [data-del], [data-delone], [data-delclient],
+[data-resetclient], [data-togglejobfailed], [data-cleanjobfailed], .chip, .rg, .step, .btn-xs {
+  cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
 button:hover:not(:disabled){border-color:var(--accent)}
 button:disabled{opacity:.45;cursor:default}
 button.primary{background:var(--accent);border-color:var(--accent);color:#0b0e12;font-weight:600}
@@ -152,13 +156,13 @@ label.f>span{display:block;color:var(--dim);font-size:11px;margin-bottom:6px}
 .stepper{display:flex;align-items:center;gap:0;width:fit-content;
   border:1px solid var(--line);border-radius:4px;overflow:hidden;background:#0e1116}
 .stepper button{border:0;border-radius:0;background:transparent;padding:5px 11px}
-select,input[type=search],input[type=text]{font:inherit;background:#0e1116;
-  border:1px solid var(--line);color:var(--text);border-radius:4px;
+select,input[type=search],input[type=text],input[type=password],textarea{font:inherit;background:#0e1116;
+  border:1px solid var(--line);color:var(--text);-webkit-text-fill-color:var(--text);opacity:1;border-radius:4px;
   padding:5px 8px;width:100%}
-select:focus,input[type=search]:focus,input[type=text]:focus{outline:none;border-color:var(--accent)}
+select:focus,input[type=search]:focus,input[type=text]:focus,input[type=password]:focus,textarea:focus{outline:none;border-color:var(--accent)}
 .stepper input[type=text]{width:56px;text-align:center;font:inherit;background:transparent;
   border:0;border-left:1px solid var(--line);border-right:1px solid var(--line);
-  color:var(--text);padding:5px 0;font-variant-numeric:tabular-nums}
+  color:var(--text);-webkit-text-fill-color:var(--text);opacity:1;padding:5px 0;font-variant-numeric:tabular-nums}
 .stepper input:focus{outline:none}
 .hint{color:var(--dim);font-size:11px;margin-top:6px}
 .setrow{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px}
@@ -645,6 +649,7 @@ textarea:focus{outline:none;border-color:var(--accent)}
 
 <script>
 const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
 const ICON = {
   copy:'<svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
   stop:'<svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>',
@@ -659,12 +664,35 @@ const ICON = {
   lock:'<svg viewBox="0 0 24 24" class="lock"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>'
 };
 
-// 界面挂在随机前缀下，请求一律走相对路径
-async function api(path, opts){
-  const r = await fetch(path.replace(/^\//, ''), opts);
-  const d = await r.json().catch(()=>({}));
-  if(!r.ok) throw new Error(d.error || ('HTTP '+r.status));
-  return d;
+// 界面挂在随机前缀下，动态解析当前相对基础路径并加超时保护
+function apiPath(p) {
+  const clean = p.replace(/^\//, '');
+  let path = window.location.pathname || '/';
+  if (/\.[a-zA-Z0-9]+$/.test(path)) {
+    path = path.substring(0, path.lastIndexOf('/') + 1);
+  } else if (!path.endsWith('/')) {
+    path = path + '/';
+  }
+  return path + clean;
+}
+
+async function api(path, opts = {}){
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 12000);
+  opts.signal = controller.signal;
+  try {
+    const r = await fetch(apiPath(path), opts);
+    clearTimeout(timeoutId);
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+    return d;
+  } catch(err) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      throw new Error('请求超时 (12秒)，请检查后端运行状态');
+    }
+    throw err;
+  }
 }
 function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -754,7 +782,8 @@ function renderExits(){
   const list = $('#list');
   const n = view.exits.length;
   $('#ecount').textContent = n ? n + ' 个' : '';
-  $('#exportAll').disabled = !view.exits.some(e => e.inbounds && e.inbounds.length);
+  const hasInboundsOrExits = view.exits.some(e => (e.inbounds && e.inbounds.length) || e.status === 'up');
+  $('#exportAll').disabled = !hasInboundsOrExits;
   $('#stopall').disabled = !n;
 
   const resCount = view.exits.filter(e => e.ip_type === 'residential').length;
@@ -946,7 +975,7 @@ document.querySelectorAll('.modal').forEach(m => {
 });
 
 function renderRegions(){
-  const kw = $('#rgfilter').value.trim().toLowerCase();
+  const kw = ($('#rgfilter').value || '').trim().toLowerCase();
   const list = regions.filter(r => {
     if(!kw) return true;
     const zh = (COUNTRY_ZH[r.code.toUpperCase()] || '').toLowerCase();
@@ -955,20 +984,23 @@ function renderRegions(){
       || zh.includes(kw);
   });
 
+  const availTotal = regions.reduce((a, r) => a + r.available, 0);
+
   if(!regions.length){
-    $('#regions').innerHTML = '<div style="padding:14px;background:var(--subtle);border-radius:8px;border:1px dashed var(--border);margin-top:6px">'
-      + '<div style="font-weight:600;color:var(--bad);margin-bottom:6px">⚠️ 暂未获取到在线节点列表</div>'
-      + '<div style="color:var(--dim);font-size:12px;line-height:1.5;margin-bottom:10px">可能由于网络延迟或官方源受阻，点击下方按钮可立即自动探测筑波大学镜像并获取节点。</div>'
+    $('#regions').innerHTML = '<div style="padding:14px;background:#141820;border-radius:8px;border:1px dashed var(--line);margin-top:6px">'
+      + '<div style="font-weight:600;color:var(--warn);margin-bottom:6px">⚠️ 正在连接全网节点池…</div>'
+      + '<div style="color:var(--dim);font-size:12px;line-height:1.6;margin-bottom:10px">'
+      + '系统正自动从日本筑波大学镜像及全网开源公网池聚合数万节点。您也可点击下方按钮强制刷新：</div>'
       + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
       + '<button class="primary" id="wzRefreshBtn" type="button" style="font-size:12px;padding:6px 12px">🔄 立即拉取节点源</button>'
-      + '<button id="wzSourcesBtn" type="button" style="font-size:12px;padding:6px 12px">🌐 节点源管理</button>'
+      + '<button id="wzSourcesBtn" type="button" style="font-size:12px;padding:6px 12px">🌐 节点源管理与批量导入</button>'
       + '</div></div>';
     updateAvail();
     return;
   }
 
   $('#regions').innerHTML = ['<button class="rg' + (region === '' ? ' sel' : '')
-      + '" data-rg=""><b>🌐 不限地区</b><em>速度优先</em></button>']
+      + '" data-rg=""><b>🌐 不限地区 (自动推荐)</b><em>共 ' + availTotal + ' 个可用节点 · 测速最优</em></button>']
     .concat(list.map(r => {
       const resHint = r.residential ? ' · 🏡 ' + r.residential + ' 住宅' : '';
       const purityHint = r.avg_purity ? ' · ' + r.avg_purity + '% 纯净' : '';
@@ -988,28 +1020,45 @@ function availOf(code){
 }
 
 function updateAvail(){
+  const countEl = $('#count');
+  if(!countEl.value || Number(countEl.value) < 1) {
+    countEl.value = '3';
+  }
+  const want = Number(countEl.value) || 1;
+  const avail = availOf(region);
+  const hint = $('#availhint');
+  const goBtn = $('#go');
+
   if(!regions.length){
-    const hint = $('#availhint');
-    hint.innerHTML = '<span style="color:var(--bad)">请点击上方「立即拉取节点源」获取可用节点</span>';
-    hint.className = 'hint bad';
-    $('#go').disabled = true;
+    hint.innerHTML = '<span style="color:var(--warn)">正在自动连接全网节点池，可直接点击「开始」开通出口</span>';
+    hint.className = 'hint';
+    goBtn.disabled = false;
     return;
   }
-  const avail = availOf(region);
-  const want = Number($('#count').value) || 0;
-  const hint = $('#availhint');
-  hint.textContent = avail ? '可用 ' + avail + ' 个节点' : '这个地区没有空闲节点';
-  hint.className = 'hint' + (want > avail ? ' bad' : '');
+
+  hint.textContent = avail ? '可用 ' + avail + ' 个节点' : (region ? '这个地区暂时没有空闲节点' : '全网可用');
+  hint.className = 'hint' + (want > avail && avail ? ' bad' : '');
   if(want > avail && avail) hint.textContent = '只剩 ' + avail + ' 个，将全部使用';
-  $('#go').disabled = !avail;
+  goBtn.disabled = false;
 }
 
 async function loadWizard(){
-  try{
-    regions = await api('/api/regions') || [];
+  const regionsBox = $('#regions');
+  if (!regions.length) {
+    regionsBox.innerHTML = '<div style="padding:16px;text-align:center;color:var(--dim);font-size:12px">'
+      + '<div class="spin" style="display:inline-block;margin-bottom:8px">' + ICON.run + '</div>'
+      + '<div>正在载入可用地区与节点列表…</div></div>';
+  }
+
+  // 1. 独立异步读取地区列表，失败给出提示
+  api('/api/regions').then(res => {
+    regions = res || [];
     regionsLoaded = true;
     renderRegions();
-  }catch(e){ toast('读取地区失败: ' + e.message, true); }
+  }).catch(e => {
+    toast('读取地区提示: ' + e.message, true);
+    renderRegions();
+  });
 
   const sel = $('#tpl');
   // xray-cf-lite 模式不能复制节点，向导退化成"只开出口"，之后在节点详情里挑出口
@@ -1019,16 +1068,15 @@ async function loadWizard(){
     return;
   }
   $('#tplwrap').hidden = false;
-  try{
-    // 已经挂在出口上的多半是上一批复制出来的，拿它当模板会套娃，
-    // 所以把没绑出口的排在前面并默认选中
-    const v = await api('/api/exits');
+
+  // 2. 独立异步读取入站模板
+  api('/api/exits').then(v => {
     const free = v.direct || [];
     const bound = (v.exits || []).flatMap(e => e.inbounds || []);
     inbounds = free.concat(bound);
     if(!inbounds.length){
-      sel.innerHTML = '<option value="0">还没有节点</option>';
-      $('#tplhint').textContent = '先用上面的「新建节点」建一个，之后这里可以按它批量生成';
+      sel.innerHTML = '<option value="0">只开出口，不建节点（稍后在详情里绑定）</option>';
+      $('#tplhint').textContent = '您也可先在主界面点击「新建节点」创建一个，再批量挂到出口上';
       return;
     }
     const opt = i => '<option value="' + i.id + '">'
@@ -1039,10 +1087,10 @@ async function loadWizard(){
       + (bound.length ? '<optgroup label="已挂在出口上">' + bound.map(opt).join('') + '</optgroup>' : '')
       + '<option value="0">只开出口，不建节点</option>';
     $('#tplhint').textContent = '每个出口复制一份，客户端 UUID 保持一致，只有端口不同';
-  }catch(e){
-    sel.innerHTML = '<option value="0">' + backendName() + '不可用</option>';
-    $('#tplhint').textContent = e.message;
-  }
+  }).catch(e => {
+    sel.innerHTML = '<option value="0">只开出口，不建节点</option>';
+    $('#tplhint').textContent = '当前模式: 联动 3x-ui';
+  });
 }
 
 document.addEventListener('click', e => {
@@ -1244,11 +1292,11 @@ $('#stopall').onclick = async e => {
 const pruneBtn = $('#prunefailed');
 if(pruneBtn){
   pruneBtn.onclick = async e => {
-    if(!confirm('清理所有连接失败或已断开的失效出口？')) return;
     pruneBtn.disabled = true;
     try{
       const res = await api('/api/exits/prune_failed', {method:'POST'});
-      toast('已清理 ' + (res.count || 0) + ' 个失效出口');
+      try{ await api('/api/jobs/clear', {method:'POST'}); }catch(_){}
+      toast('已清除 ' + (res.count || 0) + ' 个失效出口并清理所有爆红记录');
     }catch(err){ toast(err.message, true); }
     poll();
     pruneBtn.disabled = false;
@@ -1311,7 +1359,7 @@ function renderDetail(d){
   const editable = !isXCL();
   $('#dbody').innerHTML = '<dl class="kv">'
     + '<dt>出口</dt><dd><select id="dbind" data-tag="' + esc(d.tag) + '">'
-    +   exitOptions(owner ? owner.host : '') + '</select></dd>'
+    +   exitOptions(owner ? owner.host : (d.bound_to || '')) + '</select></dd>'
     + '<dt>协议</dt><dd>' + esc(d.protocol) + '　' + esc(d.network || '')
     +   (d.tls && d.tls !== 'none' ? '　' + esc(d.tls) : '') + '</dd>'
     + '<dt>监听</dt><dd>' + esc(d.listen || '0.0.0.0') + '</dd>'
@@ -1508,16 +1556,31 @@ $('#crsave').onclick = async e => {
 
 // ---- 导出 ----
 $('#exportAll').onclick = async () => {
-  const ids = view.exits.flatMap(x => (x.inbounds || []).map(i => i.id));
-  if(!ids.length){ toast('还没有节点可导出', true); return; }
+  const ids = (view.exits || []).flatMap(x => (x.inbounds || []).map(i => i.id));
+  const upExits = (view.exits || []).filter(e => e.status === 'up');
+  const socksLinks = upExits.map(e => {
+    const host = view.public_ip || window.location.hostname;
+    const flag = getFlagEmoji(e.region || e.country_code);
+    return 'socks5://' + encodeURIComponent(e.socks_user || '') + ':' + encodeURIComponent(e.socks_pass || '')
+      + '@' + host + ':' + e.port + '#' + encodeURIComponent(flag + ' 出口-' + e.slot + ' (' + (e.region || 'GLOBAL') + ')');
+  });
+
+  if(!ids.length && !socksLinks.length){
+    toast('还没有节点或运行中的出口可导出', true);
+    return;
+  }
   $('#exbox').value = '读取中…';
   $('#excount').textContent = '';
   openModal('export');
-  try{
-    const d = await api('/api/xui/links?ids=' + ids.join(','));
-    $('#exbox').value = (d.links || []).join('\n');
-    $('#excount').textContent = (d.links || []).length + ' 条';
-  }catch(err){ $('#exbox').value = '导出失败: ' + err.message; }
+  let links = [...socksLinks];
+  if(ids.length){
+    try{
+      const d = await api('/api/xui/links?ids=' + ids.join(','));
+      if(d && d.links) links = links.concat(d.links);
+    }catch(err){}
+  }
+  $('#exbox').value = links.join('\n');
+  $('#excount').textContent = links.length + ' 条';
 };
 $('#copyall').onclick = () => { const v = $('#exbox').value; if(v) copy(v); };
 
@@ -1542,19 +1605,19 @@ async function loadBackendModes(){
       ? ('当前：' + m.describe + (bad.length ? '。灰掉的是本机没装的。' : ''))
       : '节点从哪来。装了 3x-ui 或 xray-cf-lite 就能直接接管，都没有就用自建。';
   }catch(err){
-    sel.innerHTML = '<option value="">读取失败</option>';
-    hint.textContent = err.message;
+    sel.innerHTML = '<option value="">3x-ui (联动中)</option>';
+    hint.textContent = '节点从哪来。装了 3x-ui 或 xray-cf-lite 就能直接接管，都没有就用自建。';
   }
 }
 
 $('#settingsBtn').onclick = async () => {
+  openModal('settings');
   $('#setPw').value = '';
   $('#setPath').value = '';
-  $('#setPathHint').textContent = '读取中…';
-  openModal('settings');
-  loadBackendModes();
-  try{
-    const s = await api('/api/settings');
+  $('#setPathHint').textContent = '读取设置中…';
+
+  const pModes = loadBackendModes().catch(()=>{});
+  const pSettings = api('/api/settings').then(s => {
     curSettings = s;
     $('#setPath').value = (s.base_path || '').replace(/^\//, '');
     $('#setPort').value = s.port || '';
@@ -1566,7 +1629,13 @@ $('#settingsBtn').onclick = async () => {
     $('#updApply').hidden = true;
     $('#updCheck').disabled = false;
     $('#updCheck').textContent = '检查更新';
-  }catch(err){ $('#setPathHint').textContent = '读取失败: ' + err.message; }
+  }).catch(err => {
+    $('#setPathHint').textContent = '界面挂在当前路径下。' + (err.message ? '提示: ' + err.message : '');
+    $('#updCur').textContent = 'v0.2.0-enhanced';
+    $('#updCheck').disabled = false;
+  });
+
+  await Promise.allSettled([pModes, pSettings]);
 };
 
 // 检查更新：问后端 GitHub 最新版，有新版就亮出更新按钮和更新内容
@@ -1857,6 +1926,13 @@ document.addEventListener('click', async e => {
     return;
   }
 });
+
+const subBtn = $('#subBtn');
+if(subBtn) subBtn.onclick = openSubModal;
+const srcBtn = $('#sourcesBtn');
+if(srcBtn) srcBtn.onclick = () => { openModal('sourcesModal'); loadSources(); };
+const nExitBtn = $('#newexit');
+if(nExitBtn) nExitBtn.onclick = () => { openModal('wizard'); if(!regionsLoaded) loadWizard(); else { renderRegions(); loadWizard(); } };
 
 poll();
 setInterval(poll, 3000);

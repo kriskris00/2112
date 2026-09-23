@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
@@ -127,7 +128,9 @@ func DetectXUI(workDir string) (*XUI, error) {
 		return nil, fmt.Errorf("本机未安装或未运行 3x-ui")
 	}
 
-	out, err := exec.Command(xuiBinary, "setting", "-show").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, xuiBinary, "setting", "-show").Output()
 	if err != nil {
 		return nil, fmt.Errorf("读取面板设置失败: %w", err)
 	}
@@ -143,7 +146,7 @@ func DetectXUI(workDir string) (*XUI, error) {
 		if on {
 			scheme = "https"
 		}
-	} else if certOut, err := exec.Command(xuiBinary, "setting", "-getCert").Output(); err == nil {
+	} else if certOut, err := exec.CommandContext(ctx, xuiBinary, "setting", "-getCert").Output(); err == nil {
 		if xuiCertConfigured(string(certOut)) {
 			scheme = "https"
 		}
@@ -187,7 +190,7 @@ func DetectXUI(workDir string) (*XUI, error) {
 	}
 
 	// 没有可用 token，这条命令会自动生成一个
-	tokOut, err := exec.Command(xuiBinary, "setting", "-getApiToken").Output()
+	tokOut, err := exec.CommandContext(ctx, xuiBinary, "setting", "-getApiToken").Output()
 	if err != nil {
 		return nil, fmt.Errorf("获取 API token 失败: %w", err)
 	}
@@ -1096,6 +1099,19 @@ func (x *XUI) InboundDetail(id int, publicHost string) (*InboundDetail, error) {
 	port := int(toFloat(raw["port"]))
 	apiTag, _ := raw["tag"].(string)
 	tag := resolvedInboundTag(apiTag, port, streamJSON)
+	bHost := bound[tag]
+	if bHost == "" {
+		bHost = bound[apiTag]
+	}
+	if bHost == "" {
+		bHost = bound[fmt.Sprintf("in-%d-tcp", port)]
+	}
+	if bHost == "" {
+		bHost = bound[fmt.Sprintf("inbound-%d", port)]
+	}
+	if bHost == "" {
+		bHost = bound[fmt.Sprintf("port-%d", port)]
+	}
 
 	detail := &InboundDetail{
 		Inbound: Inbound{
@@ -1105,7 +1121,7 @@ func (x *XUI) InboundDetail(id int, publicHost string) (*InboundDetail, error) {
 			Remark:   fmt.Sprint(raw["remark"]),
 			Enable:   raw["enable"] == true,
 			Tag:      tag,
-			BoundTo:  bound[tag],
+			BoundTo:  bHost,
 		},
 		Listen: fmt.Sprint(orEmpty(raw["listen"])),
 	}
@@ -1693,10 +1709,14 @@ func forceIPv4(outbound map[string]any) {
 // Alpine 这类发行版用 OpenRC 而不是 systemd，只查 systemctl 会误判成"没装"，
 // 于是装了面板也会退回自建模式，两个 Xray 抢端口。
 func xuiRunning() bool {
-	if exec.Command("systemctl", "is-active", "--quiet", "x-ui").Run() == nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if exec.CommandContext(ctx, "systemctl", "is-active", "--quiet", "x-ui").Run() == nil {
 		return true
 	}
-	if exec.Command("rc-service", "x-ui", "status").Run() == nil {
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel2()
+	if exec.CommandContext(ctx2, "rc-service", "x-ui", "status").Run() == nil {
 		return true
 	}
 	return false
