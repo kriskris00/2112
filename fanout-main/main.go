@@ -78,6 +78,17 @@ func main() {
 
 	go mgr.WatchHealth()
 
+	// 后台全网自动爬取并持续累积节点池（每 15 分钟自动聚合发现新可用节点）
+	go func() {
+		ticker := time.NewTicker(15 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			if n, err := mgr.RefreshNodes(); err == nil {
+				log.Printf("自动全网抓取并更新节点池成功，当前池中共有 %d 个可用节点", n)
+			}
+		}
+	}()
+
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
@@ -104,7 +115,11 @@ func main() {
 	mux.HandleFunc("/api/provision", apiProvision(mgr))
 	mux.HandleFunc("/api/jobs", apiJobs(mgr))
 	mux.HandleFunc("/api/jobs/dismiss", apiJobDismiss(mgr))
+	mux.HandleFunc("/api/jobs/clear", apiJobsClear(mgr))
+	mux.HandleFunc("/api/jobs/clean_failed", apiJobsCleanFailed(mgr))
 	mux.HandleFunc("/api/exits", apiExits(mgr))
+	mux.HandleFunc("/api/exits/prune_failed", apiExitsPruneFailed(mgr))
+	mux.HandleFunc("/api/sources/import", apiSourcesImport(mgr))
 	mux.HandleFunc("/api/xui", apiXUIStatus)
 	mux.HandleFunc("/api/xui/inbounds", apiXUIInbounds(mgr))
 	mux.HandleFunc("/api/xui/bind", apiXUIBind(mgr))
@@ -134,6 +149,9 @@ func main() {
 	if bpCreated {
 		log.Printf("已生成访问路径，见 %s", filepath.Join(*workDir, "basepath"))
 	}
+
+	mux.HandleFunc("/sub", apiSubscription(mgr, auth))
+	mux.HandleFunc("/api/cred/token", apiCredToken(auth))
 
 	// 用户显式给了 -web 就以命令行为准，否则沿用界面上存过的端口
 	portExplicit := false
@@ -478,6 +496,52 @@ func apiJobDismiss(m *Manager) http.HandlerFunc {
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "已关闭"})
 	}
 }
+
+func apiJobsClear(m *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		m.jobs.DismissAll()
+		writeJSON(w, http.StatusOK, map[string]string{"ok": "已清理所有已完成任务"})
+	}
+}
+
+func apiJobsCleanFailed(m *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.URL.Query().Get("id")
+		m.jobs.ClearFailedSteps(id)
+		writeJSON(w, http.StatusOK, map[string]string{"ok": "已清理爆红记录"})
+	}
+}
+
+func apiExitsPruneFailed(m *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		count := m.PruneFailed()
+		writeJSON(w, http.StatusOK, map[string]any{"count": count})
+	}
+}
+
+func apiSourcesImport(m *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Text string `json:"text"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求格式错误"})
+			return
+		}
+		added, err := m.ImportNodes(req.Text)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		nodes, _ := m.Nodes()
+		writeJSON(w, http.StatusOK, map[string]any{
+			"added": added,
+			"total": len(nodes),
+			"info":  GetSourceInfo(),
+		})
+	}
+}
+
 
 // apiXUIStatus 报告当前的节点链接后端：接管的 3x-ui，或 fanout 自己跑的 Xray。
 func apiXUIStatus(w http.ResponseWriter, r *http.Request) {

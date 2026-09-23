@@ -391,10 +391,23 @@ func (x *XUI) Inbounds(live map[string]bool) ([]Inbound, error) {
 		// keep a "-tcp" tag for WebSocket inbounds, so reconstruction produces
 		// a routing rule that can never match the running Xray inbound.
 		tag := resolvedInboundTag(r.Tag, r.Port, r.Stream)
+		bHost := bound[tag]
+		if bHost == "" {
+			bHost = bound[r.Tag]
+		}
+		if bHost == "" {
+			bHost = bound[fmt.Sprintf("in-%d-tcp", r.Port)]
+		}
+		if bHost == "" {
+			bHost = bound[fmt.Sprintf("inbound-%d", r.Port)]
+		}
+		if bHost == "" {
+			bHost = bound[fmt.Sprintf("port-%d", r.Port)]
+		}
 		out = append(out, Inbound{
 			ID: r.ID, Port: r.Port, Protocol: r.Protocol,
 			Remark: r.Remark, Enable: r.Enable,
-			Tag: tag, BoundTo: bound[tag], BoundUp: live[bound[tag]],
+			Tag: tag, BoundTo: bHost, BoundUp: live[bHost],
 		})
 	}
 	return out, nil
@@ -483,6 +496,15 @@ func (x *XUI) boundInbounds() (map[string]string, error) {
 		}
 		for _, it := range toStringSlice(m["inboundTag"]) {
 			bound[it] = host
+			var portNum int
+			for _, ch := range it {
+				if ch >= '0' && ch <= '9' {
+					portNum = portNum*10 + int(ch-'0')
+				}
+			}
+			if portNum > 0 {
+				bound[fmt.Sprintf("port-%d", portNum)] = host
+			}
 		}
 	}
 	return bound, nil
@@ -504,14 +526,17 @@ func toStringSlice(v any) []string {
 	return nil
 }
 
-// Bind 把某个入站的流量导向指定隧道。slot 传 0 表示解绑，恢复直连。
-//
-// 只动 fanout- 前缀的出站与规则，用户手工配置的条目原样保留。
+// Bind 把某个入站的流量导向指定隧道。hostname 传空表示解绑，恢复直连。
 func (x *XUI) Bind(inboundTag string, hostname string, tunnels []*Tunnel) error {
 	var target *Tunnel
-	if hostname != "" {
+	hostname = strings.TrimSpace(hostname)
+	if hostname != "" && hostname != "direct" && hostname != "none" {
 		for _, t := range tunnels {
-			if t.Node.HostName == hostname {
+			if t.Node.HostName == hostname ||
+				sanitizeTag(t.Node.HostName) == hostname ||
+				t.ExitIP == hostname ||
+				t.Node.IP == hostname ||
+				fmt.Sprintf("%d", t.Slot) == hostname {
 				target = t
 				break
 			}
@@ -535,8 +560,35 @@ func (x *XUI) Bind(inboundTag string, hostname string, tunnels []*Tunnel) error 
 		return err
 	}
 	knownTags := map[string]bool{}
-	for _, ib := range current {
+	var tagPort int
+	for _, ch := range inboundTag {
+		if ch >= '0' && ch <= '9' {
+			tagPort = tagPort*10 + int(ch-'0')
+		}
+	}
+	var targetIb *Inbound
+	for i := range current {
+		ib := &current[i]
 		knownTags[ib.Tag] = true
+		if ib.Tag == inboundTag || fmt.Sprint(ib.ID) == inboundTag || fmt.Sprint(ib.Port) == inboundTag ||
+			(tagPort > 0 && ib.Port == tagPort) {
+			targetIb = ib
+		}
+	}
+
+	// 收集该入站所有可能在 Xray 中被引用的标签别名
+	matchTags := map[string]bool{inboundTag: true}
+	if targetIb != nil {
+		tagPort = targetIb.Port
+		matchTags[targetIb.Tag] = true
+	}
+	if tagPort > 0 {
+		matchTags[fmt.Sprintf("in-%d-tcp", tagPort)] = true
+		matchTags[fmt.Sprintf("in-%d-udp", tagPort)] = true
+		matchTags[fmt.Sprintf("in-%d-ws", tagPort)] = true
+		matchTags[fmt.Sprintf("in-%d-grpc", tagPort)] = true
+		matchTags[fmt.Sprintf("inbound-%d", tagPort)] = true
+		matchTags[fmt.Sprintf("%d", tagPort)] = true
 	}
 
 	setting, testURL, err := x.loadXray()
@@ -552,7 +604,7 @@ func (x *XUI) Bind(inboundTag string, hostname string, tunnels []*Tunnel) error 
 	}
 	rules, _ := routing["rules"].([]any)
 
-	// 先摘掉这个入站现有的 fanout 绑定，再按需要重新加一条
+	// 先彻底摘掉这个入站所有现存的 fanout 绑定规则（避免规则重复或顺序遮盖）
 	cleaned := make([]any, 0, len(rules)+1)
 	for _, r := range rules {
 		m, ok := r.(map[string]any)
@@ -565,10 +617,13 @@ func (x *XUI) Bind(inboundTag string, hostname string, tunnels []*Tunnel) error 
 			cleaned = append(cleaned, r)
 			continue
 		}
-		// 顺便丢掉不再存在的入站标签（如换过端口后残留的旧规则）
 		remain := []any{}
 		for _, it := range toStringSlice(m["inboundTag"]) {
-			if it != inboundTag && knownTags[it] {
+			matchesThis := matchTags[it]
+			if !matchesThis && tagPort > 0 && strings.Contains(it, fmt.Sprintf("%d", tagPort)) {
+				matchesThis = true
+			}
+			if !matchesThis {
 				remain = append(remain, it)
 			}
 		}
@@ -578,12 +633,35 @@ func (x *XUI) Bind(inboundTag string, hostname string, tunnels []*Tunnel) error 
 		}
 	}
 
+	// 若绑定到指定出口，将新规则置于规则首位，确保 Xray 绝对优先匹配转发到该出口
 	if target != nil {
-		cleaned = append(cleaned, map[string]any{
+		tagsToAdd := []any{inboundTag}
+		if targetIb != nil && targetIb.Tag != "" && targetIb.Tag != inboundTag {
+			tagsToAdd = append(tagsToAdd, targetIb.Tag)
+		}
+		if tagPort > 0 {
+			tagsToAdd = append(tagsToAdd,
+				fmt.Sprintf("in-%d-tcp", tagPort),
+				fmt.Sprintf("in-%d-ws", tagPort),
+				fmt.Sprintf("inbound-%d", tagPort),
+			)
+		}
+		dedupTags := make([]any, 0, len(tagsToAdd))
+		seenTag := map[string]bool{}
+		for _, t := range tagsToAdd {
+			s := fmt.Sprint(t)
+			if s != "" && !seenTag[s] {
+				seenTag[s] = true
+				dedupTags = append(dedupTags, s)
+			}
+		}
+
+		newRule := map[string]any{
 			"type":        "field",
-			"inboundTag":  []any{inboundTag},
+			"inboundTag":  dedupTags,
 			"outboundTag": tunnelTag(target),
-		})
+		}
+		cleaned = append([]any{newRule}, cleaned...)
 	}
 
 	routing["rules"] = cleaned

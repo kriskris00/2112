@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,12 +29,57 @@ const mirrorKey = "8rhIFzFKRJMFAe-xP5OQPclDEvSjKlHo"
 
 // defaultMirrors 日本筑波大学 VPN Gate 官方活跃公网 IP 镜像与直连候选池
 var defaultMirrors = []string{
-	"http://150.40.105.19:35399/api/iphone/", // 筑波大学 IP 镜像 1 (已实测存活)
-	"http://150.40.105.6:11803/api/iphone/",  // 筑波大学 IP 镜像 2
-	"http://150.40.105.23:64629/api/iphone/", // 筑波大学 IP 镜像 3
-	"http://194.156.89.134:47774/api/iphone/", // 筑波大学 IP 镜像 4
-	"http://www.vpngate.net/api/iphone/",     // 官方 HTTP 直连
-	"https://www.vpngate.net/api/iphone/",    // 官方 HTTPS 直连
+	"http://150.40.105.19:35399/api/iphone/",  // 筑波大学 IP 镜像 1 (克罗地亚)
+	"http://119.195.163.98:23340/api/iphone/",  // 筑波大学 IP 镜像 2 (韩国)
+	"http://150.40.105.6:11803/api/iphone/",   // 筑波大学 IP 镜像 3 (克罗地亚)
+	"http://150.40.105.23:64629/api/iphone/",  // 筑波大学 IP 镜像 4 (克罗地亚)
+	"http://103.172.220.133:3946/api/iphone/",  // 筑波大学 IP 镜像 5 (印度)
+	"http://194.156.89.134:47774/api/iphone/", // 筑波大学 IP 镜像 6 (德国)
+	"http://219.100.37.234:25500/api/iphone/", // 筑波大学 IP 镜像 7 (日本)
+	"http://153.125.233.158:19641/api/iphone/",// 筑波大学 IP 镜像 8 (日本)
+	"http://130.158.75.33:14631/api/iphone/",  // 筑波大学 IP 镜像 9 (日本筑波大学本部)
+	"http://219.100.37.238:52158/api/iphone/", // 筑波大学 IP 镜像 10 (日本)
+	"http://219.100.37.244:11075/api/iphone/", // 筑波大学 IP 镜像 11 (日本)
+	"http://www.vpngate.net/api/iphone/",      // 官方 HTTP 直连
+	"https://www.vpngate.net/api/iphone/",     // 官方 HTTPS 直连
+	"https://p.xy.kg/vpngate",                  // Cloudflare 全球容灾反代
+}
+
+// discoverMirrors 动态抓取筑波大学官方每天轮换推荐的全球公网镜像列表
+func discoverMirrors(timeout time.Duration) []string {
+	client := &http.Client{Timeout: timeout}
+	urls := []string{
+		"http://www.vpngate.net/en/sites.aspx",
+		"https://www.vpngate.net/en/sites.aspx",
+		"http://150.40.105.19:35399/en/sites.aspx",
+	}
+	re := regexp.MustCompile(`http://\d+\.\d+\.\d+\.\d+:\d+/`)
+	var found []string
+	seen := map[string]bool{}
+
+	for _, u := range urls {
+		resp, err := client.Get(u)
+		if err != nil {
+			continue
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			continue
+		}
+		matches := re.FindAllString(string(body), -1)
+		for _, m := range matches {
+			apiUrl := strings.TrimRight(m, "/") + "/api/iphone/"
+			if !seen[apiUrl] {
+				seen[apiUrl] = true
+				found = append(found, apiUrl)
+			}
+		}
+		if len(found) > 0 {
+			break
+		}
+	}
+	return found
 }
 
 // SourceInfo 描述节点源状态
@@ -111,108 +157,155 @@ func vpngateAPIURL() string {
 	return vpngateAPI
 }
 
-// fetchNodes 拉取并解析 VPN Gate 节点列表，支持多镜像降级与磁盘离线缓存。
-func fetchNodes(workDir string, timeout time.Duration) ([]Node, error) {
-	nodes, rawBody, srcURL, err := fetchNodesWithMirrors(vpngateAPIURL(), timeout)
-	if err == nil && len(nodes) > 0 {
-		// 写入本地持久化缓存
-		if workDir != "" && rawBody != "" {
-			cachePath := filepath.Join(workDir, "cached_nodes.csv")
-			_ = os.WriteFile(cachePath, []byte(rawBody), 0644)
-		}
-		sourceInfoMu.Lock()
-		globalSourceInfo.ActiveSource = srcURL
-		globalSourceInfo.LastFetch = time.Now()
-		globalSourceInfo.LastError = ""
-		sourceInfoMu.Unlock()
-		return nodes, nil
+// saveNodesToCache 保存节点到持久化离线缓存（标准 VPN Gate CSV 格式）
+func saveNodesToCache(workDir string, nodes []Node) {
+	if workDir == "" || len(nodes) == 0 {
+		return
 	}
+	var sb strings.Builder
+	sb.WriteString("*vpn_servers\r\n")
+	sb.WriteString("#HostName,IP,Score,Ping,Speed,CountryLong,CountryShort,NumVpnSessions,Uptime,TotalUsers,TotalTraffic,LogType,Operator,Message,OpenVPN_ConfigData_Base64\r\n")
+	for _, n := range nodes {
+		b64 := base64.StdEncoding.EncodeToString([]byte(n.Config))
+		speedInt := int64(n.SpeedMbps * 1e6)
+		line := fmt.Sprintf("%s,%s,0,%d,%d,%s,%s,%d,0,0,0,2,,,%s\r\n",
+			n.HostName, n.IP, n.Ping, speedInt, n.Country, n.CountryCode, n.Sessions, b64)
+		sb.WriteString(line)
+	}
+	sb.WriteString("*\r\n")
+	cachePath := filepath.Join(workDir, "cached_nodes.csv")
+	_ = os.WriteFile(cachePath, []byte(sb.String()), 0644)
+}
 
-	// 在线源全部失败时，尝试读取磁盘离线缓存
+// fetchNodes 拉取并解析 VPN Gate 节点列表，支持多镜像并发聚合、多在线订阅源与磁盘离线缓存池。
+func fetchNodes(workDir string, timeout time.Duration) ([]Node, error) {
+	nodeMap := make(map[string]Node)
+
+	// 1. 先读历史离线缓存作为底池（保留之前有效积累的节点）
+	var cachedCount int
 	if workDir != "" {
 		cachePath := filepath.Join(workDir, "cached_nodes.csv")
-		if data, readErr := os.ReadFile(cachePath); readErr == nil && len(data) > 0 {
-			if cachedNodes, parseErr := parseNodeCSV(string(data)); parseErr == nil && len(cachedNodes) > 0 {
-				log.Printf("所有在线节点源拉取受阻，已恢复载入本地离线缓存节点 (%d 个)", len(cachedNodes))
-				sourceInfoMu.Lock()
-				globalSourceInfo.ActiveSource = "本地离线缓存 (cached_nodes.csv)"
-				globalSourceInfo.CachedNodes = len(cachedNodes)
-				if err != nil {
-					globalSourceInfo.LastError = "在线拉取失败，已使用离线缓存: " + err.Error()
+		if data, err := os.ReadFile(cachePath); err == nil && len(data) > 0 {
+			if list, pErr := parseNodeCSV(string(data)); pErr == nil {
+				for _, n := range list {
+					if n.IP != "" {
+						nodeMap[n.IP] = n
+					}
 				}
-				sourceInfoMu.Unlock()
-				return cachedNodes, nil
+				cachedCount = len(nodeMap)
 			}
 		}
 	}
 
-	sourceInfoMu.Lock()
-	if err != nil {
-		globalSourceInfo.LastError = err.Error()
+	// 2. 收集所有待抓取的源地址（支持用户多行/多地址配置自定义订阅）
+	sourceInfoMu.RLock()
+	customURLText := globalSourceInfo.CustomURL
+	sourceInfoMu.RUnlock()
+
+	var targets []string
+	if customURLText != "" {
+		for _, u := range strings.Split(customURLText, "\n") {
+			u = strings.TrimSpace(u)
+			for _, sub := range strings.Split(u, ",") {
+				sub = strings.TrimSpace(sub)
+				if sub != "" {
+					targets = append(targets, sub)
+				}
+			}
+		}
 	}
+	// 加入官方与全部日本筑波大学活跃镜像
+	targets = append(targets, defaultMirrors...)
+	// 并发动态探测今日最新推荐的实时镜像池
+	if discovered := discoverMirrors(4 * time.Second); len(discovered) > 0 {
+		targets = append(targets, discovered...)
+	}
+
+	// 3. 并发拉取所有镜像源并去重聚合
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var activeSrc string
+	var successCount int
+
+	for _, target := range targets {
+		wg.Add(1)
+		go func(url string) {
+			defer wg.Done()
+			perTimeout := 8 * time.Second
+			if timeout < perTimeout {
+				perTimeout = timeout
+			}
+			raw, err := fetchRawCSVFrom(url, "", perTimeout)
+			if err != nil {
+				return
+			}
+			nodes, err := parseNodeCSV(raw)
+			if err != nil || len(nodes) == 0 {
+				return
+			}
+			mu.Lock()
+			if activeSrc == "" {
+				activeSrc = url
+			}
+			successCount++
+			for _, n := range nodes {
+				if n.IP != "" {
+					nodeMap[n.IP] = n
+				}
+			}
+			mu.Unlock()
+		}(target)
+	}
+	wg.Wait()
+
+	if len(nodeMap) == 0 {
+		sourceInfoMu.Lock()
+		globalSourceInfo.LastError = "所有在线镜像及离线缓存均不可用"
+		sourceInfoMu.Unlock()
+		return nil, fmt.Errorf("所有在线镜像及离线缓存均不可用")
+	}
+
+	// 转换为列表并按速度降序排序
+	nodes := make([]Node, 0, len(nodeMap))
+	for _, n := range nodeMap {
+		nodes = append(nodes, n)
+	}
+	sort.Slice(nodes, func(i, j int) bool { return nodes[i].SpeedMbps > nodes[j].SpeedMbps })
+
+	// 保存持久化累积节点缓存，节点池随时间不断扩展累积
+	if workDir != "" {
+		saveNodesToCache(workDir, nodes)
+	}
+
+	sourceInfoMu.Lock()
+	if activeSrc != "" {
+		globalSourceInfo.ActiveSource = fmt.Sprintf("%s (已聚合 %d 个源)", activeSrc, successCount)
+	} else {
+		globalSourceInfo.ActiveSource = "本地累积离线缓存池"
+	}
+	globalSourceInfo.LastFetch = time.Now()
+	globalSourceInfo.TotalNodes = len(nodes)
+	globalSourceInfo.CachedNodes = cachedCount
+	globalSourceInfo.LastError = ""
 	sourceInfoMu.Unlock()
-	return nil, err
+
+	return nodes, nil
 }
 
 // fetchNodesWith 把直连地址拆成参数，方便单元测试。
 func fetchNodesWith(direct string, timeout time.Duration) ([]Node, error) {
-	nodes, _, _, err := fetchNodesWithMirrors(direct, timeout)
-	return nodes, err
-}
-
-// fetchNodesWithMirrors 依次尝试 direct -> 自定义 mirror -> 筑波大学公共镜像池
-func fetchNodesWithMirrors(direct string, timeout time.Duration) ([]Node, string, string, error) {
-	// 1. 先尝试指定的主直连地址
-	raw, err := fetchRawCSVFrom(direct, "", timeout)
-	if err == nil {
-		nodes, parseErr := parseNodeCSV(raw)
-		if parseErr == nil {
-			return nodes, raw, direct, nil
+	if direct != "" {
+		if nodes, err := fetchNodesFrom(direct, "", timeout); err == nil && len(nodes) > 0 {
+			return nodes, nil
 		}
-		err = parseErr
-	}
-
-	// 2. 检查环境变量 FANOUT_VPNGATE_MIRROR 设置
-	if envMirror, ok := os.LookupEnv("FANOUT_VPNGATE_MIRROR"); ok {
-		if strings.TrimSpace(envMirror) == "" {
-			// 测试用例显式设为空，表示不走任何反代镜像
-			return nil, "", "", err
-		}
-		raw, mirrorErr := fetchRawCSVFrom(strings.TrimSpace(envMirror), mirrorAccessKey(), timeout)
-		if mirrorErr == nil {
-			nodes, parseErr := parseNodeCSV(raw)
-			if parseErr == nil {
-				return nodes, raw, envMirror, nil
+		if m := mirrorURL(); m != "" {
+			if nodes, err := fetchNodesFrom(m, mirrorAccessKey(), timeout); err == nil && len(nodes) > 0 {
+				return nodes, nil
 			}
-			return nil, "", "", parseErr
 		}
-		return nil, "", "", fmt.Errorf("直连失败(%v)；反代也失败: %w", err, mirrorErr)
+		return nil, fmt.Errorf("直连与反代均不可用")
 	}
-
-	// 3. 环境变量未设置时，依次轮询内置的筑波大学官方 IP 镜像列表
-	var lastErr error = err
-	for _, m := range defaultMirrors {
-		if m == direct {
-			continue
-		}
-		mirrorTimeout := 8 * time.Second
-		if timeout < mirrorTimeout {
-			mirrorTimeout = timeout
-		}
-		mRaw, mErr := fetchRawCSVFrom(m, "", mirrorTimeout)
-		if mErr != nil {
-			lastErr = mErr
-			continue
-		}
-		nodes, pErr := parseNodeCSV(mRaw)
-		if pErr == nil && len(nodes) > 0 {
-			log.Printf("成功通过备用镜像源获取节点: %s (共 %d 个节点)", m, len(nodes))
-			return nodes, mRaw, m, nil
-		}
-		lastErr = pErr
-	}
-
-	return nil, "", "", fmt.Errorf("直连及所有备用镜像拉取均失败: %w", lastErr)
+	return fetchNodes("", timeout)
 }
 
 func fetchRawCSVFrom(url, key string, timeout time.Duration) (string, error) {
@@ -397,9 +490,159 @@ func loadLocalOvpnNodes(dir string) []Node {
 			node.IPType = intel.IPType
 			node.PurityScore = intel.PurityScore
 			node.ISP = intel.ISP
+			if countryCode == "CUSTOM" && intel.CountryCode != "" {
+				node.CountryCode = intel.CountryCode
+				node.Country = intel.Country
+			}
 		}
 		out = append(out, node)
 	}
 	return out
 }
+
+// parseImportedNodes 解析用户批量粘贴导入的节点文本，支持 VPN Gate CSV、多份 .ovpn 文本或纯 IP 列表
+func parseImportedNodes(text string) ([]Node, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil, fmt.Errorf("导入内容为空")
+	}
+
+	// 1. 如果包含 HostName，按标准 CSV 解析
+	if strings.Contains(text, "HostName") {
+		return parseNodeCSV(text)
+	}
+
+	// 2. 如果包含 remote 指令，按 OpenVPN 块解析
+	if strings.Contains(text, "remote ") {
+		var nodes []Node
+		blocks := strings.Split(text, "client\n")
+		if len(blocks) <= 1 {
+			blocks = strings.Split(text, "client\r\n")
+		}
+		if len(blocks) <= 1 {
+			blocks = []string{text}
+		}
+		for i, block := range blocks {
+			block = strings.TrimSpace(block)
+			if block == "" || !strings.Contains(block, "remote ") {
+				continue
+			}
+			cfg := block
+			if !strings.HasPrefix(cfg, "client") {
+				cfg = "client\n" + cfg
+			}
+			ip := ""
+			port := "1194"
+			for _, line := range strings.Split(cfg, "\n") {
+				line = strings.TrimSpace(line)
+				if strings.HasPrefix(line, "remote ") {
+					parts := strings.Fields(line)
+					if len(parts) >= 2 {
+						ip = parts[1]
+					}
+					if len(parts) >= 3 {
+						port = parts[2]
+					}
+					break
+				}
+			}
+			if ip == "" {
+				continue
+			}
+			if net.ParseIP(ip) == nil {
+				if addrs, err := net.LookupHost(ip); err == nil && len(addrs) > 0 {
+					ip = addrs[0]
+				}
+			}
+			intel := GetIPIntel(ip)
+			country := intel.Country
+			countryCode := intel.CountryCode
+			if countryCode == "" {
+				countryCode = "CUSTOM"
+				country = "Custom"
+			}
+			nodes = append(nodes, Node{
+				HostName:    fmt.Sprintf("custom_%s_%s_%d", ip, port, i+1),
+				IP:          ip,
+				Country:     country,
+				CountryCode: countryCode,
+				Ping:        50,
+				SpeedMbps:   60.0,
+				Config:      cfg,
+				IPType:      intel.IPType,
+				PurityScore: intel.PurityScore,
+				ISP:         intel.ISP,
+			})
+		}
+		if len(nodes) > 0 {
+			return nodes, nil
+		}
+	}
+
+	// 3. 逐行解析 IP 或 IP:Port 列表
+	var nodes []Node
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		line = strings.TrimSpace(line)
+		line = strings.TrimRight(line, "\r")
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "//") {
+			continue
+		}
+		parts := strings.Split(line, ":")
+		ip := strings.TrimSpace(parts[0])
+		port := "1194"
+		if len(parts) >= 2 {
+			port = strings.TrimSpace(parts[1])
+		}
+		if net.ParseIP(ip) == nil {
+			fields := strings.Fields(line)
+			if len(fields) > 0 && net.ParseIP(fields[0]) != nil {
+				ip = fields[0]
+			} else {
+				continue
+			}
+		}
+
+		intel := GetIPIntel(ip)
+		country := intel.Country
+		countryCode := intel.CountryCode
+		if countryCode == "" {
+			countryCode = "CUSTOM"
+			country = "Custom"
+		}
+
+		defaultCfg := fmt.Sprintf(`client
+dev tun
+proto udp
+remote %s %s
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+cipher AES-128-CBC
+auth SHA1
+auth-user-pass
+verb 2
+`, ip, port)
+
+		nodes = append(nodes, Node{
+			HostName:    fmt.Sprintf("ip_%s_%s_%d", ip, port, i+1),
+			IP:          ip,
+			Country:     country,
+			CountryCode: countryCode,
+			Ping:        60,
+			SpeedMbps:   40.0,
+			Config:      defaultCfg,
+			IPType:      intel.IPType,
+			PurityScore: intel.PurityScore,
+			ISP:         intel.ISP,
+		})
+	}
+
+	if len(nodes) == 0 {
+		return nil, fmt.Errorf("未能从导入文本中解析出有效的节点或 IP")
+	}
+	return nodes, nil
+}
+
 

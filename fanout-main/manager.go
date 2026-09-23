@@ -95,6 +95,74 @@ func (m *Manager) ScanLocalNodes() (int, error) {
 	return len(customNodes), nil
 }
 
+// ImportNodes 批量导入用户粘贴的节点文本（支持 CSV、.ovpn 块或 IP 列表），去重后合并入节点池
+func (m *Manager) ImportNodes(rawText string) (int, error) {
+	newNodes, err := parseImportedNodes(rawText)
+	if err != nil {
+		return 0, err
+	}
+	if len(newNodes) == 0 {
+		return 0, fmt.Errorf("未从文本中识别出有效节点或 IP")
+	}
+
+	m.mu.Lock()
+	existing := map[string]bool{}
+	for _, n := range m.nodes {
+		if n.IP != "" {
+			existing[n.IP] = true
+		}
+		if n.HostName != "" {
+			existing[n.HostName] = true
+		}
+	}
+	var added int
+	for _, n := range newNodes {
+		if !existing[n.IP] && !existing[n.HostName] {
+			m.nodes = append(m.nodes, n)
+			if n.IP != "" {
+				existing[n.IP] = true
+			}
+			if n.HostName != "" {
+				existing[n.HostName] = true
+			}
+			added++
+		}
+	}
+	m.fetched = time.Now()
+	total := len(m.nodes)
+	m.mu.Unlock()
+
+	// 保存持久化离线缓存
+	if m.workDir != "" {
+		saveNodesToCache(m.workDir, m.nodes)
+	}
+
+	sourceInfoMu.Lock()
+	globalSourceInfo.TotalNodes = total
+	globalSourceInfo.CustomNodes += added
+	sourceInfoMu.Unlock()
+
+	go BatchEnrichNodes(newNodes)
+	return added, nil
+}
+
+// PruneFailed 停止并清理所有连接失败或中断的出口
+func (m *Manager) PruneFailed() int {
+	m.mu.Lock()
+	var slots []int
+	for slot, t := range m.tunnels {
+		if t.Status == "failed" || t.Status == "stopped" {
+			slots = append(slots, slot)
+		}
+	}
+	m.mu.Unlock()
+	for _, slot := range slots {
+		_ = m.Stop(slot)
+	}
+	return len(slots)
+}
+
+
 func (m *Manager) Nodes() ([]Node, time.Time) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

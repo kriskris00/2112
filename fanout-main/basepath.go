@@ -117,6 +117,10 @@ func normalizeBasePath(bp string) string {
 // 每次请求读当前 basePath，改路径后无需重启即可生效。
 func StripBasePath(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/sub" || strings.HasPrefix(r.URL.Path, "/sub?") {
+			next.ServeHTTP(w, r)
+			return
+		}
 		base := currentBasePath()
 		if base == "" {
 			next.ServeHTTP(w, r)

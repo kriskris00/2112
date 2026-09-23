@@ -109,6 +109,14 @@ func (m *Manager) ExitsOf() ExitsView {
 	byHost := map[string]int{}
 	for i, t := range tunnels {
 		byHost[sanitizeTag(t.Node.HostName)] = i
+		byHost[t.Node.HostName] = i
+		if t.ExitIP != "" {
+			byHost[t.ExitIP] = i
+		}
+		if t.Node.IP != "" {
+			byHost[t.Node.IP] = i
+		}
+		byHost[fmt.Sprintf("%d", t.Slot)] = i
 		cred := t.credential()
 		intel := GetIPIntel(t.ExitIP)
 		if (intel.IPType == "" || intel.IPType == "hosting" && intel.ISP == "Unknown") && t.Node.IP != "" {

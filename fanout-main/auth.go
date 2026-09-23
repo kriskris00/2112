@@ -138,13 +138,40 @@ func (a *Auth) valid(tok string) bool {
 	return ok && time.Now().Before(exp)
 }
 
-const sessionCookie = "fanout_session"
+func (a *Auth) Password() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.password
+}
 
 // Wrap 保护一个 handler，未登录时 API 返回 401、页面跳登录。
 func (a *Auth) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/login" {
 			a.handleLogin(w, r)
+			return
+		}
+		// 聚合订阅接口：允许通过 ?token= 或 ?key= 或 Basic Auth 口令鉴权，兼容各种代理客户端
+		if r.URL.Path == "/sub" {
+			token := r.URL.Query().Get("token")
+			if token == "" {
+				token = r.URL.Query().Get("key")
+			}
+			if token == "" {
+				_, pass, ok := r.BasicAuth()
+				if ok {
+					token = pass
+				}
+			}
+			if token != "" && subtle.ConstantTimeCompare([]byte(token), []byte(a.Password())) == 1 {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if c, err := r.Cookie(sessionCookie); err == nil && a.valid(c.Value) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			http.Error(w, "未授权的订阅访问，请在链接后附带 ?token=您的访问口令", http.StatusUnauthorized)
 			return
 		}
 		if c, err := r.Cookie(sessionCookie); err == nil && a.valid(c.Value) {

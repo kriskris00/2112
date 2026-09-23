@@ -136,7 +136,7 @@ func (m *Manager) pickNodes(region string, count int) ([]Node, error) {
 		if used[n.HostName] {
 			continue
 		}
-		if region != "" && !strings.EqualFold(n.CountryCode, region) {
+		if region != "" && !strings.EqualFold(n.CountryCode, region) && !strings.EqualFold(n.Country, region) {
 			continue
 		}
 		out = append(out, n)
@@ -178,13 +178,24 @@ func (m *Manager) Regions() []RegionStat {
 
 	byCode := map[string]*regAccum{}
 	for _, n := range m.nodes {
-		if used[n.HostName] || n.CountryCode == "" {
+		if used[n.HostName] {
 			continue
 		}
-		s := byCode[n.CountryCode]
+		cc := strings.ToUpper(strings.TrimSpace(n.CountryCode))
+		if cc == "" && n.Country != "" {
+			cc = strings.ToUpper(strings.TrimSpace(n.Country))
+		}
+		if cc == "" {
+			cc = "GLOBAL"
+		}
+		name := n.Country
+		if name == "" {
+			name = cc
+		}
+		s := byCode[cc]
 		if s == nil {
-			s = &regAccum{stat: RegionStat{Code: n.CountryCode, Name: n.Country, BestPing: n.Ping}}
-			byCode[n.CountryCode] = s
+			s = &regAccum{stat: RegionStat{Code: cc, Name: name, BestPing: n.Ping}}
+			byCode[cc] = s
 		}
 		s.stat.Available++
 		if n.SpeedMbps > s.stat.BestSpeed {

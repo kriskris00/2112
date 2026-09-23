@@ -72,6 +72,11 @@ main{padding:14px 16px 40px;max-width:1180px;margin:0 auto}
 .chip{border:1px solid var(--line);border-radius:3px;padding:1px 7px;font-size:11px;
   color:var(--dim);cursor:pointer;background:#0e1116}
 .chip:hover{border-color:var(--accent);color:var(--text)}
+.chip-item{display:inline-flex;align-items:center;background:#202632;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+.chip-item .chip{border:none;border-radius:0;background:transparent;padding:1px 6px}
+.chip-item .chip:hover{background:#2a3242}
+.chip-item .chip-select{border:none;border-left:1px solid var(--line);background:#161a22;color:var(--dim);font-size:11px;padding:2px 5px;cursor:pointer;outline:none}
+.chip-item .chip-select:hover{color:var(--text);background:#222834}
 .chip.none{border-style:dashed;cursor:default}
 .chip.none:hover{border-color:var(--line);color:var(--dim)}
 .orphan{margin-top:18px;border:1px solid var(--line);border-radius:6px;
@@ -102,6 +107,15 @@ main{padding:14px 16px 40px;max-width:1180px;margin:0 auto}
 .step.running{color:var(--warn);border-color:rgba(201,144,58,.35)}
 .spin{animation:rot 1s linear infinite;transform-origin:center}
 @keyframes rot{to{transform:rotate(360deg)}}
+.jobs-bar{display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:12px;color:var(--dim)}
+.btn-xs{font-size:11px;padding:3px 8px;border-radius:4px;background:#141820;border:1px solid var(--line);color:var(--dim);cursor:pointer;display:inline-flex;align-items:center;gap:4px}
+.btn-xs:hover{color:var(--text);border-color:var(--accent)}
+.btn-xs.danger{color:var(--bad)}
+.btn-xs.danger:hover{border-color:var(--bad)}
+.step.failed-summary{cursor:pointer;border-style:dashed}
+.step.failed-summary:hover{background:rgba(194,84,80,.1)}
+.failed-steps-wrap{width:100%;margin-top:6px;padding-top:6px;border-top:1px dashed var(--line);display:none}
+.failed-steps-wrap.open{display:flex;flex-wrap:wrap;gap:6px}
 .links{display:flex;gap:14px;margin-right:4px}
 .links a{color:var(--dim);text-decoration:none;font-size:12px}
 .links a:hover{color:var(--accent)}
@@ -221,6 +235,10 @@ textarea:focus{outline:none;border-color:var(--accent)}
     <h2>出口</h2>
     <span class="count" id="ecount"></span>
     <span class="spacer"></span>
+    <button class="primary" id="subBtn" title="全平台通用聚合订阅 (V2RayN / Shadowrocket / Sing-box / Clash / Mihomo)" style="background:linear-gradient(135deg,#2e8555,#3fa66b);border-color:#3fa66b;color:#fff">
+      <svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+      聚合订阅
+    </button>
     <button id="exportAll" title="导出全部节点链接">
       <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
       导出链接
@@ -228,6 +246,10 @@ textarea:focus{outline:none;border-color:var(--accent)}
     <button id="stopall" title="停止所有出口">
       <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
       全部停止
+    </button>
+    <button id="prunefailed" title="清除所有连接失败或中断的出口">
+      <svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+      清除失效
     </button>
     <button id="sourcesBtn" title="管理节点源与抓取镜像">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
@@ -520,16 +542,16 @@ textarea:focus{outline:none;border-color:var(--accent)}
       </div>
 
       <div style="margin-bottom:16px">
-        <h3 style="margin-bottom:8px;font-size:14px">自定义在线节点源</h3>
-        <div style="display:flex;gap:8px">
-          <input id="customSrcUrl" type="url" placeholder="https://... 或 http://... (VPN Gate CSV 订阅地址)" style="flex:1">
-          <button class="primary" id="saveCustomSrc">保存并拉取</button>
+        <h3 style="margin-bottom:8px;font-size:14px">自定义在线节点源（支持填写多个订阅）</h3>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <textarea id="customSrcUrl" style="min-height:60px;font-size:11px;font-family:monospace;padding:6px 8px" placeholder="https://... 或 http://... (支持填写多个源，每行一个或逗号分隔)"></textarea>
+          <div><button class="primary" id="saveCustomSrc">保存并拉取所有源</button></div>
         </div>
         <div class="hint">可输入您自己的 VPN Gate 镜像、反代或自建 API。留空则恢复默认官方与内置镜像。</div>
       </div>
 
       <div style="margin-bottom:16px">
-        <h3 style="margin-bottom:8px;font-size:14px">内置可用镜像源池（自动故障转移）</h3>
+        <h3 style="margin-bottom:8px;font-size:14px">内置可用镜像源池（自动故障转移 & 并发聚合）</h3>
         <div style="font-size:12px;color:var(--dim);line-height:1.6;background:var(--card-bg);padding:10px;border-radius:6px;border:1px solid var(--border);margin-bottom:8px">
           <div>• 筑波大学 IP 镜像 1：<code>150.40.105.19:35399</code></div>
           <div>• 筑波大学 IP 镜像 2：<code>150.40.105.6:11803</code></div>
@@ -537,7 +559,20 @@ textarea:focus{outline:none;border-color:var(--accent)}
           <div>• 筑波大学 IP 镜像 4：<code>194.156.89.134:47774</code></div>
           <div>• 官方直连：<code>www.vpngate.net</code></div>
         </div>
-        <button id="refreshMirrors">🔄 立即轮询抓取所有源</button>
+        <button id="refreshMirrors">🔄 立即轮询并发聚合所有源</button>
+      </div>
+
+      <div style="margin-bottom:16px;border-top:1px solid var(--border);padding-top:14px">
+        <h3 style="margin-bottom:6px;font-size:14px">📋 批量导入节点 / IP 文本 (扩充数万节点)</h3>
+        <div class="hint" style="margin-bottom:8px">
+          支持直接粘贴 <b>VPN Gate CSV 全量文本</b>、多个 <b>.ovpn 配置文本</b>，或<b>每行一个 IP / IP:Port</b>。<br>
+          系统将自动提取 IP、测速、定位国家并去重合并入当前节点池：
+        </div>
+        <textarea id="importNodesText" style="min-height:90px;font-size:11px;font-family:monospace;padding:6px 8px" placeholder="在此粘贴 CSV 内容、.ovpn 块或 IP 列表...&#10;示例 1: 150.40.105.19:1194&#10;示例 2: 126.79.197.198&#10;示例 3: *vpn_servers 格式的 CSV 全文"></textarea>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="primary" id="doImportNodes">📥 立即批量导入到节点池</button>
+          <span id="importResult" style="font-size:12px;color:var(--ok);align-self:center" hidden></span>
+        </div>
       </div>
 
       <div>
@@ -553,6 +588,55 @@ textarea:focus{outline:none;border-color:var(--accent)}
     <div class="foot">
       <span class="spacer"></span>
       <button data-close="sourcesModal">关闭</button>
+    </div>
+</div>
+
+<div class="modal" id="submodal">
+  <div class="sheet" style="max-width:580px">
+    <div class="head">
+      <h2>⚡ 全平台聚合订阅</h2>
+      <span class="spacer"></span>
+      <button class="icon" data-close="submodal" title="关闭">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+    </div>
+    <div class="body">
+      <div style="font-size:12px;color:var(--dim);margin-bottom:12px">
+        支持所有主流客户端导入订阅。节点在服务端自由切换出口后，客户端无需重新导入或刷新，流量实时无缝生效！
+      </div>
+
+      <label class="f">
+        <span style="font-weight:600;display:flex;align-items:center;gap:6px">
+          📱 通用聚合订阅 (Base64)
+          <em style="color:var(--dim);font-weight:normal;font-style:normal">V2RayN / Shadowrocket / Sing-box / NekoBox / Loon</em>
+        </span>
+        <div style="display:flex;gap:6px;margin-top:4px">
+          <input type="text" id="subUrlBase64" readonly style="flex:1;background:#12151a;color:var(--accent);font-family:monospace;font-size:11px">
+          <button class="primary" id="copySubBase64" style="flex:none">📋 复制</button>
+        </div>
+      </label>
+
+      <label class="f" style="margin-top:14px">
+        <span style="font-weight:600;display:flex;align-items:center;gap:6px">
+          🐱 Clash / Mihomo 配置订阅
+          <em style="color:var(--dim);font-weight:normal;font-style:normal">Clash Verge / Clash Meta / Mihomo Party / ShellClash</em>
+        </span>
+        <div style="display:flex;gap:6px;margin-top:4px">
+          <input type="text" id="subUrlClash" readonly style="flex:1;background:#12151a;color:#c9903a;font-family:monospace;font-size:11px">
+          <button class="primary" id="copySubClash" style="flex:none">📋 复制</button>
+          <button id="importClashBtn" style="flex:none">⚡ 一键导入</button>
+        </div>
+      </label>
+
+      <div style="margin-top:14px;padding:10px;background:rgba(74,158,218,.1);border:1px solid rgba(74,158,218,.3);border-radius:4px;font-size:11px;line-height:1.6">
+        💡 <b>智能出口路由特性</b>：<br>
+        1. 订阅链接自动聚合当前所有 3x-ui 入站及正在运行的 VPN Gate 出口隧道。<br>
+        2. 在主界面随时将节点切换到任意出口，客户端立即生效，实现真正的自由多国跳板。
+      </div>
+    </div>
+    <div class="foot">
+      <span class="spacer"></span>
+      <button data-close="submodal">完成</button>
     </div>
   </div>
 </div>
@@ -629,6 +713,39 @@ function backendName(){ return BACKEND_NAME[view.backend] || '3x-ui'; }
 
 const STATUS = {up:'已连通', starting:'连接中', failed:'失败', stopped:'已停止'};
 
+function getFlagEmoji(countryCode) {
+  if (!countryCode || countryCode === '' || countryCode === 'CUSTOM') return '🌐';
+  if (countryCode.length !== 2) return '🌐';
+  const code = countryCode.toUpperCase();
+  const c1 = code.charCodeAt(0) - 65 + 0x1F1E6;
+  const c2 = code.charCodeAt(1) - 65 + 0x1F1E6;
+  if (c1 >= 0x1F1E6 && c1 <= 0x1F1FF && c2 >= 0x1F1E6 && c2 <= 0x1F1FF) {
+    return String.fromCodePoint(c1, c2);
+  }
+  return '🌐';
+}
+
+const COUNTRY_ZH = {
+  JP: '日本', KR: '韩国', US: '美国', RU: '俄罗斯', VN: '越南',
+  IN: '印度', MV: '马尔代夫', TH: '泰国', HK: '中国香港', TW: '中国台湾',
+  SG: '新加坡', GB: '英国', DE: '德国', FR: '法国', CA: '加拿大',
+  AU: '澳大利亚', NL: '荷兰', MY: '马来西亚', PH: '菲律宾', ID: '印尼',
+  UA: '乌克兰', BR: '巴西', TR: '土耳其', PL: '波兰', SE: '瑞典',
+  NO: '挪威', FI: '芬兰', ES: '西班牙', IT: '意大利', CH: '瑞士',
+  RO: '罗马尼亚', BG: '保加利亚', CZ: '捷克', HU: '匈牙利', AT: '奥地利',
+  CUSTOM: '自定义'
+};
+
+function formatCountry(code, name) {
+  if (!code || code === 'CUSTOM') return '🌐 ' + (name || '自定义');
+  const flag = getFlagEmoji(code);
+  const zh = COUNTRY_ZH[code.toUpperCase()] || '';
+  if (zh) {
+    return flag + ' ' + code + ' ' + zh + (name && name !== code && name !== zh ? ' · ' + name : '');
+  }
+  return flag + ' ' + code + (name ? ' · ' + name : '');
+}
+
 function renderExits(){
   const list = $('#list');
   const n = view.exits.length;
@@ -670,21 +787,26 @@ function renderExits(){
     const purityTag = '<span class="tag-purity" style="color:' + pColor + '" title="IP 纯净度评分">' + purity + '%</span>';
 
     const chips = (e.inbounds || []).length
-      ? e.inbounds.map(i => '<button class="chip" data-detail="' + i.id + '" title="'
-          + esc((i.remark || i.protocol) + ' · ' + i.protocol + ' :' + i.port) + '">'
-          + esc(i.protocol) + ' :' + i.port + '</button>').join('')
+      ? e.inbounds.map(i =>
+          '<span class="chip-item">'
+          + '<button class="chip" data-detail="' + i.id + '" title="'
+          +   esc((i.remark || i.protocol) + ' · ' + i.protocol + ' :' + i.port + ' (点击配置客户端/查看详情)') + '">'
+          +   esc(i.remark || i.protocol) + ' :' + i.port + '</button>'
+          + '<select class="obind chip-select" data-tag="' + esc(i.tag) + '" title="自由切换此节点出口或恢复直连">'
+          +   exitOptions(e.host)
+          + '</select>'
+          + '</span>').join('')
       : '<span class="chip none">无节点</span>';
     const err = e.status === 'failed' && e.err
       ? '<div class="errline" title="' + esc(e.err) + '">' + esc(e.err) + '</div>' : '';
-    const place = e.country && e.country.toUpperCase() !== (e.region || '').toUpperCase()
-      ? esc(e.region) + ' ' + esc(e.country) : esc(e.region || '—');
-    const ispText = e.isp ? ' · ' + esc(e.isp) : ' · ' + esc(e.host);
+    const place = formatCountry(e.region || e.country_code, e.country);
+    const ispText = e.isp ? ' · ' + esc(e.isp) : (e.host ? ' · ' + esc(e.host) : '');
 
     return '<div class="exit">'
       + '<div class="row">'
       +   '<span class="dot ' + e.status + '" title="' + (STATUS[e.status] || e.status) + '"></span>'
       +   '<span class="ip">' + esc(label) + typeTag + purityTag + '</span>'
-      +   '<span class="meta" title="' + esc(place + ispText) + '">' + place + ispText + '</span>'
+      +   '<span class="meta" title="' + esc(place + ispText) + '">' + esc(place + ispText) + '</span>'
       +   '<span class="chips">' + chips + '</span>'
       +   '<span class="socks"><button data-cred="' + e.slot + '" title="SOCKS5 访问凭据">'
       +     ICON.lock + ':' + e.port + '</button></span>'
@@ -726,22 +848,63 @@ function renderOrphans(){
     + '</div>';
 }
 
+let showAllFailed = false;
+
 function renderJobs(jobs){
   const box = $('#jobs');
-  box.innerHTML = jobs.map(j => {
-    const steps = j.steps.map(s => {
+  if(!jobs || !jobs.length){
+    box.innerHTML = '';
+    return;
+  }
+
+  const header = '<div class="jobs-bar">'
+    + '<span>任务进度 (' + jobs.length + ')</span>'
+    + '<span class="spacer"></span>'
+    + '<button class="btn-xs" id="clearAllDoneJobs" title="清空所有已完成/失败的任务卡片">🧹 清空任务卡片</button>'
+    + '<button class="btn-xs" id="toggleAllFailedBtn">' + (showAllFailed ? '🙈 隐藏全部爆红' : '👁️ 显示全部爆红') + '</button>'
+    + '</div>';
+
+  const items = jobs.map(j => {
+    const okSteps = j.steps.filter(s => s.status === 'ok');
+    const runningSteps = j.steps.filter(s => s.status === 'running' || s.status === 'pending');
+    const failedSteps = j.steps.filter(s => s.status === 'failed');
+
+    const renderStep = s => {
       const ic = {ok:ICON.ok, failed:ICON.bad, running:ICON.run}[s.status] || ICON.wait;
       const t = s.detail ? s.label + ' — ' + s.detail : s.label;
       return '<span class="step ' + s.status + '" title="' + esc(t) + '">' + ic
         + esc(s.status === 'ok' && s.detail ? s.detail : s.label) + '</span>';
-    }).join('');
+    };
+
+    let stepsHtml = '';
+    stepsHtml += okSteps.map(renderStep).join('');
+    stepsHtml += runningSteps.map(renderStep).join('');
+
+    if(failedSteps.length > 0){
+      const isRunning = j.status === 'running';
+      // 跑完后默认优雅自动折叠隐藏爆红失败项！
+      const isFailedOpen = showAllFailed || (isRunning && failedSteps.length < 4);
+      stepsHtml += '<button class="btn-xs step failed-summary" data-togglejobfailed="' + esc(j.id) + '" title="点击展开/折叠未连通候选">'
+        + (isFailedOpen ? '▲ 收起 ' : '▼ 查看 ') + failedSteps.length + ' 个未连通候选</button>';
+      stepsHtml += '<button class="btn-xs danger" data-cleanjobfailed="' + esc(j.id) + '" title="彻底清除此任务里的爆红记录">🧹 清理爆红</button>';
+      stepsHtml += '<div class="failed-steps-wrap' + (isFailedOpen ? ' open' : '') + '" id="failed_wrap_' + esc(j.id) + '">'
+        + failedSteps.map(renderStep).join('')
+        + '</div>';
+    }
+
     const close = j.status === 'running' ? ''
       : '<button class="icon" data-job="' + esc(j.id) + '" title="关闭">' + ICON.x + '</button>';
+
     return '<div class="job"><div class="top"><strong>' + esc(j.summary) + '</strong>'
-      + '<span class="count">' + j.done + '/' + j.total + '</span>'
+      + '<span class="count">' + j.done + '/' + j.total
+      + (okSteps.length ? ' · <span style="color:var(--ok)">已成功 ' + okSteps.length + '</span>' : '')
+      + (failedSteps.length ? ' · <span style="color:var(--bad)">失败 ' + failedSteps.length + '</span>' : '')
+      + '</span>'
       + '<span class="spacer"></span>' + close + '</div>'
-      + '<div class="steps">' + steps + '</div></div>';
+      + '<div class="steps">' + stepsHtml + '</div></div>';
   }).join('');
+
+  box.innerHTML = header + items;
 }
 
 async function poll(){
@@ -780,8 +943,13 @@ document.querySelectorAll('.modal').forEach(m => {
 
 function renderRegions(){
   const kw = $('#rgfilter').value.trim().toLowerCase();
-  const list = regions.filter(r => !kw
-    || r.code.toLowerCase().includes(kw) || r.name.toLowerCase().includes(kw));
+  const list = regions.filter(r => {
+    if(!kw) return true;
+    const zh = (COUNTRY_ZH[r.code.toUpperCase()] || '').toLowerCase();
+    return r.code.toLowerCase().includes(kw)
+      || r.name.toLowerCase().includes(kw)
+      || zh.includes(kw);
+  });
 
   if(!regions.length){
     $('#regions').innerHTML = '<div style="padding:14px;background:var(--subtle);border-radius:8px;border:1px dashed var(--border);margin-top:6px">'
@@ -796,12 +964,13 @@ function renderRegions(){
   }
 
   $('#regions').innerHTML = ['<button class="rg' + (region === '' ? ' sel' : '')
-      + '" data-rg=""><b>不限地区</b><em>速度优先</em></button>']
+      + '" data-rg=""><b>🌐 不限地区</b><em>速度优先</em></button>']
     .concat(list.map(r => {
       const resHint = r.residential ? ' · 🏡 ' + r.residential + ' 住宅' : '';
       const purityHint = r.avg_purity ? ' · ' + r.avg_purity + '% 纯净' : '';
+      const title = formatCountry(r.code, r.name);
       return '<button class="rg' + (region === r.code ? ' sel' : '')
-        + '" data-rg="' + esc(r.code) + '"><b>' + esc(r.code) + ' ' + esc(r.name) + '</b>'
+        + '" data-rg="' + esc(r.code) + '"><b>' + esc(title) + '</b>'
         + '<em>' + r.available + ' 个空闲' + resHint + purityHint + '</em></button>';
     }))
     .join('');
@@ -978,6 +1147,36 @@ $('#go').onclick = async e => {
 
 // ---- 出口操作 ----
 document.addEventListener('click', async e => {
+  const clearAllJobs = e.target.closest('#clearAllDoneJobs');
+  if(clearAllJobs){
+    try{ await api('/api/jobs/clear', {method:'POST'}); toast('已清理所有任务卡片'); }catch(err){}
+    poll();
+    return;
+  }
+  const toggleAll = e.target.closest('#toggleAllFailedBtn');
+  if(toggleAll){
+    showAllFailed = !showAllFailed;
+    poll();
+    return;
+  }
+  const toggleJob = e.target.closest('[data-togglejobfailed]');
+  if(toggleJob){
+    const wrap = $('#failed_wrap_' + toggleJob.dataset.togglejobfailed);
+    if(wrap){
+      wrap.classList.toggle('open');
+      toggleJob.textContent = wrap.classList.contains('open') ? '▲ 收起候选' : '▼ 查看候选';
+    }
+    return;
+  }
+  const cleanJob = e.target.closest('[data-cleanjobfailed]');
+  if(cleanJob){
+    try{
+      await api('/api/jobs/clean_failed?id=' + encodeURIComponent(cleanJob.dataset.cleanjobfailed), {method:'POST'});
+      toast('已清理该任务中的爆红失败项');
+    }catch(err){}
+    poll();
+    return;
+  }
   const stop = e.target.closest('[data-stop]');
   if(stop){
     stop.disabled = true;
@@ -1038,6 +1237,20 @@ $('#stopall').onclick = async e => {
   poll();
 };
 
+const pruneBtn = $('#prunefailed');
+if(pruneBtn){
+  pruneBtn.onclick = async e => {
+    if(!confirm('清理所有连接失败或已断开的失效出口？')) return;
+    pruneBtn.disabled = true;
+    try{
+      const res = await api('/api/exits/prune_failed', {method:'POST'});
+      toast('已清理 ' + (res.count || 0) + ' 个失效出口');
+    }catch(err){ toast(err.message, true); }
+    poll();
+    pruneBtn.disabled = false;
+  };
+}
+
 // ---- 节点详情 ----
 let curDetail = null;
 
@@ -1061,10 +1274,14 @@ async function openDetail(id){
 // 出口下拉：列出所有已连通的隧道，外加"直连"。绑定按 Xray 的 inboundTag 走。
 function exitOptions(currentHost){
   const up = view.exits.filter(e => e.status === 'up');
-  return '<option value=""' + (currentHost ? '' : ' selected') + '>直连（不走隧道）</option>'
-    + up.map(e => '<option value="' + esc(e.host) + '"'
-        + (e.host === currentHost ? ' selected' : '') + '>'
-        + esc((e.exit_ip || e.host) + ' · ' + e.region) + '</option>').join('');
+  return '<option value=""' + (currentHost ? '' : ' selected') + '>直连（不走代理）</option>'
+    + up.map(e => {
+        const flag = getFlagEmoji(e.region || e.country_code);
+        const name = flag + ' ' + (e.exit_ip || e.host) + (e.region ? ' · ' + e.region : '');
+        return '<option value="' + esc(e.host) + '"'
+          + (e.host === currentHost ? ' selected' : '') + '>'
+          + esc(name) + '</option>';
+      }).join('');
 }
 
 function renderDetail(d){
@@ -1112,17 +1329,18 @@ function renderDetail(d){
     : '<div class="hint">这个节点由 xray-cf-lite 管，端口、UUID 和分享链接都去它那边改。这里只决定它走哪条出口。</div>');
 }
 
-// 未绑定区的出口下拉，选中即绑
+// 出口下拉改动即生效（支持自由切换任意出口或恢复直连）
 document.addEventListener('change', async e => {
   const sel = e.target.closest('.obind');
-  if(!sel || !sel.value) return;
+  if(!sel) return;
   sel.disabled = true;
   try{
     await api('/api/xui/bind?tag=' + encodeURIComponent(sel.dataset.tag)
       + '&host=' + encodeURIComponent(sel.value), {method:'POST'});
-    toast('已绑定');
+    toast(sel.value ? '已切换至指定出口' : '已恢复直连');
     poll();
-  }catch(err){ toast(err.message, true); sel.disabled = false; }
+  }catch(err){ toast(err.message, true); }
+  sel.disabled = false;
 });
 
 // 出口下拉改动即生效。绑定按 inboundTag 走，host 传空表示解绑回直连。
@@ -1139,7 +1357,37 @@ document.addEventListener('change', async e => {
   sel.disabled = false;
 });
 
+async function openSubModal(){
+  const host = location.hostname;
+  const port = location.port ? ':' + location.port : '';
+  const proto = location.protocol;
+  let token = '';
+  try {
+    const tokenRes = await api('/api/cred/token');
+    if (tokenRes && tokenRes.token) token = tokenRes.token;
+  } catch(e) {}
+
+  const tokenQuery = token ? '?token=' + encodeURIComponent(token) : '';
+  const subBase = proto + '//' + host + port + '/sub' + tokenQuery;
+  const clashSep = tokenQuery ? '&format=clash' : '?format=clash';
+  const subClash = proto + '//' + host + port + '/sub' + tokenQuery + clashSep;
+
+  $('#subUrlBase64').value = subBase;
+  $('#subUrlClash').value = subClash;
+  $('#copySubBase64').onclick = () => copy(subBase);
+  $('#copySubClash').onclick = () => copy(subClash);
+  $('#importClashBtn').onclick = () => {
+    window.location.href = 'clash://install-config?url=' + encodeURIComponent(subClash) + '&name=fanout';
+  };
+  openModal('submodal');
+}
+
 document.addEventListener('click', async e => {
+  if(e.target.closest('#subBtn')){
+    openSubModal();
+    return;
+  }
+
   const link = e.target.closest('[data-detail]');
   if(link) return openDetail(link.dataset.detail);
 
@@ -1536,6 +1784,38 @@ document.addEventListener('click', async e => {
   }
   if(e.target.closest('#scanLocalOvpn')){
     await scanCustomOvpn(e.target.closest('#scanLocalOvpn'));
+    return;
+  }
+  if(e.target.closest('#doImportNodes')){
+    const btn = e.target.closest('#doImportNodes');
+    const text = ($('#importNodesText').value || '').trim();
+    if(!text){
+      toast('请先粘贴节点 CSV、.ovpn 块或 IP 列表', true);
+      return;
+    }
+    btn.disabled = true;
+    try{
+      const res = await api('/api/sources/import', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({text: text}),
+      });
+      toast('成功导入并去重 ' + (res.added || 0) + ' 个节点，当前节点池共 ' + (res.total || 0) + ' 节点');
+      const rEl = $('#importResult');
+      if(rEl){
+        rEl.textContent = '✔ 成功导入 ' + res.added + ' 个节点，节点池总计 ' + res.total + ' 节点';
+        rEl.hidden = false;
+      }
+      $('#importNodesText').value = '';
+      await loadSources();
+      regions = await api('/api/regions') || [];
+      renderRegions();
+      poll();
+    }catch(err){
+      toast('导入失败: ' + err.message, true);
+    }finally{
+      btn.disabled = false;
+    }
     return;
   }
   if(e.target.closest('#saveCustomSrc')){

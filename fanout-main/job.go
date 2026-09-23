@@ -135,3 +135,36 @@ func (s *JobStore) Dismiss(id string) {
 	}
 	s.jobs = kept
 }
+
+// DismissAll 丢弃所有作业或已完成作业
+func (s *JobStore) DismissAll() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	kept := s.jobs[:0]
+	for _, j := range s.jobs {
+		if j.status == "running" {
+			kept = append(kept, j)
+		}
+	}
+	s.jobs = kept
+}
+
+// ClearFailedSteps 清除指定作业（或全部作业）中的爆红/失败步骤
+func (s *JobStore) ClearFailedSteps(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, j := range s.jobs {
+		if id == "" || j.id == id {
+			j.mu.Lock()
+			kept := j.steps[:0]
+			for _, st := range j.steps {
+				if st.Status != "failed" {
+					kept = append(kept, st)
+				}
+			}
+			j.steps = kept
+			j.mu.Unlock()
+		}
+	}
+}
+
