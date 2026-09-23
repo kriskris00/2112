@@ -17,7 +17,7 @@ import (
 )
 
 // version 由构建时通过 -ldflags 注入。
-var version = "v0.3.0-enhanced"
+var version = "v0.3.1-enhanced"
 
 func main() {
 	var (
@@ -767,21 +767,21 @@ func apiXUIDetail(mgr *Manager) http.HandlerFunc {
 		if detail != nil && len(detail.Links) > 0 {
 			tunnels := mgr.Tunnels()
 			var matchedTunnel *Tunnel
-			for _, t := range tunnels {
-				if t.Status == "up" {
-					if t.Node.HostName == detail.BoundTo || sanitizeTag(t.Node.HostName) == detail.BoundTo || t.Node.IP == detail.BoundTo {
-						matchedTunnel = t
-						break
-					}
-					sTag := sanitizeTag(t.Node.HostName)
-					if strings.Contains(detail.BoundTo, sTag) || strings.Contains(sTag, detail.BoundTo) {
-						matchedTunnel = t
-						break
+			bTo := strings.TrimSpace(detail.BoundTo)
+			if bTo != "" && !strings.EqualFold(bTo, "direct") && !strings.EqualFold(bTo, "none") {
+				for _, t := range tunnels {
+					if t.Status == "up" {
+						if t.Node.HostName == bTo || sanitizeTag(t.Node.HostName) == bTo || t.Node.IP == bTo || t.ExitIP == bTo || fmt.Sprintf("exit-%d", t.Slot) == bTo {
+							matchedTunnel = t
+							break
+						}
+						sTag := sanitizeTag(t.Node.HostName)
+						if len(sTag) >= 3 && (strings.Contains(bTo, sTag) || strings.Contains(sTag, bTo)) {
+							matchedTunnel = t
+							break
+						}
 					}
 				}
-			}
-			if matchedTunnel == nil && len(tunnels) == 1 && tunnels[0].Status == "up" {
-				matchedTunnel = tunnels[0]
 			}
 			if matchedTunnel != nil {
 				cleanName := formatProxyName(matchedTunnel.Node.CountryCode, matchedTunnel.Node.Country, matchedTunnel.Node.ISP, fmt.Sprintf("%s :%d", strings.ToUpper(detail.Protocol), detail.Port))

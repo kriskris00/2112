@@ -70,7 +70,7 @@ var ibCache inboundCache
 func cachedInbounds(live map[string]bool) ([]Inbound, error) {
 	ibCache.mu.Lock()
 	defer ibCache.mu.Unlock()
-	if time.Since(ibCache.at) < inboundCacheTTL {
+	if time.Since(ibCache.at) < inboundCacheTTL && len(ibCache.list) > 0 && ibCache.err == nil {
 		return ibCache.list, ibCache.err
 	}
 
@@ -78,6 +78,10 @@ func cachedInbounds(live map[string]bool) ([]Inbound, error) {
 	x, err := openPanel()
 	if err == nil {
 		list, err = x.Inbounds(live)
+	}
+	if err != nil && len(ibCache.list) > 0 {
+		// 面板调用发生瞬时错误时，优先复用上一次成功的入站缓存，防止界面闪烁或清空入站
+		return ibCache.list, nil
 	}
 	ibCache.at, ibCache.list, ibCache.err = time.Now(), list, err
 	return list, err
@@ -118,7 +122,8 @@ func (m *Manager) ExitsOf() ExitsView {
 		if t.Node.IP != "" {
 			byHost[t.Node.IP] = i
 		}
-		byHost[fmt.Sprintf("%d", t.Slot)] = i
+		byHost[fmt.Sprintf("exit-%d", t.Slot)] = i
+		byHost[fmt.Sprintf("slot-%d", t.Slot)] = i
 		cred := t.credential()
 		intel := GetIPIntel(t.ExitIP)
 		if (intel.IPType == "" || intel.IPType == "hosting" && intel.ISP == "Unknown") && t.Node.IP != "" {
@@ -152,7 +157,9 @@ func (m *Manager) ExitsOf() ExitsView {
 	list, err := cachedInbounds(live)
 	if err != nil {
 		view.Panel = err.Error()
-		return view
+		if len(list) == 0 {
+			return view
+		}
 	}
 
 	for _, ib := range list {
@@ -161,23 +168,35 @@ func (m *Manager) ExitsOf() ExitsView {
 			Protocol: ib.Protocol, Enable: ib.Enable, Tag: ib.Tag,
 		}
 		matchedIdx := -1
-		if ib.BoundTo != "" {
-			if idx, ok := byHost[ib.BoundTo]; ok {
+		bTo := strings.TrimSpace(ib.BoundTo)
+		// 只有真正绑定了有效出口目标的入站才做匹配；未绑定的直连入站绝不乱挂
+		if bTo != "" && !strings.EqualFold(bTo, "direct") && !strings.EqualFold(bTo, "none") {
+			// 1. 精确哈希匹配 O(1)
+			if idx, ok := byHost[bTo]; ok {
 				matchedIdx = idx
-			} else if idx, ok := byHost[sanitizeTag(ib.BoundTo)]; ok {
+			} else if idx, ok := byHost[sanitizeTag(bTo)]; ok {
 				matchedIdx = idx
 			} else {
-				for h, idx := range byHost {
-					if strings.Contains(ib.BoundTo, h) || strings.Contains(h, ib.BoundTo) {
-						matchedIdx = idx
+				// 2. 严格按隧道列表固定顺序进行确定性特征匹配（杜绝 map 随机迭代乱跳）
+				sBTo := sanitizeTag(bTo)
+				for i, t := range tunnels {
+					sTag := sanitizeTag(t.Node.HostName)
+					if len(sTag) >= 3 && (strings.Contains(sBTo, sTag) || strings.Contains(sTag, sBTo)) {
+						matchedIdx = i
+						break
+					}
+					if t.Node.IP != "" && strings.Contains(bTo, t.Node.IP) {
+						matchedIdx = i
+						break
+					}
+					if t.ExitIP != "" && strings.Contains(bTo, t.ExitIP) {
+						matchedIdx = i
 						break
 					}
 				}
 			}
 		}
-		if matchedIdx == -1 && len(view.Exits) == 1 {
-			matchedIdx = 0
-		}
+
 		if matchedIdx >= 0 && matchedIdx < len(view.Exits) {
 			view.Exits[matchedIdx].Inbounds = append(view.Exits[matchedIdx].Inbounds, row)
 			continue

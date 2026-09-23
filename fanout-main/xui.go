@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -27,15 +28,21 @@ type XUI struct {
 	Port     int    `json:"port"`
 	BasePath string `json:"base_path"`
 	Scheme   string `json:"scheme"`
+	apiHost  string // 母机内部 API 始终走 127.0.0.1 本地回环
 	token    string
 	client   *http.Client
 	// workDir 是 fanout 的工作目录，新建 TLS 入站时自签证书落在这里。
 	workDir string
 }
 
-// base 返回访问面板用的前缀。
+// base 返回访问面板 API 的本地基准前缀。
+// 必须始终走 127.0.0.1 本地回环，彻底杜绝公网发包/NAT回流(Hairpin)超时与防火墙拦截。
 func (x *XUI) base() string {
-	return fmt.Sprintf("%s://%s:%d%s", x.Scheme, x.Host, x.Port, x.BasePath)
+	targetHost := "127.0.0.1"
+	if x.apiHost != "" {
+		targetHost = x.apiHost
+	}
+	return fmt.Sprintf("%s://%s:%d%s", x.Scheme, targetHost, x.Port, x.BasePath)
 }
 
 func (x *XUI) Kind() string { return "3x-ui" }
@@ -166,6 +173,7 @@ func DetectXUI(workDir string) (*XUI, error) {
 			Port:     port,
 			BasePath: strings.TrimSuffix(bm[1], "/"),
 			Scheme:   scheme,
+			apiHost:  "127.0.0.1",
 			token:    token,
 			client:   localClient(),
 			workDir:  workDir,
@@ -237,11 +245,77 @@ func saveToken(workDir, token string) {
 // 没有中间人风险，所以跳过证书校验。
 func localClient() *http.Client {
 	return &http.Client{
-		Timeout: 20 * time.Second,
+		Timeout: 6 * time.Second,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //#nosec G402 -- 仅用于 127.0.0.1
+			DialContext: (&net.Dialer{
+				Timeout:   2 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			ForceAttemptHTTP2: false,
+			MaxIdleConns:      10,
+			IdleConnTimeout:   30 * time.Second,
 		},
 	}
+}
+
+// doRequest 执行对 3x-ui API 的 HTTP 调用，具备自动协议自愈、回退及 Token 刷新能力。
+func (x *XUI) doRequest(req *http.Request) (*http.Response, error) {
+	req.Header.Set("Authorization", "Bearer "+x.token)
+
+	resp, err := x.client.Do(req)
+	// 1. 如果 HTTPS 连到了 HTTP 服务 (server gave HTTP response to HTTPS client)，自愈切为 http
+	if err != nil && strings.Contains(err.Error(), "server gave HTTP response to HTTPS client") {
+		x.Scheme = "http"
+		req.URL.Scheme = "http"
+		resp, err = x.client.Do(req)
+	}
+	// 2. 如果 HTTP 连到了 HTTPS 服务，自愈切为 https
+	if err != nil && (strings.Contains(err.Error(), "malformed HTTP response") || strings.Contains(err.Error(), "first record does not look like a TLS handshake")) {
+		x.Scheme = "https"
+		req.URL.Scheme = "https"
+		resp, err = x.client.Do(req)
+	}
+	// 3. 如果 127.0.0.1 被拒且存在外部主机名，回退使用 x.Host
+	if err != nil && strings.Contains(err.Error(), "connection refused") && x.apiHost != x.Host && x.Host != "" && x.Host != "127.0.0.1" {
+		x.apiHost = x.Host
+		req.URL.Host = fmt.Sprintf("%s:%d", x.Host, x.Port)
+		resp, err = x.client.Do(req)
+	}
+
+	// 4. 如果遇到 401/403，说明 token 失效，自动从面板刷新一次
+	if err == nil && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
+		resp.Body.Close()
+		newToken := x.refreshToken()
+		if newToken != "" && newToken != x.token {
+			x.token = newToken
+			req.Header.Set("Authorization", "Bearer "+x.token)
+			resp, err = x.client.Do(req)
+		}
+	}
+
+	return resp, err
+}
+
+func (x *XUI) refreshToken() string {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	tokOut, err := exec.CommandContext(ctx, xuiBinary, "setting", "-getApiToken").Output()
+	if err != nil {
+		return ""
+	}
+	tm := reXUIToken.FindStringSubmatch(string(tokOut))
+	if tm == nil {
+		return ""
+	}
+	token := tm[1]
+	cachedTokenMu.Lock()
+	cachedToken = token
+	cachedTokenMu.Unlock()
+	if x.workDir != "" {
+		saveToken(x.workDir, token)
+	}
+	return token
 }
 
 // post 调用面板 API。v3.5.0 里 Bearer token 只对 /panel/api/ 前缀生效。
@@ -265,12 +339,11 @@ func (x *XUI) call(method, path string, form url.Values) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+x.token)
 	if form != nil {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	}
 
-	resp, err := x.client.Do(req)
+	resp, err := x.doRequest(req)
 	if err != nil {
 		return nil, fmt.Errorf("调用 %s 失败: %w", path, err)
 	}
@@ -925,10 +998,9 @@ func (x *XUI) addInbound(payload map[string]any) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	req.Header.Set("Authorization", "Bearer "+x.token)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := x.client.Do(req)
+	resp, err := x.doRequest(req)
 	if err != nil {
 		return 0, err
 	}
@@ -1029,10 +1101,9 @@ func (x *XUI) jsonRequest(method, endpoint string, body []byte) ([]byte, error) 
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+x.token)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := x.client.Do(req)
+	resp, err := x.doRequest(req)
 	if err != nil {
 		return nil, err
 	}
@@ -1363,7 +1434,7 @@ func (x *XUI) Rebind(oldHost string, target *Tunnel, tunnels []*Tunnel) error {
 	oldTag := sanitizeTag(oldHost)
 	newLabel := exitLabel(target)
 	for _, ib := range list {
-		if ib.BoundTo != oldTag {
+		if ib.BoundTo != oldTag && ib.BoundTo != oldHost {
 			continue
 		}
 		if err := x.Bind(ib.Tag, target.Node.HostName, tunnels); err != nil {
@@ -1409,10 +1480,9 @@ func (x *XUI) postJSON(path string, payload any, what string) error {
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", "Bearer "+x.token)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := x.client.Do(req)
+	resp, err := x.doRequest(req)
 	if err != nil {
 		return err
 	}

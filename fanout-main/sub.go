@@ -87,15 +87,13 @@ func apiSubscription(m *Manager, a *Auth) http.HandlerFunc {
 					boundTunnel[t.Node.IP] = t
 				}
 				boundTunnel[fmt.Sprintf("exit-%d", t.Slot)] = t
-				boundTunnel[fmt.Sprintf("%d", t.Slot)] = t
+				boundTunnel[fmt.Sprintf("slot-%d", t.Slot)] = t
 			}
 		}
 
 		findTunnel := func(boundTo string) *Tunnel {
-			if boundTo == "" {
-				if len(upTunnels) == 1 {
-					return upTunnels[0]
-				}
+			boundTo = strings.TrimSpace(boundTo)
+			if boundTo == "" || strings.EqualFold(boundTo, "direct") || strings.EqualFold(boundTo, "none") {
 				return nil
 			}
 			if t, ok := boundTunnel[boundTo]; ok && t != nil {
@@ -107,15 +105,12 @@ func apiSubscription(m *Manager, a *Auth) http.HandlerFunc {
 			}
 			for _, t := range upTunnels {
 				s := sanitizeTag(t.Node.HostName)
-				if strings.Contains(boundTo, s) || strings.Contains(s, boundTo) {
+				if len(s) >= 3 && (strings.Contains(boundTo, s) || strings.Contains(s, boundTo)) {
 					return t
 				}
 				if t.Node.IP != "" && strings.Contains(boundTo, t.Node.IP) {
 					return t
 				}
-			}
-			if len(upTunnels) == 1 {
-				return upTunnels[0]
 			}
 			return nil
 		}
