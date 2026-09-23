@@ -236,7 +236,22 @@ func socksReplyWith(c net.Conn, code byte, ip net.IP, port int) error {
 
 func relay(a, b net.Conn) {
 	done := make(chan struct{}, 2)
-	go func() { io.Copy(a, b); done <- struct{}{} }()
-	go func() { io.Copy(b, a); done <- struct{}{} }()
+	go func() {
+		_, _ = io.Copy(a, b)
+		if tc, ok := a.(*net.TCPConn); ok {
+			_ = tc.CloseWrite()
+		}
+		done <- struct{}{}
+	}()
+	go func() {
+		_, _ = io.Copy(b, a)
+		if tc, ok := b.(*net.TCPConn); ok {
+			_ = tc.CloseWrite()
+		}
+		done <- struct{}{}
+	}()
+	<-done
+	_ = a.SetDeadline(time.Now().Add(5 * time.Second))
+	_ = b.SetDeadline(time.Now().Add(5 * time.Second))
 	<-done
 }

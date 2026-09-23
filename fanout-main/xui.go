@@ -663,6 +663,7 @@ func (x *XUI) Bind(inboundTag string, hostname string, tunnels []*Tunnel) error 
 			"type":        "field",
 			"inboundTag":  dedupTags,
 			"outboundTag": tunnelTag(target),
+			"network":     "tcp,udp",
 		}
 		cleaned = append([]any{newRule}, cleaned...)
 	}

@@ -106,6 +106,7 @@ func buildXrayConfig(inbounds []*nativeInbound, tunnels []*Tunnel) map[string]an
 			"type":        "field",
 			"inboundTag":  []any{ib.tag()},
 			"outboundTag": xuiTagPrefix + ib.BoundTo,
+			"network":     "tcp,udp",
 		})
 	}
 

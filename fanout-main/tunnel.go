@@ -106,6 +106,9 @@ func (t *Tunnel) setupNetns() error {
 	ensureRule("nat", "POSTROUTING", "-s", cidr, "-j", "MASQUERADE")
 	ensureRuleInsert("filter", "FORWARD", "-s", cidr, "-j", "ACCEPT")
 	ensureRuleInsert("filter", "FORWARD", "-d", cidr, "-j", "ACCEPT")
+	ensureRule("mangle", "FORWARD", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu")
+	runQuiet("ip", "netns", "exec", ns, "iptables", "-t", "mangle", "-A", "OUTPUT", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu")
+	runQuiet("ip", "netns", "exec", ns, "iptables", "-t", "mangle", "-A", "FORWARD", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu")
 	return nil
 }
 
@@ -158,9 +161,11 @@ func (t *Tunnel) startOpenVPN(dir string) error {
 		"--auth-user-pass", authPath,
 		"--auth-nocache",
 		"--dev", "tun0",
+		"--redirect-gateway", "def1",
 		"--connect-retry-max", "2",
 		"--connect-timeout", "20",
-		"--data-ciphers", "AES-128-CBC:AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305",
+		"--data-ciphers", "AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305:AES-256-CBC:AES-128-CBC:BF-CBC",
+		"--data-ciphers-fallback", "AES-128-CBC",
 		"--verb", "3",
 		"--log", logPath,
 	)
@@ -248,49 +253,89 @@ func (t *Tunnel) setCredential(c SocksCred) {
 	t.Cred = c
 }
 
-// probeExitIP 通过隧道查询出口 IP，用于确认这条隧道确实换了 IP。
+// probeExitIP 通过隧道真实发起 HTTP 请求检测公网连通性并提取出口 IP。
+// 必须确保真正能出网才返回成功，探测失败时报错以触发管理器切换下一个候选节点。
 func (t *Tunnel) probeExitIP() (string, error) {
 	if t.dialer != nil {
 		client := &http.Client{
 			Transport: &http.Transport{
 				Dial: t.dialer,
 			},
-			Timeout: 8 * time.Second,
+			Timeout: 6 * time.Second,
 		}
-		resp, err := client.Get("http://api.ipify.org")
+
+		// 1. 直连 IP 接口（免 DNS 解析，快速验证隧道 TCP 转发）
+		resp, err := client.Get("http://1.1.1.1/cdn-cgi/trace")
 		if err == nil && resp.StatusCode == http.StatusOK {
 			body, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
-			ip := strings.TrimSpace(string(body))
-			if net.ParseIP(ip) != nil {
-				return ip, nil
+			for _, line := range strings.Split(string(body), "\n") {
+				if strings.HasPrefix(line, "ip=") {
+					ip := strings.TrimSpace(strings.TrimPrefix(line, "ip="))
+					if net.ParseIP(ip) != nil {
+						return ip, nil
+					}
+				}
 			}
 		}
 		if resp != nil {
 			resp.Body.Close()
 		}
-		if t.Node.IP != "" {
-			return t.Node.IP, nil
+
+		// 2. 备用接口：ip-api.com
+		resp2, err2 := client.Get("http://ip-api.com/line/?fields=query")
+		if err2 == nil && resp2.StatusCode == http.StatusOK {
+			body, _ := io.ReadAll(resp2.Body)
+			resp2.Body.Close()
+			ip := strings.TrimSpace(string(body))
+			if net.ParseIP(ip) != nil {
+				return ip, nil
+			}
 		}
-		return "", fmt.Errorf("探测出口 IP 失败: %v", err)
+		if resp2 != nil {
+			resp2.Body.Close()
+		}
+
+		// 3. 备用接口：api.ipify.org
+		resp3, err3 := client.Get("http://api.ipify.org")
+		if err3 == nil && resp3.StatusCode == http.StatusOK {
+			body, _ := io.ReadAll(resp3.Body)
+			resp3.Body.Close()
+			ip := strings.TrimSpace(string(body))
+			if net.ParseIP(ip) != nil {
+				return ip, nil
+			}
+		}
+		if resp3 != nil {
+			resp3.Body.Close()
+		}
+
+		return "", fmt.Errorf("隧道连通测试失败（未收到公网响应）: %v", err)
 	}
 
 	out, err := exec.Command("ip", "netns", "exec", t.nsName(),
-		"curl", "-s", "--max-time", "15", "http://api.ipify.org").Output()
-	if err != nil {
-		if t.Node.IP != "" {
-			return t.Node.IP, nil
+		"curl", "-s", "--max-time", "8", "http://1.1.1.1/cdn-cgi/trace").Output()
+	if err == nil {
+		for _, line := range strings.Split(string(out), "\n") {
+			if strings.HasPrefix(line, "ip=") {
+				ip := strings.TrimSpace(strings.TrimPrefix(line, "ip="))
+				if net.ParseIP(ip) != nil {
+					return ip, nil
+				}
+			}
 		}
-		return "", fmt.Errorf("查询出口 IP 失败: %w", err)
 	}
-	ip := strings.TrimSpace(string(out))
-	if net.ParseIP(ip) == nil {
-		if t.Node.IP != "" {
-			return t.Node.IP, nil
+
+	out2, err2 := exec.Command("ip", "netns", "exec", t.nsName(),
+		"curl", "-s", "--max-time", "8", "http://api.ipify.org").Output()
+	if err2 == nil {
+		ip := strings.TrimSpace(string(out2))
+		if net.ParseIP(ip) != nil {
+			return ip, nil
 		}
-		return "", fmt.Errorf("出口 IP 返回异常: %q", ip)
 	}
-	return ip, nil
+
+	return "", fmt.Errorf("查询出口 IP 失败: %v", err)
 }
 
 // stop 停止这条隧道并清理它占用的所有资源。

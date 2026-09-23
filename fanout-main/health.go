@@ -9,9 +9,9 @@ import (
 )
 
 const (
-	healthInterval = 10 * time.Second
-	healthFailures = 2 // 连续失败几次才判定掉线，避免网络抖动误杀
-	healthTimeout  = 6 * time.Second
+	healthInterval = 30 * time.Second
+	healthFailures = 4 // 连续失败 4 次才判定掉线，容忍偶发抖动
+	healthTimeout  = 8 * time.Second
 )
 
 // WatchHealth 周期检查每条隧道是否还能出网，掉线的自动换节点重连。
@@ -48,18 +48,32 @@ func (m *Manager) WatchHealth() {
 // openvpn 死掉后照样能出网，只是出口变回了母机 IP。
 // 所以要比对出口 IP 是否仍是建立隧道时拿到的那个。
 func (m *Manager) tunnelHealthy(t *Tunnel) bool {
+	// 1. 直连 IP 探测（无需域名解析，抗限流）
 	out, err := exec.Command("ip", "netns", "exec", t.nsName(),
 		"curl", "-s", "--max-time", strconv.Itoa(int(healthTimeout.Seconds())),
+		"http://1.1.1.1/cdn-cgi/trace").Output()
+	if err == nil {
+		for _, line := range strings.Split(string(out), "\n") {
+			if strings.HasPrefix(line, "ip=") {
+				got := strings.TrimSpace(strings.TrimPrefix(line, "ip="))
+				if got != "" {
+					return got == t.ExitIP
+				}
+			}
+		}
+	}
+
+	// 2. 备用通过 ipify 探测
+	out2, err2 := exec.Command("ip", "netns", "exec", t.nsName(),
+		"curl", "-s", "--max-time", strconv.Itoa(int(healthTimeout.Seconds())),
 		"http://api.ipify.org").Output()
-	if err != nil {
-		return false
+	if err2 == nil {
+		got := strings.TrimSpace(string(out2))
+		if got != "" {
+			return got == t.ExitIP
+		}
 	}
-	got := strings.TrimSpace(string(out))
-	if got == "" {
-		return false
-	}
-	// 出口 IP 变了说明 VPN 已经断开，流量退回了母机
-	return got == t.ExitIP
+	return false
 }
 
 // reconnect 就地把一条隧道换到别的节点上，保持槽位与端口不变，

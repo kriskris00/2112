@@ -1695,7 +1695,7 @@ $('#settingsBtn').onclick = async () => {
     $('#updCheck').textContent = '检查更新';
   }).catch(err => {
     $('#setPathHint').textContent = '界面挂在当前路径下。' + (err.message ? '提示: ' + err.message : '');
-    $('#updCur').textContent = 'v0.2.5-enhanced';
+    $('#updCur').textContent = 'v0.2.6-enhanced';
     $('#updCheck').disabled = false;
   });
 
