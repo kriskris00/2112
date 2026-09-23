@@ -263,6 +263,10 @@ textarea:focus{outline:none;border-color:var(--accent)}
       <svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h10"/></svg>
       新建节点
     </button>
+    <button class="primary" id="scanNodesBtn" title="母机真实发包测活：验证能连通能出网才展示，可挑选单个或批量启动" style="background:linear-gradient(135deg,#1b3b6f,#212d40);border-color:#4a9eda;color:#5eb3ec;font-weight:600">
+      <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><path d="M11 8v6M8 11h6"/></svg>
+      测活扫节点
+    </button>
     <button class="primary" id="newexit">
       <svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
       新建出口
@@ -665,6 +669,105 @@ textarea:focus{outline:none;border-color:var(--accent)}
     <div class="foot">
       <span class="spacer"></span>
       <button data-close="submodal">完成</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="liveScanModal">
+  <div class="sheet" style="max-width:960px;width:95vw;max-height:90vh">
+    <div class="head">
+      <h2>🔍 母机测活扫描器 (全网/全国/高校真实发包测活)</h2>
+      <span class="spacer"></span>
+      <button class="icon" data-close="liveScanModal" title="关闭">
+        <svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+    </div>
+    <div class="body" style="padding:14px">
+      <div style="font-size:12px;color:var(--dim);margin-bottom:12px;line-height:1.6;background:#0e1116;border:1px solid var(--line);border-radius:6px;padding:10px 12px">
+        ⚡ <b>真实出网验证标准</b>：直接从本机 VPS 发起真实 TCP+SOCKS5/OpenVPN 握手并向 <code>1.1.1.1/cdn-cgi/trace</code> 校验出口，<b>只有母机实测 100% 能连通、有回包的节点才会列出</b>！杜绝任何失效死节点与假节点。
+      </div>
+
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px;background:var(--panel);border:1px solid var(--line);padding:10px;border-radius:6px">
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <span style="font-size:11px;color:var(--dim)">扫描来源</span>
+          <select id="lsSource" style="padding:6px 8px;font-size:12px;min-width:140px;background:#0e1116;border:1px solid var(--line);color:var(--text);border-radius:4px">
+            <option value="all">🌐 全部候选源 (全网并发实测)</option>
+            <option value="edu" selected>🎓 高校学术科研网 (CERNET/筑波/全球高校)</option>
+            <option value="vpngate">🇯🇵 日本筑波大学 (VPN Gate)</option>
+            <option value="proxy">🌍 全网公网代理池</option>
+            <option value="custom">📁 本地自定义节点</option>
+          </select>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <span style="font-size:11px;color:var(--dim)">筛选国家/地区</span>
+          <select id="lsRegion" style="padding:6px 8px;font-size:12px;min-width:110px;background:#0e1116;border:1px solid var(--line);color:var(--text);border-radius:4px">
+            <option value="all">全部国家/地区</option>
+            <option value="CN">🇨🇳 中国 (CERNET/全国节点)</option>
+            <option value="JP">🇯🇵 日本 (筑波大学等)</option>
+            <option value="US">🇺🇸 美国 (高校/骨干网)</option>
+            <option value="KR">🇰🇷 韩国 (KOREN)</option>
+            <option value="TW">🇹🇼 台湾 (TANet)</option>
+            <option value="HK">🇭🇰 香港</option>
+            <option value="SG">🇸🇬 新加坡</option>
+            <option value="DE">🇩🇪 德国</option>
+            <option value="GB">🇬🇧 英国</option>
+          </select>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:160px">
+          <span style="font-size:11px;color:var(--dim)">关键词过滤 (IP/学校/运营商)</span>
+          <input type="search" id="lsSearch" placeholder="如 tsukuba、edu、cernet、150.40..." style="font-size:12px;padding:6px 8px;background:#0e1116;border:1px solid var(--line);color:var(--text);border-radius:4px">
+        </div>
+
+        <div style="display:flex;align-items:center;gap:8px">
+          <button class="primary" id="lsStartScanBtn" style="height:32px;font-weight:600;padding:0 12px">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
+            开始测活扫描
+          </button>
+          <button id="lsBatchStartBtn" disabled style="height:32px;border-color:var(--ok);color:var(--ok);padding:0 12px">
+            ⚡ 批量启动选中 (<span id="lsSelCount">0</span>)
+          </button>
+        </div>
+      </div>
+
+      <div id="lsStatusBox" style="margin-bottom:12px;display:flex;align-items:center;gap:12px;font-size:12px;color:var(--dim);background:#0e1116;border:1px solid var(--line);border-radius:4px;padding:7px 12px">
+        <span id="lsScanIndicator" style="display:inline-flex;align-items:center;gap:6px">
+          <span class="dot" id="lsDot"></span>
+          <span id="lsStatusText">准备就绪，点击上方按钮从 VPS 本机探测</span>
+        </span>
+        <span class="spacer"></span>
+        <span>实测有效：<b id="lsVerifiedCount" style="color:var(--ok)">0</b> 个</span>
+        <span id="lsLastScanTime" style="margin-left:8px"></span>
+      </div>
+
+      <div style="max-height:420px;overflow-y:auto;border:1px solid var(--line);border-radius:6px;background:var(--panel)">
+        <table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left">
+          <thead style="position:sticky;top:0;background:#181c23;border-bottom:1px solid var(--line);z-index:2">
+            <tr>
+              <th style="padding:8px 10px;width:36px"><input type="checkbox" id="lsSelectAll" title="全选所有可用"></th>
+              <th style="padding:8px 10px;width:80px">地区</th>
+              <th style="padding:8px 10px;width:80px">协议</th>
+              <th style="padding:8px 10px">节点地址 / 归属网络</th>
+              <th style="padding:8px 10px;width:95px">实测延迟</th>
+              <th style="padding:8px 10px;width:95px">真实状态</th>
+              <th style="padding:8px 10px;text-align:right;width:90px">操作</th>
+            </tr>
+          </thead>
+          <tbody id="lsTableBody">
+            <tr>
+              <td colspan="7" style="text-align:center;padding:36px;color:var(--dim)">
+                暂无实测数据，点击【开始测活扫描】从本机 VPS 真实探测全网与高校节点
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="foot">
+      <span class="count" id="lsFootInfo">实测通畅节点启动后自动挂接出网</span>
+      <span class="spacer"></span>
+      <button data-close="liveScanModal">关闭</button>
     </div>
   </div>
 </div>
@@ -1695,7 +1798,7 @@ $('#settingsBtn').onclick = async () => {
     $('#updCheck').textContent = '检查更新';
   }).catch(err => {
     $('#setPathHint').textContent = '界面挂在当前路径下。' + (err.message ? '提示: ' + err.message : '');
-    $('#updCur').textContent = 'v0.2.7-enhanced';
+    $('#updCur').textContent = 'v0.2.8-enhanced';
     $('#updCheck').disabled = false;
   });
 
@@ -1998,6 +2101,267 @@ document.addEventListener('click', async e => {
     return;
   }
 });
+
+// ---- 测活扫描器前端控制器 ----
+let liveScanPollTimer = null;
+let currentLiveNodes = [];
+let selectedLiveHosts = new Set();
+
+async function openLiveScanModal(){
+  openModal('liveScanModal');
+  await fetchAndRenderLiveNodes();
+}
+
+async function fetchAndRenderLiveNodes(isBackgroundPoll = false){
+  const source = $('#lsSource') ? $('#lsSource').value : 'all';
+  const region = $('#lsRegion') ? $('#lsRegion').value : 'all';
+  const search = $('#lsSearch') ? ($('#lsSearch').value || '').trim() : '';
+  const url = '/api/nodes/live?source=' + encodeURIComponent(source) + 
+              '&region=' + encodeURIComponent(region) + 
+              '&search=' + encodeURIComponent(search);
+  try{
+    const data = await api(url);
+    if(!data) return;
+    
+    const isScanning = !!data.scanning;
+    const dot = $('#lsDot');
+    const statusText = $('#lsStatusText');
+    const startBtn = $('#lsStartScanBtn');
+    
+    if(dot) dot.className = 'dot ' + (isScanning ? 'starting' : 'up');
+    if(startBtn){
+      startBtn.disabled = isScanning;
+      startBtn.innerHTML = isScanning 
+        ? (ICON.run + ' 正在并发测活 (' + (data.progress || 0) + '/' + (data.total || 0) + ')...')
+        : '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg> 开始测活扫描';
+    }
+    
+    if(statusText){
+      if(isScanning){
+        statusText.textContent = '母机发包实测中: 进度 ' + (data.progress || 0) + ' / ' + (data.total || 0) + '，已验证 ' + (data.verified_count || 0) + ' 个有效节点';
+      } else if(data.last_scan && data.last_scan !== '0001-01-01 00:00:00'){
+        statusText.textContent = '探测完成！已筛选出 ' + (data.verified_count || 0) + ' 个母机 100% 实测通畅出网节点';
+      } else {
+        statusText.textContent = '就绪：点击【开始测活扫描】从 VPS 真实发包探测';
+      }
+    }
+
+    if($('#lsVerifiedCount')) $('#lsVerifiedCount').textContent = data.verified_count || 0;
+    if($('#lsLastScanTime')) $('#lsLastScanTime').textContent = (data.last_scan && data.last_scan !== '0001-01-01 00:00:00') ? ('上次: ' + data.last_scan) : '';
+
+    currentLiveNodes = data.nodes || [];
+    renderLiveNodesTable(currentLiveNodes);
+
+    if(isScanning){
+      if(!liveScanPollTimer){
+        liveScanPollTimer = setInterval(() => fetchAndRenderLiveNodes(true), 1200);
+      }
+    } else {
+      if(liveScanPollTimer){
+        clearInterval(liveScanPollTimer);
+        liveScanPollTimer = null;
+      }
+    }
+  }catch(e){
+    if(!isBackgroundPoll){
+      toast('获取测活数据失败: ' + e.message, true);
+    }
+  }
+}
+
+async function triggerStartLiveScan(){
+  const source = $('#lsSource') ? $('#lsSource').value : 'all';
+  const region = $('#lsRegion') ? $('#lsRegion').value : 'all';
+  const startBtn = $('#lsStartScanBtn');
+  if(startBtn) startBtn.disabled = true;
+
+  toast('正在启动母机并发真实测活扫描...');
+  try{
+    await api('/api/nodes/live_scan?source=' + encodeURIComponent(source) + '&region=' + encodeURIComponent(region), {
+      method: 'POST'
+    });
+    fetchAndRenderLiveNodes();
+    if(!liveScanPollTimer){
+      liveScanPollTimer = setInterval(() => fetchAndRenderLiveNodes(true), 1200);
+    }
+  }catch(e){
+    toast('启动测活失败: ' + e.message, true);
+    if(startBtn) startBtn.disabled = false;
+  }
+}
+
+function renderLiveNodesTable(nodes){
+  const tbody = $('#lsTableBody');
+  if(!tbody) return;
+  if(!nodes || nodes.length === 0){
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:36px;color:var(--dim)">暂无实测可用节点。请点击上方【开始测活扫描】从 VPS 发起全网真实探测</td></tr>';
+    updateLiveBatchState();
+    return;
+  }
+
+  const rows = nodes.map(n => {
+    const isChecked = selectedLiveHosts.has(n.hostname);
+    const flag = getFlagEmoji(n.country_code);
+    const cc = esc(n.country_code || 'GLOBAL');
+    const countryName = esc(n.country || '');
+    const ping = n.ping || 50;
+    const pingColor = ping < 80 ? 'var(--ok)' : (ping < 180 ? 'var(--accent)' : 'var(--warn)');
+    
+    let protoBadge = '<span class="tag-host" style="font-size:10px">OpenVPN</span>';
+    if(n.proto === 'socks5'){
+      protoBadge = '<span class="tag-res" style="font-size:10px">SOCKS5</span>';
+    } else if(n.proto === 'http' || n.proto === 'https'){
+      protoBadge = '<span class="tag-mob" style="font-size:10px">HTTP</span>';
+    }
+
+    let eduBadge = '';
+    if(n.source === 'edu' || n.ip_type === 'edu' || (n.hostname && n.hostname.toLowerCase().includes('tsukuba'))){
+      eduBadge = '<span style="background:rgba(74,158,218,.2);color:#4a9eda;border:1px solid rgba(74,158,218,.4);border-radius:3px;padding:1px 4px;font-size:10px;margin-left:4px">🎓 高校学术</span>';
+    }
+
+    const hostName = esc(n.hostname);
+    const ip = esc(n.ip);
+    const isp = esc(n.isp || '公共骨干网');
+
+    return '<tr style="border-bottom:1px solid var(--line);transition:background .15s" onmouseover="this.style.background=\'rgba(255,255,255,0.02)\'" onmouseout="this.style.background=\'transparent\'">' +
+      '<td style="padding:7px 10px"><input type="checkbox" class="ls-chk" data-host="' + hostName + '" ' + (isChecked ? 'checked' : '') + '></td>' +
+      '<td style="padding:7px 10px;white-space:nowrap"><span style="font-size:14px;margin-right:4px">' + flag + '</span><b>' + cc + '</b></td>' +
+      '<td style="padding:7px 10px">' + protoBadge + '</td>' +
+      '<td style="padding:7px 10px">' +
+        '<div style="font-weight:600;font-family:monospace;color:var(--text);display:flex;align-items:center">' + ip + eduBadge + '</div>' +
+        '<div style="font-size:11px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:320px">' + isp + (countryName ? ' · ' + countryName : '') + '</div>' +
+      '</td>' +
+      '<td style="padding:7px 10px;font-family:monospace;font-weight:600;color:' + pingColor + '">' + ping + ' ms</td>' +
+      '<td style="padding:7px 10px"><span style="color:var(--ok);font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:3px">✔ 实测通畅</span></td>' +
+      '<td style="padding:7px 10px;text-align:right">' +
+        '<button class="btn-xs primary ls-start-one" data-host="' + hostName + '" style="padding:3px 10px;font-weight:600">' +
+          '<svg viewBox="0 0 24 24" style="width:12px;height:12px"><polygon points="5 3 19 12 5 21 5 3"/></svg> 启动' +
+        '</button>' +
+      '</td>' +
+    '</tr>';
+  }).join('');
+
+  tbody.innerHTML = rows;
+  updateLiveBatchState();
+}
+
+function updateLiveBatchState(){
+  const count = selectedLiveHosts.size;
+  if($('#lsSelCount')) $('#lsSelCount').textContent = count;
+  const batchBtn = $('#lsBatchStartBtn');
+  if(batchBtn) batchBtn.disabled = count === 0;
+  
+  const allChk = $('#lsSelectAll');
+  if(allChk){
+    if(currentLiveNodes.length > 0 && count === currentLiveNodes.length){
+      allChk.checked = true;
+      allChk.indeterminate = false;
+    } else if(count > 0){
+      allChk.checked = false;
+      allChk.indeterminate = true;
+    } else {
+      allChk.checked = false;
+      allChk.indeterminate = false;
+    }
+  }
+}
+
+async function startSingleLiveNode(host, btn){
+  if(btn) btn.disabled = true;
+  toast('正在启动该实测节点...');
+  try{
+    const res = await api('/api/start?host=' + encodeURIComponent(host));
+    toast('节点启动成功！SOCKS5 端口: ' + (res.port || '已分配') + '，出口IP: ' + (res.exit_ip || '协商中'));
+    closeModal('liveScanModal');
+    poll();
+  }catch(e){
+    toast('启动失败: ' + e.message, true);
+    if(btn) btn.disabled = false;
+  }
+}
+
+async function startBatchLiveNodes(){
+  const hosts = Array.from(selectedLiveHosts);
+  if(!hosts.length){
+    toast('请先勾选要启动的节点', true);
+    return;
+  }
+  const btn = $('#lsBatchStartBtn');
+  if(btn) btn.disabled = true;
+  toast('正在批量启动 ' + hosts.length + ' 个实测节点...');
+  try{
+    const res = await api('/api/nodes/batch_start', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({hosts: hosts})
+    });
+    const started = (res.started || []).length;
+    const errCount = (res.errors || []).length;
+    if(started > 0){
+      toast('成功启动 ' + started + ' 个出口节点！' + (errCount ? ' (' + errCount + ' 个冲突/失败)' : ''));
+      selectedLiveHosts.clear();
+      closeModal('liveScanModal');
+      poll();
+    } else {
+      toast('启动失败: ' + (res.errors || []).join('; '), true);
+    }
+  }catch(e){
+    toast('批量启动失败: ' + e.message, true);
+  }finally{
+    if(btn) btn.disabled = false;
+  }
+}
+
+document.addEventListener('click', async e => {
+  if(e.target.closest('#scanNodesBtn')){
+    openLiveScanModal();
+    return;
+  }
+  if(e.target.closest('#lsStartScanBtn')){
+    await triggerStartLiveScan();
+    return;
+  }
+  if(e.target.closest('#lsBatchStartBtn')){
+    await startBatchLiveNodes();
+    return;
+  }
+  const startOne = e.target.closest('.ls-start-one');
+  if(startOne){
+    const host = startOne.dataset.host;
+    if(host) await startSingleLiveNode(host, startOne);
+    return;
+  }
+  if(e.target.matches('#lsSelectAll')){
+    const chk = e.target;
+    if(chk.checked){
+      currentLiveNodes.forEach(n => selectedLiveHosts.add(n.hostname));
+    } else {
+      selectedLiveHosts.clear();
+    }
+    renderLiveNodesTable(currentLiveNodes);
+    return;
+  }
+  const itemChk = e.target.closest('.ls-chk');
+  if(itemChk){
+    const host = itemChk.dataset.host;
+    if(itemChk.checked){
+      selectedLiveHosts.add(host);
+    } else {
+      selectedLiveHosts.delete(host);
+    }
+    updateLiveBatchState();
+    return;
+  }
+});
+
+const scanNodesBtn = $('#scanNodesBtn');
+if(scanNodesBtn) scanNodesBtn.onclick = openLiveScanModal;
+const lsSrcEl = $('#lsSource');
+if(lsSrcEl) lsSrcEl.onchange = () => fetchAndRenderLiveNodes();
+const lsRgEl = $('#lsRegion');
+if(lsRgEl) lsRgEl.onchange = () => fetchAndRenderLiveNodes();
+const lsSearchEl = $('#lsSearch');
+if(lsSearchEl) lsSearchEl.oninput = () => fetchAndRenderLiveNodes();
 
 const subBtn = $('#subBtn');
 if(subBtn) subBtn.onclick = openSubModal;

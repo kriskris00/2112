@@ -217,23 +217,29 @@ func (t *Tunnel) serve() error {
 		t.Port = port
 	}
 	t.listener = ln
-	if t.dialer == nil {
-		t.dialer = dialerInNetns(t.nsName())
-	}
-	dial := t.dialer
-
 	go func() {
 		for {
 			conn, err := ln.Accept()
 			if err != nil {
 				return
 			}
-			// 每次连接现取凭据：改口令后不必重建监听，新连接立刻按新凭据校验
+			// 每次连接现取凭据与拨号器：换节点或改口令后不必重建监听，新连接立刻按新配置生效
 			cred := t.credential()
+			dial := t.getDialer()
 			go serveSocks(conn, &cred, dial)
 		}
 	}()
 	return nil
+}
+
+// getDialer 动态获取当前有效的出站拨号器
+func (t *Tunnel) getDialer() func(network, addr string) (net.Conn, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.dialer != nil {
+		return t.dialer
+	}
+	return dialerInNetns(t.nsName())
 }
 
 // credential 取一份凭据副本，避免读写并发。

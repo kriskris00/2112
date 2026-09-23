@@ -207,6 +207,28 @@ func (m *Manager) Nodes() ([]Node, time.Time) {
 	return out, m.fetched
 }
 
+// AddVerifiedNode 将经本机实测通畅的优质节点注入节点池前列
+func (m *Manager) AddVerifiedNode(n Node) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i, cur := range m.nodes {
+		if cur.HostName == n.HostName {
+			m.nodes[i] = n
+			return
+		}
+	}
+	m.nodes = append([]Node{n}, m.nodes...)
+}
+
+// RawNodes 获取当前所有原始候选节点
+func (m *Manager) RawNodes() []Node {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]Node, len(m.nodes))
+	copy(out, m.nodes)
+	return out
+}
+
 func (m *Manager) Tunnels() []*Tunnel {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

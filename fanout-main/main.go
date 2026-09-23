@@ -16,7 +16,7 @@ import (
 )
 
 // version 由构建时通过 -ldflags 注入。
-var version = "v0.2.7-enhanced"
+var version = "v0.2.8-enhanced"
 
 func main() {
 	var (
@@ -109,6 +109,10 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handleIndex)
+	liveScanner := GetLiveScanner(mgr)
+	mux.HandleFunc("/api/nodes/live", apiLiveNodes(liveScanner))
+	mux.HandleFunc("/api/nodes/live_scan", apiLiveScan(liveScanner, mgr))
+	mux.HandleFunc("/api/nodes/batch_start", apiBatchStart(mgr, liveScanner))
 	mux.HandleFunc("/api/nodes", apiNodes(mgr))
 	mux.HandleFunc("/api/tunnels", apiTunnels(mgr))
 	mux.HandleFunc("/api/start", apiStart(mgr))
@@ -225,6 +229,17 @@ func apiStart(m *Manager) http.HandlerFunc {
 		if host == "" {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "缺少 host 参数"})
 			return
+		}
+		if globalScanner != nil {
+			if vn, ok := globalScanner.GetNodeByHost(host); ok {
+				t, err := m.Start(vn)
+				if err != nil {
+					writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+					return
+				}
+				writeJSON(w, http.StatusOK, t)
+				return
+			}
 		}
 		nodes, _ := m.Nodes()
 		for _, n := range nodes {
