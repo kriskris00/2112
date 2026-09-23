@@ -33,6 +33,7 @@ type loginFails struct {
 	blocked time.Time
 }
 
+const sessionCookie = "fanout_session"
 const sessionTTL = 12 * time.Hour
 
 // 登录失败节流：同一 IP 连续错 loginMaxFails 次后，锁 loginBlockFor。
