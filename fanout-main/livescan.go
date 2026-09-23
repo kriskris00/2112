@@ -391,11 +391,28 @@ func (ls *LiveScanner) runScan(source, region string, maxCandidates int) {
 
 				outMu.Lock()
 				verifiedList = append(verifiedList, node)
-				outMu.Unlock()
+				// 实时更新已验证列表副本并按最佳网络排序（延迟越低越前，带宽越大越前）
+				curList := append([]Node(nil), verifiedList...)
+				sort.Slice(curList, func(i, j int) bool {
+					pi := curList[i].Ping
+					pj := curList[j].Ping
+					if pi <= 0 {
+						pi = 9999
+					}
+					if pj <= 0 {
+						pj = 9999
+					}
+					if pi != pj {
+						return pi < pj
+					}
+					return curList[i].SpeedMbps > curList[j].SpeedMbps
+				})
 
 				ls.mu.Lock()
 				ls.verifiedCount = len(verifiedList)
+				ls.verified = curList
 				ls.mu.Unlock()
+				outMu.Unlock()
 
 				ls.mgr.AddVerifiedNode(node)
 			}
@@ -408,14 +425,20 @@ func (ls *LiveScanner) runScan(source, region string, maxCandidates int) {
 	}
 	wg.Wait()
 
-	// 4. 排序：高校学术/筑波大学优先，实测延迟由低到高排列
+	// 4. 排序：网络最好的排在最前面（实测延迟越低越前，带宽越大越前）
 	sort.Slice(verifiedList, func(i, j int) bool {
-		isEduI := verifiedList[i].Source == "edu" || verifiedList[i].IPType == "edu" || strings.Contains(verifiedList[i].HostName, "tsukuba")
-		isEduJ := verifiedList[j].Source == "edu" || verifiedList[j].IPType == "edu" || strings.Contains(verifiedList[j].HostName, "tsukuba")
-		if isEduI != isEduJ {
-			return isEduI
+		pi := verifiedList[i].Ping
+		pj := verifiedList[j].Ping
+		if pi <= 0 {
+			pi = 9999
 		}
-		return verifiedList[i].Ping < verifiedList[j].Ping
+		if pj <= 0 {
+			pj = 9999
+		}
+		if pi != pj {
+			return pi < pj
+		}
+		return verifiedList[i].SpeedMbps > verifiedList[j].SpeedMbps
 	})
 
 	ls.mu.Lock()
@@ -466,6 +489,21 @@ func (ls *LiveScanner) GetVerifiedNodes(source, region, search string) []Node {
 
 		out = append(out, n)
 	}
+
+	sort.Slice(out, func(i, j int) bool {
+		pi := out[i].Ping
+		pj := out[j].Ping
+		if pi <= 0 {
+			pi = 9999
+		}
+		if pj <= 0 {
+			pj = 9999
+		}
+		if pi != pj {
+			return pi < pj
+		}
+		return out[i].SpeedMbps > out[j].SpeedMbps
+	})
 
 	return out
 }

@@ -2211,6 +2211,14 @@ function renderLiveNodesTable(nodes){
     return;
   }
 
+  // 严格按网络质量最优排在最前面 (延迟最低优先，同延迟则带宽最高优先)
+  nodes.sort((a, b) => {
+    const pa = a.ping && a.ping > 0 ? a.ping : 9999;
+    const pb = b.ping && b.ping > 0 ? b.ping : 9999;
+    if (pa !== pb) return pa - pb;
+    return (b.speed_mbps || 0) - (a.speed_mbps || 0);
+  });
+
   const rows = nodes.map(n => {
     const isChecked = selectedLiveHosts.has(n.hostname);
     const flag = getFlagEmoji(n.country_code);
