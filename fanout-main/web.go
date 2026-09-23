@@ -296,14 +296,14 @@ textarea:focus{outline:none;border-color:var(--accent)}
         <select id="wzSource" style="padding:8px 10px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--text);font-size:13px;width:100%">
           <option value="all">🌐 全部聚合源 (全网数万节点 · 智能优选)</option>
           <option value="vpngate">🇯🇵 日本筑波大学 (VPN Gate 官方与镜像源)</option>
-          <option value="edu">🎓 中国教育科研网高校 (CERNET / 高校学术)</option>
-          <option value="proxy">🌍 全网公网开源代理池 (TheSpeedX / Proxifly 等)</option>
+          <option value="edu">🎓 海外高校学术科研网 (日本筑波/韩国/台湾/欧美名校 · 不含国内)</option>
+          <option value="proxy">🌍 全网公网开源代理池 (数十万全球开源代理)</option>
           <option value="custom">📁 本地导入与自定义节点 (.ovpn / 自建)</option>
         </select>
       </label>
       <label class="f">
         <span>地区 / 国家</span>
-        <input type="search" id="rgfilter" placeholder="搜索或筛选国家/地区，如 日本、JP、美国、教育网...">
+        <input type="search" id="rgfilter" placeholder="搜索或筛选国家/地区，如 日本、JP、美国、海外学术...">
         <div class="regions" id="regions" style="margin-top:6px"></div>
       </label>
       <label class="f">
@@ -578,17 +578,17 @@ textarea:focus{outline:none;border-color:var(--accent)}
       </div>
 
       <div style="margin-bottom:16px">
-        <h3 style="margin-bottom:8px;font-size:14px">全网多源节点池（全网数万节点 + 日本筑波大学 + 教育网高校）</h3>
+        <h3 style="margin-bottom:8px;font-size:14px">全网多源节点池（全网数十万节点 + 日本筑波大学 + 海外高校学术网）</h3>
         <div style="font-size:12px;color:var(--dim);line-height:1.6;background:var(--card-bg);padding:10px;border-radius:6px;border:1px solid var(--border);margin-bottom:8px">
-          <div>• <b>日本筑波大学官方及全量容灾镜像池</b>：150.40.105.19 / 119.195.163.98 等 11+ 镜像</div>
-          <div>• <b>全网开源公开代理库 (100,000+ 节点)</b>：Zevtyardt / Proxifly / Hookzof / TheSpeedX 等并发聚合</div>
-          <div>• <b>教育网与高校学术网专项</b>：CERNET / SINET / 清华 / 北大 / 中科大 / 浙大等高校 IP 专项识别与归类</div>
+          <div>• <b>日本筑波大学官方及全量容灾镜像池</b>：150.40.105.19 / 119.195.163.98 等 15+ 镜像并发聚合</div>
+          <div>• <b>全网开源公开代理库 (200,000+ 节点)</b>：30+ 全球高质量开源代理源与 API 极速聚合</div>
+          <div>• <b>海外高校学术科研网专项</b>：日本 (SINET/筑波) / 韩国 (KOREN) / 台湾 (TANet) / 欧美等名校学术专网（不含国内）</div>
           <div>• <b>全自动容灾与并发测速</b>：自动并发拉取、剔除不可用死节点、按纯净度与网络速度降序排序</div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="primary" id="refreshMirrors" data-src="all">🔄 刷新全部源 (全网数万节点)</button>
+          <button class="primary" id="refreshMirrors" data-src="all">🔄 刷新全部源 (全网海量节点)</button>
           <button id="refreshVpnGate" data-src="vpngate">🇯🇵 仅拉取筑波大学源</button>
-          <button id="refreshEdu" data-src="edu">🎓 仅拉取教育科研网</button>
+          <button id="refreshEdu" data-src="edu">🎓 仅拉取海外学术网</button>
           <button id="refreshProxy" data-src="proxy">🌍 仅拉取全网代理池</button>
         </div>
       </div>
@@ -692,9 +692,9 @@ textarea:focus{outline:none;border-color:var(--accent)}
           <span style="font-size:11px;color:var(--dim)">扫描来源</span>
           <select id="lsSource" style="padding:6px 8px;font-size:12px;min-width:140px;background:#0e1116;border:1px solid var(--line);color:var(--text);border-radius:4px">
             <option value="all">🌐 全部候选源 (全网并发实测)</option>
-            <option value="edu" selected>🎓 高校学术科研网 (CERNET/筑波/全球高校)</option>
+            <option value="edu" selected>🎓 海外高校学术网 (日本筑波/韩国/台湾/欧美 · 不含国内)</option>
             <option value="vpngate">🇯🇵 日本筑波大学 (VPN Gate)</option>
-            <option value="proxy">🌍 全网公网代理池</option>
+            <option value="proxy">🌍 全网公网代理池 (数十万源)</option>
             <option value="custom">📁 本地自定义节点</option>
           </select>
         </div>
@@ -703,21 +703,32 @@ textarea:focus{outline:none;border-color:var(--accent)}
           <span style="font-size:11px;color:var(--dim)">筛选国家/地区</span>
           <select id="lsRegion" style="padding:6px 8px;font-size:12px;min-width:110px;background:#0e1116;border:1px solid var(--line);color:var(--text);border-radius:4px">
             <option value="all">全部国家/地区</option>
-            <option value="CN">🇨🇳 中国 (CERNET/全国节点)</option>
             <option value="JP">🇯🇵 日本 (筑波大学等)</option>
-            <option value="US">🇺🇸 美国 (高校/骨干网)</option>
+            <option value="US">🇺🇸 美国 (名校/骨干)</option>
             <option value="KR">🇰🇷 韩国 (KOREN)</option>
             <option value="TW">🇹🇼 台湾 (TANet)</option>
             <option value="HK">🇭🇰 香港</option>
             <option value="SG">🇸🇬 新加坡</option>
             <option value="DE">🇩🇪 德国</option>
             <option value="GB">🇬🇧 英国</option>
+            <option value="CN">🇨🇳 中国 (国内节点)</option>
+          </select>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <span style="font-size:11px;color:var(--dim)">测活数量</span>
+          <select id="lsMax" style="padding:6px 8px;font-size:12px;min-width:125px;background:#0e1116;border:1px solid var(--line);color:var(--text);border-radius:4px;font-weight:600">
+            <option value="0" selected>⚡ 全部拉满 (全量测活)</option>
+            <option value="5000">超大池 (5,000 个)</option>
+            <option value="2000">深度池 (2,000 个)</option>
+            <option value="1000">快速池 (1,000 个)</option>
+            <option value="300">极速体验 (300 个)</option>
           </select>
         </div>
 
         <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:160px">
           <span style="font-size:11px;color:var(--dim)">关键词过滤 (IP/学校/运营商)</span>
-          <input type="search" id="lsSearch" placeholder="如 tsukuba、edu、cernet、150.40..." style="font-size:12px;padding:6px 8px;background:#0e1116;border:1px solid var(--line);color:var(--text);border-radius:4px">
+          <input type="search" id="lsSearch" placeholder="如 tsukuba、edu、sinet、150.40..." style="font-size:12px;padding:6px 8px;background:#0e1116;border:1px solid var(--line);color:var(--text);border-radius:4px">
         </div>
 
         <div style="display:flex;align-items:center;gap:8px">
@@ -886,7 +897,7 @@ function getFlagEmoji(countryCode) {
 }
 
 const COUNTRY_ZH = {
-  EDU: '教育网高校', GLOBAL: '全球公网',
+  EDU: '海外高校学术网络', GLOBAL: '全球公网',
   JP: '日本', KR: '韩国', US: '美国', RU: '俄罗斯', VN: '越南',
   IN: '印度', MV: '马尔代夫', TH: '泰国', HK: '中国香港', TW: '中国台湾',
   SG: '新加坡', GB: '英国', DE: '德国', FR: '法国', CA: '加拿大',
@@ -899,7 +910,7 @@ const COUNTRY_ZH = {
 
 function formatCountry(code, name) {
   if (!code || code === 'CUSTOM') return '🌐 ' + (name || '自定义');
-  if (code === 'EDU') return '🎓 EDU 教育网高校' + (name && name !== 'EDU' && name !== '教育网高校' ? ' · ' + name : '');
+  if (code === 'EDU') return '🎓 海外高校学术科研网' + (name && name !== 'EDU' && name !== '教育网高校' && name !== '海外高校学术网络' ? ' · ' + name : '');
   const flag = getFlagEmoji(code);
   const zh = COUNTRY_ZH[code.toUpperCase()] || '';
   if (zh) {
@@ -1107,7 +1118,7 @@ document.querySelectorAll('.modal').forEach(m => {
 const DEFAULT_CORE_REGIONS = [
   {code: 'GLOBAL', name: '全球推荐 (自动优选)', available: 50, avg_purity: 88},
   {code: 'JP', name: '日本 (筑波大学官方/镜像)', available: 15, avg_purity: 95},
-  {code: 'EDU', name: '教育网高校 (CERNET学术)', available: 10, avg_purity: 99},
+  {code: 'EDU', name: '海外高校学术科研网 (不含国内)', available: 10, avg_purity: 99},
   {code: 'HK', name: '中国香港', available: 10, avg_purity: 90},
   {code: 'TW', name: '中国台湾', available: 8, avg_purity: 88},
   {code: 'SG', name: '新加坡', available: 8, avg_purity: 90},
@@ -1798,7 +1809,7 @@ $('#settingsBtn').onclick = async () => {
     $('#updCheck').textContent = '检查更新';
   }).catch(err => {
     $('#setPathHint').textContent = '界面挂在当前路径下。' + (err.message ? '提示: ' + err.message : '');
-    $('#updCur').textContent = 'v0.2.8-enhanced';
+    $('#updCur').textContent = 'v0.2.9-enhanced';
     $('#updCheck').disabled = false;
   });
 
@@ -1950,9 +1961,9 @@ async function loadSources(){
 async function refreshSources(btn, src = 'all'){
   if(btn) btn.disabled = true;
   const nameMap = {
-    all: '全网所有源（筑波大学+教育网+全球公网）',
+    all: '全网所有源（筑波大学+海外高校学术+全球公网）',
     vpngate: '日本筑波大学官方与镜像源',
-    edu: '中国教育科研网高校学术源',
+    edu: '海外高校学术科研源（日本筑波/韩国/欧美名校 · 不含国内）',
     proxy: '全网公网开源代理池'
   };
   toast('正在拉取 ' + (nameMap[src] || src) + '，请稍候...');
@@ -2172,12 +2183,13 @@ async function fetchAndRenderLiveNodes(isBackgroundPoll = false){
 async function triggerStartLiveScan(){
   const source = $('#lsSource') ? $('#lsSource').value : 'all';
   const region = $('#lsRegion') ? $('#lsRegion').value : 'all';
+  const max = $('#lsMax') ? $('#lsMax').value : '0';
   const startBtn = $('#lsStartScanBtn');
   if(startBtn) startBtn.disabled = true;
 
-  toast('正在启动母机并发真实测活扫描...');
+  toast('正在启动母机并发真实测活 (100协程并发拉满)...');
   try{
-    await api('/api/nodes/live_scan?source=' + encodeURIComponent(source) + '&region=' + encodeURIComponent(region), {
+    await api('/api/nodes/live_scan?source=' + encodeURIComponent(source) + '&region=' + encodeURIComponent(region) + '&max=' + encodeURIComponent(max), {
       method: 'POST'
     });
     fetchAndRenderLiveNodes();
@@ -2216,7 +2228,7 @@ function renderLiveNodesTable(nodes){
 
     let eduBadge = '';
     if(n.source === 'edu' || n.ip_type === 'edu' || (n.hostname && n.hostname.toLowerCase().includes('tsukuba'))){
-      eduBadge = '<span style="background:rgba(74,158,218,.2);color:#4a9eda;border:1px solid rgba(74,158,218,.4);border-radius:3px;padding:1px 4px;font-size:10px;margin-left:4px">🎓 高校学术</span>';
+      eduBadge = '<span style="background:rgba(74,158,218,.2);color:#4a9eda;border:1px solid rgba(74,158,218,.4);border-radius:3px;padding:1px 4px;font-size:10px;margin-left:4px">🎓 海外学术</span>';
     }
 
     const hostName = esc(n.hostname);

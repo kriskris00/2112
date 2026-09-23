@@ -16,7 +16,7 @@ import (
 )
 
 // version 由构建时通过 -ldflags 注入。
-var version = "v0.2.8-enhanced"
+var version = "v0.2.9-enhanced"
 
 func main() {
 	var (
@@ -60,7 +60,7 @@ func main() {
 
 	mgr := NewManager(*maxSlots, *workDir)
 	initNodes, _ := mgr.Nodes()
-	log.Printf("节点底池已就绪: %d 个节点 (含教育网高校、日本筑波大学及全球节点)", len(initNodes))
+	log.Printf("节点底池已就绪: %d 个节点 (含海外高校学术网、日本筑波大学及全球节点)", len(initNodes))
 	go BatchEnrichNodes(initNodes)
 
 	// 后台并发拉取全网最新节点与筑波大学镜像，不阻塞服务极速启动

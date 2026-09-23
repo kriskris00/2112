@@ -12,19 +12,22 @@ import (
 	"time"
 )
 
-// isEduISP 判断运营商是否为高校或教育科研网
+// isEduISP 判断运营商是否为海外高校或国际教育科研学术网（不含国内）
 func isEduISP(isp string) bool {
 	low := strings.ToLower(isp)
-	return strings.Contains(low, "cernet") ||
-		strings.Contains(low, "education") ||
+	if strings.Contains(low, "cernet") || strings.Contains(low, "china") {
+		return false
+	}
+	return strings.Contains(low, "education") ||
 		strings.Contains(low, "university") ||
 		strings.Contains(low, "college") ||
 		strings.Contains(low, "sinet") ||
 		strings.Contains(low, "academic") ||
 		strings.Contains(low, "campus") ||
-		strings.Contains(low, "科研") ||
-		strings.Contains(low, "高校") ||
-		strings.Contains(low, "大学")
+		strings.Contains(low, "koren") ||
+		strings.Contains(low, "tanet") ||
+		strings.Contains(low, "geant") ||
+		strings.Contains(low, "tsukuba")
 }
 
 // IPIntel 存储单个 IP 的归属类型、运营商与纯净度风控数据
@@ -112,8 +115,8 @@ func GetIPIntel(ip string) IPIntel {
 			IP:          ip,
 			IPType:      "edu",
 			PurityScore: 98,
-			ISP:         "中国教育科研网CERNET/高校",
-			Country:     "教育网高校",
+			ISP:         "海外高校学术科研网络",
+			Country:     "海外学术网络",
 			CountryCode: "EDU",
 			UpdatedAt:   time.Now().Unix(),
 		}
@@ -176,11 +179,13 @@ func enrichSingleIPAsync(ip string) {
 	if ispName == "" {
 		ispName = data.Org
 	}
-	if isEduISP(ispName) || isEduIP(ip) {
+	if (isEduISP(ispName) || isEduIP(ip)) && data.CountryCode != "CN" && !strings.Contains(strings.ToLower(data.Country), "china") {
 		ipType = "edu"
 		purity = 98
-		data.CountryCode = "EDU"
-		data.Country = "教育网高校"
+		if data.CountryCode == "" || data.CountryCode == "EDU" {
+			data.CountryCode = "EDU"
+			data.Country = "海外高校学术网络"
+		}
 	}
 
 	result := IPIntel{
@@ -279,11 +284,13 @@ func BatchEnrichNodes(nodes []Node) {
 		}
 		country := item.Country
 		countryCode := item.CountryCode
-		if isEduISP(isp) || isEduIP(item.Query) {
+		if (isEduISP(isp) || isEduIP(item.Query)) && item.CountryCode != "CN" && !strings.Contains(strings.ToLower(item.Country), "china") {
 			ipType = "edu"
 			purity = 98
-			countryCode = "EDU"
-			country = "教育网高校"
+			if countryCode == "" || countryCode == "EDU" {
+				countryCode = "EDU"
+				country = "海外高校学术网络"
+			}
 		}
 		globalIPIntel.cache[item.Query] = IPIntel{
 			IP:          item.Query,

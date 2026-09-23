@@ -4,9 +4,55 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
+
+var countryNameZH = map[string]string{
+	"JP": "日本", "KR": "韩国", "US": "美国", "HK": "中国香港", "TW": "中国台湾",
+	"SG": "新加坡", "GB": "英国", "DE": "德国", "FR": "法国", "CA": "加拿大",
+	"AU": "澳大利亚", "NL": "荷兰", "MY": "马来西亚", "PH": "菲律宾", "ID": "印尼",
+	"TH": "泰国", "VN": "越南", "IN": "印度", "RU": "俄罗斯", "BR": "巴西",
+	"TR": "土耳其", "IT": "意大利", "ES": "西班牙", "SE": "瑞典", "CH": "瑞士",
+	"NO": "挪威", "FI": "芬兰", "PL": "波兰", "CZ": "捷克", "AT": "奥地利",
+	"GLOBAL": "全球", "EDU": "海外高校学术网",
+}
+
+// formatProxyName 构造规范的订阅节点名称：[国旗Emoji] [国家名称] · [企业/ISP名称] ([规格/出口])
+func formatProxyName(countryCode, country, isp string, suffix string) string {
+	cc := strings.ToUpper(strings.TrimSpace(countryCode))
+	flag := getFlagEmoji(cc)
+
+	cName := countryNameZH[cc]
+	if cName == "" {
+		cName = country
+	}
+	if cName == "" {
+		cName = cc
+	}
+	if cName == "" {
+		cName = "全球节点"
+	}
+
+	comp := strings.TrimSpace(isp)
+	if comp == "" || strings.EqualFold(comp, "Public Proxy") || strings.EqualFold(comp, "Public Pool") || strings.EqualFold(comp, "VPN Gate") {
+		if strings.Contains(strings.ToLower(isp), "tsukuba") || strings.EqualFold(cc, "JP") {
+			comp = "筑波大学 VPN Gate"
+		} else {
+			comp = "优质网络"
+		}
+	}
+	runes := []rune(comp)
+	if len(runes) > 24 {
+		comp = string(runes[:22]) + "..."
+	}
+
+	if suffix != "" {
+		return fmt.Sprintf("%s %s · %s (%s)", flag, cName, comp, suffix)
+	}
+	return fmt.Sprintf("%s %s · %s", flag, cName, comp)
+}
 
 // apiCredToken 供已登录 Web 界面的管理员获取口令，方便一键生成带 token 的聚合订阅链接
 func apiCredToken(a *Auth) http.HandlerFunc {
@@ -28,6 +74,17 @@ func apiSubscription(m *Manager, a *Auth) http.HandlerFunc {
 			strings.Contains(ua, "mihomo") ||
 			strings.Contains(ua, "meta")
 
+		// 建立已连接出站绑定的映射：Node.HostName -> *Tunnel
+		tunnels := m.Tunnels()
+		boundTunnel := make(map[string]*Tunnel)
+		var upTunnels []*Tunnel
+		for _, t := range tunnels {
+			if t.Status == "up" {
+				upTunnels = append(upTunnels, t)
+				boundTunnel[t.Node.HostName] = t
+			}
+		}
+
 		// 收集所有 3x-ui 入站及其分享链接
 		var details []*InboundDetail
 		var allLinks []string
@@ -39,24 +96,28 @@ func apiSubscription(m *Manager, a *Auth) http.HandlerFunc {
 				d, dErr := p.InboundDetail(ib.ID, host)
 				if dErr == nil && d != nil {
 					details = append(details, d)
-					allLinks = append(allLinks, d.Links...)
+					// 处理链接名称：改成国家表情和企业名称
+					t := boundTunnel[d.BoundTo]
+					for _, rawLink := range d.Links {
+						if t != nil {
+							idx := strings.LastIndex(rawLink, "#")
+							if idx != -1 {
+								cleanName := formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP, fmt.Sprintf("%s :%d", strings.ToUpper(d.Protocol), d.Port))
+								rawLink = rawLink[:idx] + "#" + url.QueryEscape(cleanName)
+							}
+						}
+						allLinks = append(allLinks, rawLink)
+					}
 				}
 			}
 		}
 
-		// 收集运行中的出口隧道（SOCKS5 形式补充）
-		tunnels := m.Tunnels()
-		var upTunnels []*Tunnel
-		for _, t := range tunnels {
-			if t.Status == "up" {
-				upTunnels = append(upTunnels, t)
-				// 生成 SOCKS5 分享链接
-				cred := t.credential()
-				flag := getFlagEmoji(t.Node.CountryCode)
-				label := fmt.Sprintf("%s 出口-%d (%s)", flag, t.Slot, t.Node.CountryCode)
-				s5Link := fmt.Sprintf("socks5://%s:%s@%s:%d#%s", cred.User, cred.Pass, host, t.Port, label)
-				allLinks = append(allLinks, s5Link)
-			}
+		// 收集运行中的出口隧道（SOCKS5 形式补充，国旗表情 + 企业名称）
+		for _, t := range upTunnels {
+			cred := t.credential()
+			label := formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP, fmt.Sprintf("出口-%d", t.Slot))
+			s5Link := fmt.Sprintf("socks5://%s:%s@%s:%d#%s", cred.User, cred.Pass, host, t.Port, url.QueryEscape(label))
+			allLinks = append(allLinks, s5Link)
 		}
 
 		// 统一流量头信息（展示 10TB 配额，永不过期）
@@ -93,18 +154,43 @@ func generateClashConfig(details []*InboundDetail, tunnels []*Tunnel, host strin
 	}
 	var proxies []proxyItem
 
-	// 1. 处理 3x-ui 入站
+	// 建立 boundTo 对应关系
+	boundTunnel := make(map[string]*Tunnel)
+	for _, t := range tunnels {
+		boundTunnel[t.Node.HostName] = t
+	}
+
+	seenNames := make(map[string]int)
+	makeUniqueName := func(raw string) string {
+		count := seenNames[raw]
+		seenNames[raw] = count + 1
+		if count > 0 {
+			return fmt.Sprintf("%s (%d)", raw, count+1)
+		}
+		return raw
+	}
+
+	// 1. 处理 3x-ui 入站（节点名称采用：国家表情 + 企业名称）
 	for _, d := range details {
 		proto := strings.ToLower(d.Protocol)
+		t := boundTunnel[d.BoundTo]
+
 		for idx, c := range d.Clients {
 			clientEmail := c.Email
 			if clientEmail == "" {
 				clientEmail = fmt.Sprintf("client-%d", idx+1)
 			}
-			pName := fmt.Sprintf("%s :%d (%s)", strings.ToUpper(proto), d.Port, clientEmail)
-			if d.Remark != "" {
-				pName = fmt.Sprintf("%s - %s :%d", d.Remark, strings.ToUpper(proto), d.Port)
+			var pName string
+			if t != nil {
+				suffix := fmt.Sprintf("%s :%d", strings.ToUpper(proto), d.Port)
+				if len(d.Clients) > 1 {
+					suffix += fmt.Sprintf(" - %s", clientEmail)
+				}
+				pName = formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP, suffix)
+			} else {
+				pName = fmt.Sprintf("🚀 入站 · %s :%d (%s)", strings.ToUpper(proto), d.Port, clientEmail)
 			}
+			pName = makeUniqueName(pName)
 
 			switch proto {
 			case "vless":
@@ -158,11 +244,10 @@ func generateClashConfig(details []*InboundDetail, tunnels []*Tunnel, host strin
 		}
 	}
 
-	// 2. 处理运行中的出口隧道 (SOCKS5 出口)
+	// 2. 处理运行中的出口隧道 (SOCKS5 出口，国家表情 + 企业名称)
 	for _, t := range tunnels {
 		cred := t.credential()
-		flag := getFlagEmoji(t.Node.CountryCode)
-		pName := fmt.Sprintf("%s 出口-%d [%s %s]", flag, t.Slot, t.Node.CountryCode, t.ExitIP)
+		pName := makeUniqueName(formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP, fmt.Sprintf("出口-%d", t.Slot)))
 		py := fmt.Sprintf("  - name: %q\r\n    type: socks5\r\n    server: %q\r\n    port: %d\r\n    username: %q\r\n    password: %q\r\n    udp: true\r\n",
 			pName, host, t.Port, cred.User, cred.Pass)
 		proxies = append(proxies, proxyItem{name: pName, yaml: py})

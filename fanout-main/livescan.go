@@ -29,7 +29,7 @@ var openvpnRemoteRe = regexp.MustCompile(`(?m)^\s*remote\s+([^\s]+)\s+(\d+)(?:\s
 // probeNodeLive 从母机真实发包探测该节点是否真正连通并能出网
 func probeNodeLive(n Node, timeout time.Duration) (bool, int64, string, error) {
 	if timeout <= 0 {
-		timeout = 2500 * time.Millisecond
+		timeout = 1800 * time.Millisecond
 	}
 
 	// 1. OpenVPN 节点探测
@@ -238,13 +238,13 @@ func (ls *LiveScanner) runScan(source, region string, maxCandidates int) {
 		ls.mu.Unlock()
 	}()
 
-	if maxCandidates <= 0 || maxCandidates > 300 {
-		maxCandidates = 150
+	if maxCandidates <= 0 {
+		maxCandidates = 999999 // 0 表示全部拉满，不设上限
 	}
 
 	// 1. 获取原始候选节点池
 	raw := ls.mgr.RawNodes()
-	if len(raw) == 0 {
+	if len(raw) < 200 {
 		fresh, err := fetchNodes(ls.mgr.workDir, source, 15*time.Second)
 		if err == nil && len(fresh) > 0 {
 			raw = fresh
@@ -266,12 +266,29 @@ func (ls *LiveScanner) runScan(source, region string, maxCandidates int) {
 		}
 
 		if isEduTarget {
+			// 教育网严格排除中国国内节点，只要海外高校学术网
+			if strings.EqualFold(n.CountryCode, "CN") ||
+				strings.Contains(strings.ToLower(n.Country), "china") ||
+				strings.HasSuffix(strings.ToLower(n.HostName), ".cn") {
+				continue
+			}
+			hostLower := strings.ToLower(n.HostName)
 			isEdu := n.Source == "edu" ||
+				n.IPType == "edu" ||
 				isEduIP(n.IP) ||
 				isEduISP(n.ISP) ||
-				strings.Contains(strings.ToLower(n.HostName), "tsukuba") ||
-				strings.Contains(strings.ToLower(n.HostName), "edu") ||
-				strings.Contains(strings.ToLower(n.Country), "edu")
+				strings.Contains(hostLower, "tsukuba") ||
+				strings.Contains(hostLower, "sinet") ||
+				strings.Contains(hostLower, "koren") ||
+				strings.Contains(hostLower, "tanet") ||
+				strings.Contains(hostLower, ".ac.jp") ||
+				strings.Contains(hostLower, ".ac.kr") ||
+				strings.Contains(hostLower, ".edu.tw") ||
+				strings.Contains(hostLower, ".ac.uk") ||
+				strings.Contains(hostLower, ".edu.au") ||
+				strings.Contains(hostLower, ".edu.sg") ||
+				(strings.Contains(hostLower, ".edu") && !strings.Contains(hostLower, ".cn")) ||
+				strings.Contains(hostLower, "univ")
 			if !isEdu {
 				continue
 			}
@@ -303,8 +320,8 @@ func (ls *LiveScanner) runScan(source, region string, maxCandidates int) {
 		return
 	}
 
-	// 3. 并发测试工作池（30 个并发工作协程）
-	const concurrency = 30
+	// 3. 并发测试工作池（100 个高并发工作协程，极速扫满数千节点）
+	const concurrency = 100
 	workCh := make(chan Node, len(candidates))
 	for _, c := range candidates {
 		workCh <- c
@@ -318,7 +335,7 @@ func (ls *LiveScanner) runScan(source, region string, maxCandidates int) {
 	worker := func() {
 		defer wg.Done()
 		for node := range workCh {
-			alive, rtt, exitIP, _ := probeNodeLive(node, 2500*time.Millisecond)
+			alive, rtt, exitIP, _ := probeNodeLive(node, 1800*time.Millisecond)
 
 			ls.mu.Lock()
 			ls.progress++
@@ -386,6 +403,9 @@ func (ls *LiveScanner) GetVerifiedNodes(source, region, search string) []Node {
 	for _, n := range ls.verified {
 		if source != "" && source != "all" {
 			if strings.EqualFold(source, "edu") {
+				if strings.EqualFold(n.CountryCode, "CN") || strings.Contains(strings.ToLower(n.Country), "china") || strings.HasSuffix(strings.ToLower(n.HostName), ".cn") {
+					continue
+				}
 				if n.Source != "edu" && !isEduIP(n.IP) && !strings.Contains(strings.ToLower(n.HostName), "tsukuba") {
 					continue
 				}
@@ -464,9 +484,9 @@ func apiLiveScan(scanner *LiveScanner, mgr *Manager) http.HandlerFunc {
 		q := r.URL.Query()
 		source := q.Get("source")
 		region := q.Get("region")
-		max := 120
+		max := 0 // 0 表示全部拉满，全量测活
 		if maxStr := q.Get("max"); maxStr != "" {
-			if m, err := strconv.Atoi(maxStr); err == nil && m > 0 {
+			if m, err := strconv.Atoi(maxStr); err == nil {
 				max = m
 			}
 		}

@@ -43,35 +43,81 @@ var defaultMirrors = []string{
 	"http://www.vpngate.net/api/iphone/",      // 官方 HTTP 直连
 	"https://www.vpngate.net/api/iphone/",     // 官方 HTTPS 直连
 	"https://p.xy.kg/vpngate",                  // Cloudflare 全球容灾反代
+	"https://vpngate.okx.buzz/api/iphone/",     // 备用高防反代镜像
+	"http://103.201.129.246:44837/api/iphone/", // 筑波大学亚太镜像
+	"http://185.220.101.4:1194/api/iphone/",    // 筑波大学欧洲镜像
 }
 
-// publicGlobalSources 全网开源公网代理与节点源（聚合数万到十万量级免费节点）
+// publicGlobalSources 全网开源公网代理与节点源（聚合数十万量级免费节点与海外学术源）
 var publicGlobalSources = []string{
 	"https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt",
+	"https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
 	"https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt",
 	"https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/all.txt",
+	"https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt",
+	"https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
 	"https://raw.githubusercontent.com/zevtyardt/proxy-list/main/all.txt",
 	"https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/all/data.txt",
 	"https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/socks5.txt",
 	"https://raw.githubusercontent.com/roosterkid/openproxylist/main/SOCKS5_RAW.txt",
 	"https://raw.githubusercontent.com/prxchk/proxy-list/main/socks5.txt",
+	"https://raw.githubusercontent.com/prxchk/proxy-list/main/http.txt",
 	"https://raw.githubusercontent.com/ErcinDedeoglu/proxies/main/proxies/socks5.txt",
 	"https://raw.githubusercontent.com/vakhov/fresh-proxy-list/master/socks5.txt",
+	"https://raw.githubusercontent.com/vakhov/fresh-proxy-list/master/http.txt",
 	"https://raw.githubusercontent.com/caliphdev/Proxy-List/master/socks5.txt",
+	"https://raw.githubusercontent.com/caliphdev/Proxy-List/master/http.txt",
 	"https://raw.githubusercontent.com/sunny9577/proxy-scraper/master/generated/socks5_proxies.txt",
+	"https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-socks5.txt",
+	"https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-http.txt",
+	"https://raw.githubusercontent.com/MuRongPIG/Proxy-Master/main/socks5.txt",
+	"https://raw.githubusercontent.com/MuRongPIG/Proxy-Master/main/http.txt",
+	"https://raw.githubusercontent.com/officialputuid/KangProxy/KangProxy/socks5/socks5.txt",
+	"https://raw.githubusercontent.com/officialputuid/KangProxy/KangProxy/http/http.txt",
+	"https://raw.githubusercontent.com/HyperBeats/proxy-list/main/socks5.txt",
+	"https://raw.githubusercontent.com/B4RC0D3-TM/proxy-list/main/SOCKS5.txt",
+	"https://raw.githubusercontent.com/elliottophellia/yakumo/master/results/socks5/global/socks5_checked.txt",
+	"https://raw.githubusercontent.com/mmpx12/proxy-list/master/socks5.txt",
+	"https://raw.githubusercontent.com/mmpx12/proxy-list/master/http.txt",
+	"https://raw.githubusercontent.com/hendrikbgr/Free-Proxy-Repo/master/proxy_list.txt",
+	"https://raw.githubusercontent.com/casals-ar/proxy-list/main/socks5",
+	"https://raw.githubusercontent.com/Anonym0usWork1221/Free-Proxies/master/proxy_files/socks5_proxies.txt",
+	"https://raw.githubusercontent.com/Zaeem20/FREE_PROXIES_LIST/master/socks5.txt",
+	"https://raw.githubusercontent.com/Zaeem20/FREE_PROXIES_LIST/master/http.txt",
+	"https://raw.githubusercontent.com/rdavydov/proxy-list/main/proxies/socks5.txt",
+	"https://raw.githubusercontent.com/rdavydov/proxy-list/main/proxies/http.txt",
 	"https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&proxy_format=protocolipport&format=text",
 	"https://spys.me/socks.txt",
+	"https://spys.me/proxy.txt",
+	"https://api.openproxylist.xyz/socks5.txt",
+	"https://api.openproxylist.xyz/http.txt",
+	"https://www.proxy-list.download/api/v1/get?type=socks5",
+	"https://www.proxy-list.download/api/v1/get?type=http",
+	"https://raw.githubusercontent.com/andigwandi/free-proxy/main/proxy_list.txt",
 }
 
 var eduCIDRs []*net.IPNet
 
 func init() {
+	// 海外高校学术科研专用网段（涵盖日本筑波/SINET、台湾TANet、韩国KOREN、美国大学/Internet2、欧洲GEANT等，绝不包含中国国内）
 	cidrs := []string{
-		"202.112.0.0/15", "202.114.0.0/15", "202.116.0.0/15", "202.118.0.0/15",
-		"202.120.0.0/15", "202.38.0.0/16", "166.111.0.0/16", "211.64.0.0/14",
-		"211.68.0.0/14", "211.80.0.0/13", "219.224.0.0/13", "210.32.0.0/14",
-		"222.192.0.0/11", "58.192.0.0/12", "59.64.0.0/11", "121.192.0.0/13",
-		"115.24.0.0/13", "150.40.0.0/16", "130.158.0.0/16",
+		// 日本筑波大学及 SINET 学术信息网
+		"130.158.0.0/16", "150.40.0.0/16", "133.0.0.0/8", "150.0.0.0/9",
+		// 台湾学术网络 TANet 及名校 (台大、清华、阳明交大等)
+		"140.111.0.0/16", "140.112.0.0/15", "140.114.0.0/15", "140.116.0.0/14",
+		"140.120.0.0/13", "163.13.0.0/15", "192.83.166.0/24",
+		// 韩国国家科研网 KOREN 与名校 (KAIST, SNU)
+		"134.75.0.0/16", "143.248.0.0/16", "147.46.0.0/15",
+		// 美国著名高校与 Internet2 学术网 (MIT, Stanford, Harvard, UCSD 等)
+		"18.0.0.0/15", "128.0.0.0/8", "129.0.0.0/9", "130.0.0.0/9", "131.0.0.0/9",
+		"132.0.0.0/9", "169.228.0.0/15", "171.64.0.0/14", "160.39.0.0/16",
+		"128.197.0.0/16", "128.103.0.0/16",
+		// 欧洲科研学术网 GÉANT 与英国/德国高校 (JANET, DFN, Edinburgh, Warwick)
+		"193.60.0.0/14", "194.80.0.0/14", "137.205.0.0/16", "138.250.0.0/16", "129.215.0.0/16",
+		// 新加坡 SingAREN 学术网 (NUS, NTU)
+		"155.69.0.0/16", "137.132.0.0/16",
+		// 澳大利亚 AARNet 学术网
+		"138.25.0.0/16", "139.130.0.0/16", "144.130.0.0/16",
 	}
 	for _, c := range cidrs {
 		_, ipnet, err := net.ParseCIDR(c)
@@ -81,7 +127,7 @@ func init() {
 	}
 }
 
-// isEduIP 判断 IP 是否位于中国 CERNET 或日本/全球学术科研高校网段
+// isEduIP 判断 IP 是否位于海外学术高校网络（日本筑波大学/SINET、台湾TANet、韩国KOREN、欧美大学等，排除国内）
 func isEduIP(ipStr string) bool {
 	parsed := net.ParseIP(ipStr)
 	if parsed == nil {
@@ -256,11 +302,14 @@ func parseProxyList(body string, defaultProto string) []Node {
 		ipType := "hosting"
 		isp := "Public Proxy"
 		src := "proxy"
-		if isEduIP(ip) {
-			country = "教育网高校"
+		if isEduIP(ip) && extractedCC != "CN" {
+			country = "海外高校学术网"
 			countryCode = "EDU"
+			if extractedCC != "" {
+				countryCode = extractedCC
+			}
 			ipType = "edu"
-			isp = "中国教育科研网CERNET/高校"
+			isp = "海外高校科研学术网络"
 			src = "edu"
 		} else if extractedCC != "" {
 			countryCode = extractedCC
@@ -373,7 +422,7 @@ func loadInitialNodes(workDir string) []Node {
 }
 
 // fetchNodes 拉取并解析节点列表，支持多镜像并发聚合、多在线订阅源、单一指定源拉取与磁盘离线缓存池。
-// sourceFilter 支持: "all" (全部), "vpngate" (仅筑波大学官方/镜像), "edu" (仅教育网高校), "proxy" (仅全网公网代理池)
+// sourceFilter 支持: "all" (全部), "vpngate" (仅筑波大学官方/镜像), "edu" (仅海外高校学术网), "proxy" (仅全网公网代理池)
 func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]Node, error) {
 	nodeMap := make(map[string]Node)
 
@@ -381,6 +430,9 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 	for _, n := range loadInitialNodes(workDir) {
 		if n.IP != "" {
 			if sourceFilter == "" || sourceFilter == "all" || strings.EqualFold(n.Source, sourceFilter) || (sourceFilter == "edu" && isEduIP(n.IP)) {
+				if sourceFilter == "edu" && (strings.EqualFold(n.CountryCode, "CN") || strings.Contains(strings.ToLower(n.Country), "china") || strings.HasSuffix(strings.ToLower(n.HostName), ".cn")) {
+					continue
+				}
 				nodeMap[n.IP] = n
 			}
 		}
@@ -524,12 +576,12 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 	case "vpngate":
 		globalSourceInfo.ActiveSource = fmt.Sprintf("日本筑波大学官方与镜像源 (%d 个在线源, %d 节点)", successCount, len(nodes))
 	case "edu":
-		globalSourceInfo.ActiveSource = fmt.Sprintf("中国教育科研网 CERNET / 高校学术源 (%d 节点)", len(nodes))
+		globalSourceInfo.ActiveSource = fmt.Sprintf("海外高校学术科研网 (日本筑波/韩国/台湾/欧美 · 不含国内) (%d 节点)", len(nodes))
 	case "proxy":
 		globalSourceInfo.ActiveSource = fmt.Sprintf("全网公网开源代理池 (%d 个在线源, %d 节点)", successCount, len(nodes))
 	default:
 		if activeSrc != "" {
-			globalSourceInfo.ActiveSource = fmt.Sprintf("全网聚合 (%d 个在线源, 筑波大学+教育网+全球公网)", successCount)
+			globalSourceInfo.ActiveSource = fmt.Sprintf("全网聚合 (%d 个在线源, 筑波大学+海外高校学术+全球公网)", successCount)
 		} else {
 			globalSourceInfo.ActiveSource = "本地累积离线缓存池"
 		}
@@ -682,24 +734,55 @@ func parseNodeCSV(body string) ([]Node, error) {
 		ipType := "hosting"
 		isp := "VPN Gate"
 		src := "vpngate"
-		isAcademic := isEduIP(ip) ||
+		hostLower := strings.ToLower(hostName)
+		isChina := strings.EqualFold(countryCode, "CN") ||
+			strings.Contains(strings.ToLower(country), "china") ||
+			strings.HasSuffix(hostLower, ".cn") ||
+			strings.Contains(hostLower, ".edu.cn")
+
+		isAcademic := !isChina && (isEduIP(ip) ||
 			isEduISP(isp) ||
-			strings.Contains(strings.ToLower(hostName), "tsukuba") ||
-			strings.Contains(strings.ToLower(hostName), "edu") ||
-			strings.Contains(strings.ToLower(hostName), ".ac.jp") ||
-			strings.Contains(strings.ToLower(hostName), ".ac.kr") ||
-			strings.Contains(strings.ToLower(hostName), ".edu.tw") ||
-			strings.Contains(strings.ToLower(hostName), ".edu.cn") ||
-			strings.Contains(strings.ToLower(hostName), "univ") ||
+			strings.Contains(hostLower, "tsukuba") ||
+			strings.Contains(hostLower, "sinet") ||
+			strings.Contains(hostLower, "koren") ||
+			strings.Contains(hostLower, "tanet") ||
+			strings.Contains(hostLower, ".ac.jp") ||
+			strings.Contains(hostLower, ".ac.kr") ||
+			strings.Contains(hostLower, ".edu.tw") ||
+			strings.Contains(hostLower, ".ac.uk") ||
+			strings.Contains(hostLower, ".edu.au") ||
+			strings.Contains(hostLower, ".edu.sg") ||
+			strings.Contains(hostLower, "univ") ||
 			strings.Contains(strings.ToLower(get("Operator")), "tsukuba") ||
 			strings.Contains(strings.ToLower(get("Operator")), "university") ||
-			strings.Contains(strings.ToLower(get("Message")), "university")
+			strings.Contains(strings.ToLower(get("Message")), "university"))
+
 		if isAcademic {
-			country = "教育网高校"
-			countryCode = "EDU"
 			ipType = "edu"
-			isp = "高校科研学术网络 (CERNET/SINET/EDU)"
 			src = "edu"
+			if strings.Contains(hostLower, "tsukuba") || strings.Contains(strings.ToLower(get("Operator")), "tsukuba") {
+				isp = "日本筑波大学 (SINET学术骨干)"
+				if countryCode == "" {
+					countryCode = "JP"
+				}
+			} else if strings.Contains(hostLower, ".ac.jp") {
+				isp = "日本大学学术网络 (SINET)"
+				if countryCode == "" {
+					countryCode = "JP"
+				}
+			} else if strings.Contains(hostLower, ".ac.kr") || strings.Contains(hostLower, "koren") {
+				isp = "韩国高校学术网络 (KOREN)"
+				if countryCode == "" {
+					countryCode = "KR"
+				}
+			} else if strings.Contains(hostLower, ".edu.tw") || strings.Contains(hostLower, "tanet") {
+				isp = "台湾学术网络 (TANet)"
+				if countryCode == "" {
+					countryCode = "TW"
+				}
+			} else {
+				isp = "海外高校学术网络 (EDU)"
+			}
 		} else if strings.HasPrefix(hostName, "pub_") {
 			src = "proxy"
 		}

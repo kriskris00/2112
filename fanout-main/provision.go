@@ -255,7 +255,7 @@ func (m *Manager) Regions(source ...string) []RegionStat {
 		presets := []RegionStat{
 			{Code: "GLOBAL", Name: "全球推荐 (自动优选)", Available: 50, BestSpeed: 100.0, BestPing: 45, AvgPurity: 85},
 			{Code: "JP", Name: "日本", Available: 15, BestSpeed: 95.0, BestPing: 45, AvgPurity: 95},
-			{Code: "EDU", Name: "教育网高校", Available: 10, BestSpeed: 75.0, BestPing: 25, AvgPurity: 99},
+			{Code: "EDU", Name: "海外高校学术科研网 (不含国内)", Available: 10, BestSpeed: 75.0, BestPing: 25, AvgPurity: 99},
 			{Code: "HK", Name: "中国香港", Available: 10, BestSpeed: 90.0, BestPing: 30, AvgPurity: 90},
 			{Code: "TW", Name: "中国台湾", Available: 8, BestSpeed: 85.0, BestPing: 38, AvgPurity: 88},
 			{Code: "SG", Name: "新加坡", Available: 8, BestSpeed: 92.0, BestPing: 60, AvgPurity: 90},
