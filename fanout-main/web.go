@@ -677,8 +677,11 @@ function apiPath(p) {
 }
 
 async function api(path, opts = {}){
+  const timeoutMs = opts.timeout || (
+    path.includes('/refresh') || path.includes('/provision') || path.includes('/update/apply') || path.includes('/import') ? 60000 : 25000
+  );
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 12000);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   opts.signal = controller.signal;
   try {
     const r = await fetch(apiPath(path), opts);
@@ -689,7 +692,7 @@ async function api(path, opts = {}){
   } catch(err) {
     clearTimeout(timeoutId);
     if (err.name === 'AbortError') {
-      throw new Error('请求超时 (12秒)，请检查后端运行状态');
+      throw new Error('请求超时 (' + Math.round(timeoutMs/1000) + '秒)，请检查后端运行状态');
     }
     throw err;
   }
@@ -1782,9 +1785,9 @@ async function loadSources(){
 
 async function refreshSources(btn){
   if(btn) btn.disabled = true;
-  toast('正在轮询探测筑波大学镜像及官方源...');
+  toast('正在并发拉取全网所有源（筑波大学+教育网+全球公网），请稍候...');
   try{
-    const res = await api('/api/sources/refresh', {method:'POST'});
+    const res = await api('/api/sources/refresh', {method:'POST', timeout:60000});
     toast('拉取成功！已获取 ' + (res.count || 0) + ' 个可用节点');
     await loadSources();
     regions = await api('/api/regions') || [];

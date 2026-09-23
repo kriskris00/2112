@@ -18,9 +18,10 @@ type Manager struct {
 	tunnels  map[int]*Tunnel
 	nodes    []Node
 	fetched  time.Time
-	workDir  string
-	maxSlots int
-	jobs     JobStore
+	workDir     string
+	maxSlots    int
+	jobs        JobStore
+	refreshing  bool
 }
 
 func NewManager(maxSlots int, workDir string) *Manager {
@@ -36,6 +37,21 @@ func NewManager(maxSlots int, workDir string) *Manager {
 
 // RefreshNodes 重新拉取节点列表。
 func (m *Manager) RefreshNodes() (int, error) {
+	m.mu.Lock()
+	if m.refreshing {
+		m.mu.Unlock()
+		m.mu.RLock()
+		defer m.mu.RUnlock()
+		return len(m.nodes), nil
+	}
+	m.refreshing = true
+	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		m.refreshing = false
+		m.mu.Unlock()
+	}()
+
 	customDir := filepath.Join(m.workDir, "custom_nodes")
 	if envDir := os.Getenv("FANOUT_CUSTOM_NODES_DIR"); envDir != "" {
 		customDir = envDir
