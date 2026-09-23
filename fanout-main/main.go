@@ -259,7 +259,8 @@ func apiStop(m *Manager) http.HandlerFunc {
 
 func apiRefresh(m *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		n, err := m.RefreshNodes()
+		source := r.URL.Query().Get("source")
+		n, err := m.RefreshNodesSource(source)
 		if err != nil {
 			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 			return
@@ -286,10 +287,11 @@ func apiSwap(m *Manager) http.HandlerFunc {
 	}
 }
 
-// apiRegions 给新建向导用：各地区还剩多少空闲节点。
+// apiRegions 给新建向导用：各地区还剩多少空闲节点，支持 ?source= 过滤。
 func apiRegions(m *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, m.Regions())
+		source := r.URL.Query().Get("source")
+		writeJSON(w, http.StatusOK, m.Regions(source))
 	}
 }
 
@@ -319,10 +321,11 @@ func apiSources(m *Manager) http.HandlerFunc {
 	}
 }
 
-// apiSourcesRefresh 强制重新拉取节点
+// apiSourcesRefresh 强制重新拉取节点，支持 ?source=all|vpngate|edu|proxy
 func apiSourcesRefresh(m *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		n, err := m.RefreshNodes()
+		source := r.URL.Query().Get("source")
+		n, err := m.RefreshNodesSource(source)
 		if err != nil {
 			writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error(), "info": GetSourceInfo()})
 			return
@@ -480,6 +483,13 @@ func apiProvision(m *Manager) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "count 参数无效"})
 			return
 		}
+		// 推荐 3 个，允许范围 1 ~ 20 (单机负载保护)
+		if count < 1 {
+			count = 1
+		}
+		if count > 20 {
+			count = 20
+		}
 		tpl := 0
 		if s := q.Get("template"); s != "" {
 			if tpl, err = strconv.Atoi(s); err != nil {
@@ -487,8 +497,9 @@ func apiProvision(m *Manager) http.HandlerFunc {
 				return
 			}
 		}
+		source := q.Get("source")
 		job, err := m.Provision(ProvisionRequest{
-			Region: q.Get("region"), Count: count, TemplateID: tpl,
+			Region: q.Get("region"), Source: source, Count: count, TemplateID: tpl,
 		})
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})

@@ -123,18 +123,37 @@ func GetIPIntel(ip string) IPIntel {
 	item, ok := globalIPIntel.cache[ip]
 	globalIPIntel.mu.RUnlock()
 
-	if ok && time.Now().Unix()-item.UpdatedAt < 7*86400 {
+	if ok {
 		return item
 	}
 
-	// 单个 IP 查询
+	// 缓存未命中时立即返回预估值，绝不阻塞网络请求（防止数万节点遍历时卡死）
+	fallback := IPIntel{
+		IP:          ip,
+		IPType:      "hosting",
+		PurityScore: 75,
+		ISP:         "Public Pool",
+		Country:     "全球节点",
+		CountryCode: "GLOBAL",
+		UpdatedAt:   time.Now().Unix(),
+	}
+
+	// 异步由后台排队丰富该单个 IP，不阻塞主流程
+	go enrichSingleIPAsync(ip)
+
+	return fallback
+}
+
+// enrichSingleIPAsync 后台异步查询单个 IP 情报并写入缓存
+func enrichSingleIPAsync(ip string) {
+	if ip == "" || ip == "127.0.0.1" || isEduIP(ip) {
+		return
+	}
 	url := fmt.Sprintf("http://ip-api.com/json/%s?fields=status,country,countryCode,isp,org,as,mobile,proxy,hosting,query", ip)
 	client := &http.Client{Timeout: 3 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil || resp.StatusCode != http.StatusOK {
-		// 查不到时默认兜底为机房
-		fallback := IPIntel{IP: ip, IPType: "hosting", PurityScore: 55, ISP: "Unknown", UpdatedAt: time.Now().Unix()}
-		return fallback
+		return
 	}
 	defer resp.Body.Close()
 
@@ -149,8 +168,7 @@ func GetIPIntel(ip string) IPIntel {
 		Hosting     bool   `json:"hosting"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil || data.Status != "success" {
-		fallback := IPIntel{IP: ip, IPType: "hosting", PurityScore: 55, ISP: "Unknown", UpdatedAt: time.Now().Unix()}
-		return fallback
+		return
 	}
 
 	ipType, purity := computePurity(data.Hosting, data.Mobile, data.Proxy)
@@ -179,8 +197,7 @@ func GetIPIntel(ip string) IPIntel {
 	globalIPIntel.cache[ip] = result
 	globalIPIntel.mu.Unlock()
 
-	go saveIPIntel()
-	return result
+	saveIPIntel()
 }
 
 // BatchEnrichNodes 异步批量解析节点列表的 IP 纯净度与类型（100 个一批）

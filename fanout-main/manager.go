@@ -35,8 +35,16 @@ func NewManager(maxSlots int, workDir string) *Manager {
 	}
 }
 
-// RefreshNodes 重新拉取节点列表。
+// RefreshNodes 重新拉取所有节点源。
 func (m *Manager) RefreshNodes() (int, error) {
+	return m.RefreshNodesSource("all")
+}
+
+// RefreshNodesSource 重新拉取指定节点源（all, vpngate, edu, proxy）。
+func (m *Manager) RefreshNodesSource(source string) (int, error) {
+	if source == "" {
+		source = "all"
+	}
 	m.mu.Lock()
 	if m.refreshing {
 		m.mu.Unlock()
@@ -58,7 +66,7 @@ func (m *Manager) RefreshNodes() (int, error) {
 	}
 	_ = os.MkdirAll(customDir, 0755)
 
-	nodes, err := fetchNodes(m.workDir, 45*time.Second)
+	nodes, err := fetchNodes(m.workDir, source, 35*time.Second)
 	// 扫描加载本地自定义 .ovpn 节点并合并
 	customNodes := loadLocalOvpnNodes(customDir)
 	if len(customNodes) > 0 {

@@ -285,20 +285,39 @@ textarea:focus{outline:none;border-color:var(--accent)}
     </div>
     <div class="body">
       <label class="f">
-        <span>地区</span>
-        <input type="search" id="rgfilter" placeholder="筛选地区">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span>节点来源 / 节点池</span>
+          <span style="font-size:12px;color:var(--dim)">自由选择单独源或全部聚合</span>
+        </div>
+        <select id="wzSource" style="padding:8px 10px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--text);font-size:13px;width:100%">
+          <option value="all">🌐 全部聚合源 (全网数万节点 · 智能优选)</option>
+          <option value="vpngate">🇯🇵 日本筑波大学 (VPN Gate 官方与镜像源)</option>
+          <option value="edu">🎓 中国教育科研网高校 (CERNET / 高校学术)</option>
+          <option value="proxy">🌍 全网公网开源代理池 (TheSpeedX / Proxifly 等)</option>
+          <option value="custom">📁 本地导入与自定义节点 (.ovpn / 自建)</option>
+        </select>
+      </label>
+      <label class="f">
+        <span>地区 / 国家</span>
+        <input type="search" id="rgfilter" placeholder="搜索或筛选国家/地区，如 日本、JP、美国、教育网...">
         <div class="regions" id="regions" style="margin-top:6px"></div>
       </label>
       <label class="f">
-        <span>数量</span>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span>出口数量</span>
+          <span style="font-size:12px;color:var(--primary);font-weight:600">推荐 3 个 (最佳性能与稳定性)</span>
+        </div>
         <div class="stepper">
-          <button id="minus" title="减少">
+          <button id="minus" type="button" title="减少">
             <svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg>
           </button>
-          <input id="count" type="text" inputmode="numeric" value="3">
-          <button id="plus" title="增加">
+          <input id="count" type="number" min="1" max="20" step="1" value="3" placeholder="3" style="text-align:center;font-weight:700;font-size:15px">
+          <button id="plus" type="button" title="增加">
             <svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
           </button>
+        </div>
+        <div class="hint" style="color:var(--dim);font-size:12px;margin-top:4px">
+          ⚙️ 默认推荐 <b>3</b> 个出口 · 允许范围: <b>1 ~ 20</b> 个 (单机 1C1G 内存负载最佳)
         </div>
         <div class="hint" id="availhint"></div>
       </label>
@@ -562,7 +581,12 @@ textarea:focus{outline:none;border-color:var(--accent)}
           <div>• <b>教育网与高校学术网专项</b>：CERNET / SINET / 清华 / 北大 / 中科大 / 浙大等高校 IP 专项识别与归类</div>
           <div>• <b>全自动容灾与并发测速</b>：自动并发拉取、剔除不可用死节点、按纯净度与网络速度降序排序</div>
         </div>
-        <button id="refreshMirrors">🔄 立即轮询并发聚合全网所有源 (数万节点)</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="primary" id="refreshMirrors" data-src="all">🔄 刷新全部源 (全网数万节点)</button>
+          <button id="refreshVpnGate" data-src="vpngate">🇯🇵 仅拉取筑波大学源</button>
+          <button id="refreshEdu" data-src="edu">🎓 仅拉取教育科研网</button>
+          <button id="refreshProxy" data-src="proxy">🌍 仅拉取全网代理池</button>
+        </div>
       </div>
 
       <div style="margin-bottom:16px;border-top:1px solid var(--border);padding-top:14px">
@@ -977,9 +1001,27 @@ document.querySelectorAll('.modal').forEach(m => {
   m.onclick = e => { if(e.target === m) m.classList.remove('open'); };
 });
 
+const DEFAULT_CORE_REGIONS = [
+  {code: 'GLOBAL', name: '全球推荐 (自动优选)', available: 50, avg_purity: 88},
+  {code: 'JP', name: '日本 (筑波大学官方/镜像)', available: 15, avg_purity: 95},
+  {code: 'EDU', name: '教育网高校 (CERNET学术)', available: 10, avg_purity: 99},
+  {code: 'HK', name: '中国香港', available: 10, avg_purity: 90},
+  {code: 'TW', name: '中国台湾', available: 8, avg_purity: 88},
+  {code: 'SG', name: '新加坡', available: 8, avg_purity: 90},
+  {code: 'US', name: '美国', available: 20, avg_purity: 88}
+];
+
+function clampCount(val) {
+  let n = parseInt(val, 10);
+  if (isNaN(n) || n < 1) n = 3;
+  if (n > 20) n = 20;
+  return n;
+}
+
 function renderRegions(){
   const kw = ($('#rgfilter').value || '').trim().toLowerCase();
-  const list = regions.filter(r => {
+  const sourceList = regions.length ? regions : DEFAULT_CORE_REGIONS;
+  const list = sourceList.filter(r => {
     if(!kw) return true;
     const zh = (COUNTRY_ZH[r.code.toUpperCase()] || '').toLowerCase();
     return r.code.toLowerCase().includes(kw)
@@ -987,22 +1029,9 @@ function renderRegions(){
       || zh.includes(kw);
   });
 
-  const availTotal = regions.reduce((a, r) => a + r.available, 0);
+  const availTotal = sourceList.reduce((a, r) => a + r.available, 0);
 
-  if(!regions.length){
-    $('#regions').innerHTML = '<div style="padding:14px;background:#141820;border-radius:8px;border:1px dashed var(--line);margin-top:6px">'
-      + '<div style="font-weight:600;color:var(--warn);margin-bottom:6px">⚠️ 正在连接全网节点池…</div>'
-      + '<div style="color:var(--dim);font-size:12px;line-height:1.6;margin-bottom:10px">'
-      + '系统正自动从日本筑波大学镜像及全网开源公网池聚合数万节点。您也可点击下方按钮强制刷新：</div>'
-      + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
-      + '<button class="primary" id="wzRefreshBtn" type="button" style="font-size:12px;padding:6px 12px">🔄 立即拉取节点源</button>'
-      + '<button id="wzSourcesBtn" type="button" style="font-size:12px;padding:6px 12px">🌐 节点源管理与批量导入</button>'
-      + '</div></div>';
-    updateAvail();
-    return;
-  }
-
-  $('#regions').innerHTML = ['<button class="rg' + (region === '' ? ' sel' : '')
+  const btns = ['<button class="rg' + (region === '' ? ' sel' : '')
       + '" data-rg=""><b>🌐 不限地区 (自动推荐)</b><em>共 ' + availTotal + ' 个可用节点 · 测速最优</em></button>']
     .concat(list.map(r => {
       const resHint = r.residential ? ' · 🏡 ' + r.residential + ' 住宅' : '';
@@ -1011,41 +1040,42 @@ function renderRegions(){
       return '<button class="rg' + (region === r.code ? ' sel' : '')
         + '" data-rg="' + esc(r.code) + '"><b>' + esc(title) + '</b>'
         + '<em>' + r.available + ' 个空闲' + resHint + purityHint + '</em></button>';
-    }))
-    .join('');
+    }));
+
+  if(!regions.length){
+    btns.push('<div style="grid-column:1/-1;padding:8px 12px;background:#141820;border-radius:6px;border:1px dashed var(--line);margin-top:6px;display:flex;justify-content:space-between;align-items:center">'
+      + '<span style="color:var(--dim);font-size:12px">⚡ 正在载入更多节点或离线状态，可直接使用上述预设地区</span>'
+      + '<button class="primary" id="wzRefreshBtn" type="button" style="font-size:11px;padding:4px 8px">🔄 刷新节点源</button>'
+      + '</div>');
+  }
+
+  $('#regions').innerHTML = btns.join('');
   updateAvail();
 }
 
 function availOf(code){
-  if(code === '') return regions.reduce((a, r) => a + r.available, 0);
-  const r = regions.find(x => x.code === code);
+  const sourceList = regions.length ? regions : DEFAULT_CORE_REGIONS;
+  if(code === '') return sourceList.reduce((a, r) => a + r.available, 0);
+  const r = sourceList.find(x => x.code === code);
   return r ? r.available : 0;
 }
 
 function updateAvail(){
   const countEl = $('#count');
-  if(!countEl.value || Number(countEl.value) < 1) {
-    countEl.value = '3';
-  }
-  const want = Number(countEl.value) || 1;
+  countEl.value = clampCount(countEl.value);
+  const want = Number(countEl.value) || 3;
   const avail = availOf(region);
   const hint = $('#availhint');
   const goBtn = $('#go');
 
-  if(!regions.length){
-    hint.innerHTML = '<span style="color:var(--warn)">正在自动连接全网节点池，可直接点击「开始」开通出口</span>';
-    hint.className = 'hint';
-    goBtn.disabled = false;
-    return;
-  }
-
-  hint.textContent = avail ? '可用 ' + avail + ' 个节点' : (region ? '这个地区暂时没有空闲节点' : '全网可用');
+  hint.textContent = avail ? '当前源可用 ' + avail + ' 个空闲节点' : (region ? '当前源此地区暂无空闲节点，将尝试全网池' : '全网可用');
   hint.className = 'hint' + (want > avail && avail ? ' bad' : '');
   if(want > avail && avail) hint.textContent = '只剩 ' + avail + ' 个，将全部使用';
   goBtn.disabled = false;
 }
 
-async function loadWizard(){
+async function loadWizard(selectedSrc){
+  const src = selectedSrc !== undefined ? selectedSrc : ($('#wzSource') ? $('#wzSource').value : 'all');
   const regionsBox = $('#regions');
   if (!regions.length) {
     regionsBox.innerHTML = '<div style="padding:16px;text-align:center;color:var(--dim);font-size:12px">'
@@ -1053,8 +1083,8 @@ async function loadWizard(){
       + '<div>正在载入可用地区与节点列表…</div></div>';
   }
 
-  // 1. 独立异步读取地区列表，失败给出提示
-  api('/api/regions').then(res => {
+  // 1. 独立异步读取选定节点源的地区列表
+  api('/api/regions?source=' + encodeURIComponent(src || 'all')).then(res => {
     regions = res || [];
     regionsLoaded = true;
     renderRegions();
@@ -1182,18 +1212,29 @@ $('#minus').onclick = () => { step(-1); };
 $('#plus').onclick = () => { step(1); };
 function step(d){
   const el = $('#count');
-  el.value = Math.min(20, Math.max(1, (Number(el.value) || 1) + d));
+  el.value = clampCount((parseInt(el.value, 10) || 3) + d);
   updateAvail();
 }
 $('#count').oninput = updateAvail;
+$('#count').onchange = updateAvail;
+$('#count').onblur = updateAvail;
+
+if($('#wzSource')){
+  $('#wzSource').onchange = () => {
+    loadWizard($('#wzSource').value);
+  };
+}
 
 $('#go').onclick = async e => {
-  const want = Math.min(Number($('#count').value) || 1, availOf(region) || 1);
+  const count = clampCount($('#count').value);
+  const avail = availOf(region);
+  const want = Math.min(count, avail > 0 ? avail : count);
   const tpl = $('#tpl').value || '0';
+  const src = $('#wzSource') ? $('#wzSource').value : 'all';
   e.target.disabled = true;
   try{
     await api('/api/provision?count=' + want + '&region=' + encodeURIComponent(region)
-      + '&template=' + tpl, {method:'POST'});
+      + '&source=' + encodeURIComponent(src) + '&template=' + tpl, {method:'POST'});
     closeModal('wizard');
     poll();
   }catch(err){ toast(err.message, true); }
@@ -1783,14 +1824,21 @@ async function loadSources(){
   }
 }
 
-async function refreshSources(btn){
+async function refreshSources(btn, src = 'all'){
   if(btn) btn.disabled = true;
-  toast('正在并发拉取全网所有源（筑波大学+教育网+全球公网），请稍候...');
+  const nameMap = {
+    all: '全网所有源（筑波大学+教育网+全球公网）',
+    vpngate: '日本筑波大学官方与镜像源',
+    edu: '中国教育科研网高校学术源',
+    proxy: '全网公网开源代理池'
+  };
+  toast('正在拉取 ' + (nameMap[src] || src) + '，请稍候...');
   try{
-    const res = await api('/api/sources/refresh', {method:'POST', timeout:60000});
-    toast('拉取成功！已获取 ' + (res.count || 0) + ' 个可用节点');
+    const res = await api('/api/sources/refresh?source=' + encodeURIComponent(src || 'all'), {method:'POST', timeout:60000});
+    toast('拉取成功！已获取 ' + (res.count || 0) + ' 个节点');
     await loadSources();
-    regions = await api('/api/regions') || [];
+    const currentWzSrc = $('#wzSource') ? $('#wzSource').value : 'all';
+    regions = await api('/api/regions?source=' + encodeURIComponent(currentWzSrc)) || [];
     renderRegions();
     poll();
   }catch(e){
@@ -1865,9 +1913,10 @@ document.addEventListener('click', async e => {
     loadSources();
     return;
   }
-  if(e.target.closest('#wzRefreshBtn') || e.target.closest('#refreshMirrors')){
-    const btn = e.target.closest('#wzRefreshBtn') || e.target.closest('#refreshMirrors');
-    await refreshSources(btn);
+  if(e.target.closest('#wzRefreshBtn') || e.target.closest('#refreshMirrors') || e.target.closest('#refreshVpnGate') || e.target.closest('#refreshEdu') || e.target.closest('#refreshProxy')){
+    const btn = e.target.closest('#wzRefreshBtn') || e.target.closest('#refreshMirrors') || e.target.closest('#refreshVpnGate') || e.target.closest('#refreshEdu') || e.target.closest('#refreshProxy');
+    const src = btn.dataset.src || ($('#wzSource') ? $('#wzSource').value : 'all');
+    await refreshSources(btn, src);
     return;
   }
   if(e.target.closest('#scanLocalOvpn')){

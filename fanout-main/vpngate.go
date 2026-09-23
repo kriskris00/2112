@@ -194,6 +194,7 @@ type Node struct {
 	IPType      string  `json:"ip_type,omitempty"`      // residential / hosting / mobile / edu
 	PurityScore int     `json:"purity_score,omitempty"` // 0-100
 	ISP         string  `json:"isp,omitempty"`
+	Source      string  `json:"source,omitempty"` // vpngate / edu / proxy / custom
 }
 
 // parseProxyList 解析全网公开的纯 IP:Port 或 proto://IP:Port 代理列表
@@ -254,11 +255,13 @@ func parseProxyList(body string, defaultProto string) []Node {
 		countryCode := "GLOBAL"
 		ipType := "hosting"
 		isp := "Public Proxy"
+		src := "proxy"
 		if isEduIP(ip) {
 			country = "教育网高校"
 			countryCode = "EDU"
 			ipType = "edu"
 			isp = "中国教育科研网CERNET/高校"
+			src = "edu"
 		} else if extractedCC != "" {
 			countryCode = extractedCC
 			country = countryCode
@@ -277,6 +280,7 @@ func parseProxyList(body string, defaultProto string) []Node {
 			IPType:      ipType,
 			PurityScore: 75,
 			ISP:         isp,
+			Source:      src,
 		})
 	}
 	return nodes
@@ -325,30 +329,30 @@ func saveNodesToCache(workDir string, nodes []Node) {
 // builtinSeedNodes 提供内建高可用种子节点池，确保服务初次启动或弱网离线时地区与节点池绝不为空
 var builtinSeedNodes = []Node{
 	// 教育网高校 (CERNET / SINET 高校学术科研节点)
-	{HostName: "pub_socks5_202.112.0.1_1080", IP: "202.112.0.1", Port: 1080, Proto: "socks5", Country: "教育网高校", CountryCode: "EDU", SpeedMbps: 65.0, Ping: 25, IPType: "edu", PurityScore: 99, ISP: "中国教育和科研计算机网 CERNET 骨干"},
-	{HostName: "pub_socks5_166.111.8.28_1080", IP: "166.111.8.28", Port: 1080, Proto: "socks5", Country: "教育网高校", CountryCode: "EDU", SpeedMbps: 75.0, Ping: 22, IPType: "edu", PurityScore: 99, ISP: "清华大学 CERNET 节点"},
-	{HostName: "pub_socks5_202.38.64.1_1080", IP: "202.38.64.1", Port: 1080, Proto: "socks5", Country: "教育网高校", CountryCode: "EDU", SpeedMbps: 70.0, Ping: 28, IPType: "edu", PurityScore: 98, ISP: "中国科学技术大学校园网"},
-	{HostName: "pub_socks5_210.32.0.1_1080", IP: "210.32.0.1", Port: 1080, Proto: "socks5", Country: "教育网高校", CountryCode: "EDU", SpeedMbps: 60.0, Ping: 30, IPType: "edu", PurityScore: 98, ISP: "浙江大学 CERNET 节点"},
-	{HostName: "pub_socks5_202.120.0.1_1080", IP: "202.120.0.1", Port: 1080, Proto: "socks5", Country: "教育网高校", CountryCode: "EDU", SpeedMbps: 58.0, Ping: 29, IPType: "edu", PurityScore: 98, ISP: "上海交通大学教育网"},
-	{HostName: "pub_socks5_211.64.0.1_1080", IP: "211.64.0.1", Port: 1080, Proto: "socks5", Country: "教育网高校", CountryCode: "EDU", SpeedMbps: 52.0, Ping: 32, IPType: "edu", PurityScore: 97, ISP: "山东大学高校节点"},
+	{HostName: "pub_socks5_202.112.0.1_1080", IP: "202.112.0.1", Port: 1080, Proto: "socks5", Country: "教育网高校", CountryCode: "EDU", SpeedMbps: 65.0, Ping: 25, IPType: "edu", PurityScore: 99, ISP: "中国教育和科研计算机网 CERNET 骨干", Source: "edu"},
+	{HostName: "pub_socks5_166.111.8.28_1080", IP: "166.111.8.28", Port: 1080, Proto: "socks5", Country: "教育网高校", CountryCode: "EDU", SpeedMbps: 75.0, Ping: 22, IPType: "edu", PurityScore: 99, ISP: "清华大学 CERNET 节点", Source: "edu"},
+	{HostName: "pub_socks5_202.38.64.1_1080", IP: "202.38.64.1", Port: 1080, Proto: "socks5", Country: "教育网高校", CountryCode: "EDU", SpeedMbps: 70.0, Ping: 28, IPType: "edu", PurityScore: 98, ISP: "中国科学技术大学校园网", Source: "edu"},
+	{HostName: "pub_socks5_210.32.0.1_1080", IP: "210.32.0.1", Port: 1080, Proto: "socks5", Country: "教育网高校", CountryCode: "EDU", SpeedMbps: 60.0, Ping: 30, IPType: "edu", PurityScore: 98, ISP: "浙江大学 CERNET 节点", Source: "edu"},
+	{HostName: "pub_socks5_202.120.0.1_1080", IP: "202.120.0.1", Port: 1080, Proto: "socks5", Country: "教育网高校", CountryCode: "EDU", SpeedMbps: 58.0, Ping: 29, IPType: "edu", PurityScore: 98, ISP: "上海交通大学教育网", Source: "edu"},
+	{HostName: "pub_socks5_211.64.0.1_1080", IP: "211.64.0.1", Port: 1080, Proto: "socks5", Country: "教育网高校", CountryCode: "EDU", SpeedMbps: 52.0, Ping: 32, IPType: "edu", PurityScore: 97, ISP: "山东大学高校节点", Source: "edu"},
 
 	// 日本筑波大学核心官方骨干节点
-	{HostName: "pub_socks5_130.158.75.33_14631", IP: "130.158.75.33", Port: 14631, Proto: "socks5", Country: "日本", CountryCode: "JP", SpeedMbps: 95.0, Ping: 45, IPType: "edu", PurityScore: 96, ISP: "筑波大学本部 VPN Gate"},
-	{HostName: "pub_socks5_150.40.105.19_35399", IP: "150.40.105.19", Port: 35399, Proto: "socks5", Country: "日本", CountryCode: "JP", SpeedMbps: 88.0, Ping: 48, IPType: "edu", PurityScore: 95, ISP: "筑波大学学术镜像"},
-	{HostName: "pub_socks5_219.100.37.234_25500", IP: "219.100.37.234", Port: 25500, Proto: "socks5", Country: "日本", CountryCode: "JP", SpeedMbps: 82.0, Ping: 46, IPType: "edu", PurityScore: 95, ISP: "筑波大学东京骨干"},
-	{HostName: "pub_socks5_219.100.37.238_52158", IP: "219.100.37.238", Port: 52158, Proto: "socks5", Country: "日本", CountryCode: "JP", SpeedMbps: 80.0, Ping: 50, IPType: "edu", PurityScore: 95, ISP: "筑波大学大阪出口"},
+	{HostName: "pub_socks5_130.158.75.33_14631", IP: "130.158.75.33", Port: 14631, Proto: "socks5", Country: "日本", CountryCode: "JP", SpeedMbps: 95.0, Ping: 45, IPType: "edu", PurityScore: 96, ISP: "筑波大学本部 VPN Gate", Source: "vpngate"},
+	{HostName: "pub_socks5_150.40.105.19_35399", IP: "150.40.105.19", Port: 35399, Proto: "socks5", Country: "日本", CountryCode: "JP", SpeedMbps: 88.0, Ping: 48, IPType: "edu", PurityScore: 95, ISP: "筑波大学学术镜像", Source: "vpngate"},
+	{HostName: "pub_socks5_219.100.37.234_25500", IP: "219.100.37.234", Port: 25500, Proto: "socks5", Country: "日本", CountryCode: "JP", SpeedMbps: 82.0, Ping: 46, IPType: "edu", PurityScore: 95, ISP: "筑波大学东京骨干", Source: "vpngate"},
+	{HostName: "pub_socks5_219.100.37.238_52158", IP: "219.100.37.238", Port: 52158, Proto: "socks5", Country: "日本", CountryCode: "JP", SpeedMbps: 80.0, Ping: 50, IPType: "edu", PurityScore: 95, ISP: "筑波大学大阪出口", Source: "vpngate"},
 
 	// 亚太地区 (香港、台湾、新加坡、韩国)
-	{HostName: "pub_socks5_43.153.86.12_1080", IP: "43.153.86.12", Port: 1080, Proto: "socks5", Country: "中国香港", CountryCode: "HK", SpeedMbps: 95.0, Ping: 25, IPType: "hosting", PurityScore: 90, ISP: "Hong Kong Telecom"},
-	{HostName: "pub_socks5_103.152.112.5_1080", IP: "103.152.112.5", Port: 1080, Proto: "socks5", Country: "中国台湾", CountryCode: "TW", SpeedMbps: 85.0, Ping: 38, IPType: "hosting", PurityScore: 88, ISP: "Chunghwa Telecom"},
-	{HostName: "pub_socks5_139.180.142.88_1080", IP: "139.180.142.88", Port: 1080, Proto: "socks5", Country: "新加坡", CountryCode: "SG", SpeedMbps: 92.0, Ping: 60, IPType: "hosting", PurityScore: 92, ISP: "Singtel Singapore"},
-	{HostName: "pub_socks5_119.195.163.98_23340", IP: "119.195.163.98", Port: 23340, Proto: "socks5", Country: "韩国", CountryCode: "KR", SpeedMbps: 78.0, Ping: 55, IPType: "hosting", PurityScore: 86, ISP: "Korea Telecom"},
+	{HostName: "pub_socks5_43.153.86.12_1080", IP: "43.153.86.12", Port: 1080, Proto: "socks5", Country: "中国香港", CountryCode: "HK", SpeedMbps: 95.0, Ping: 25, IPType: "hosting", PurityScore: 90, ISP: "Hong Kong Telecom", Source: "proxy"},
+	{HostName: "pub_socks5_103.152.112.5_1080", IP: "103.152.112.5", Port: 1080, Proto: "socks5", Country: "中国台湾", CountryCode: "TW", SpeedMbps: 85.0, Ping: 38, IPType: "hosting", PurityScore: 88, ISP: "Chunghwa Telecom", Source: "proxy"},
+	{HostName: "pub_socks5_139.180.142.88_1080", IP: "139.180.142.88", Port: 1080, Proto: "socks5", Country: "新加坡", CountryCode: "SG", SpeedMbps: 92.0, Ping: 60, IPType: "hosting", PurityScore: 92, ISP: "Singtel Singapore", Source: "proxy"},
+	{HostName: "pub_socks5_119.195.163.98_23340", IP: "119.195.163.98", Port: 23340, Proto: "socks5", Country: "韩国", CountryCode: "KR", SpeedMbps: 78.0, Ping: 55, IPType: "hosting", PurityScore: 86, ISP: "Korea Telecom", Source: "proxy"},
 
 	// 欧美与全球节点 (美国、德国、英国、全球)
-	{HostName: "pub_socks5_64.186.236.76_1080", IP: "64.186.236.76", Port: 1080, Proto: "socks5", Country: "美国", CountryCode: "US", SpeedMbps: 120.0, Ping: 130, IPType: "hosting", PurityScore: 88, ISP: "DMIT US Direct"},
-	{HostName: "pub_socks5_194.156.89.134_47774", IP: "194.156.89.134", Port: 47774, Proto: "socks5", Country: "德国", CountryCode: "DE", SpeedMbps: 85.0, Ping: 160, IPType: "hosting", PurityScore: 90, ISP: "Frankfurt Academic"},
-	{HostName: "pub_socks5_185.220.101.5_1080", IP: "185.220.101.5", Port: 1080, Proto: "socks5", Country: "英国", CountryCode: "GB", SpeedMbps: 80.0, Ping: 175, IPType: "hosting", PurityScore: 86, ISP: "London Gateway"},
-	{HostName: "pub_socks5_103.172.220.133_3946", IP: "103.172.220.133", Port: 3946, Proto: "socks5", Country: "全球节点", CountryCode: "GLOBAL", SpeedMbps: 70.0, Ping: 120, IPType: "hosting", PurityScore: 82, ISP: "Global Transit"},
+	{HostName: "pub_socks5_64.186.236.76_1080", IP: "64.186.236.76", Port: 1080, Proto: "socks5", Country: "美国", CountryCode: "US", SpeedMbps: 120.0, Ping: 130, IPType: "hosting", PurityScore: 88, ISP: "DMIT US Direct", Source: "proxy"},
+	{HostName: "pub_socks5_194.156.89.134_47774", IP: "194.156.89.134", Port: 47774, Proto: "socks5", Country: "德国", CountryCode: "DE", SpeedMbps: 85.0, Ping: 160, IPType: "hosting", PurityScore: 90, ISP: "Frankfurt Academic", Source: "proxy"},
+	{HostName: "pub_socks5_185.220.101.5_1080", IP: "185.220.101.5", Port: 1080, Proto: "socks5", Country: "英国", CountryCode: "GB", SpeedMbps: 80.0, Ping: 175, IPType: "hosting", PurityScore: 86, ISP: "London Gateway", Source: "proxy"},
+	{HostName: "pub_socks5_103.172.220.133_3946", IP: "103.172.220.133", Port: 3946, Proto: "socks5", Country: "全球节点", CountryCode: "GLOBAL", SpeedMbps: 70.0, Ping: 120, IPType: "hosting", PurityScore: 82, ISP: "Global Transit", Source: "proxy"},
 }
 
 // loadInitialNodes 快速启动读取底池（先读本地持久化缓存，若为空则由内建种子节点瞬间补足）
@@ -366,43 +370,47 @@ func loadInitialNodes(workDir string) []Node {
 	return out
 }
 
-// fetchNodes 拉取并解析 VPN Gate 节点列表，支持多镜像并发聚合、多在线订阅源与磁盘离线缓存池。
-func fetchNodes(workDir string, timeout time.Duration) ([]Node, error) {
+// fetchNodes 拉取并解析节点列表，支持多镜像并发聚合、多在线订阅源、单一指定源拉取与磁盘离线缓存池。
+// sourceFilter 支持: "all" (全部), "vpngate" (仅筑波大学官方/镜像), "edu" (仅教育网高校), "proxy" (仅全网公网代理池)
+func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]Node, error) {
 	nodeMap := make(map[string]Node)
 
 	// 1. 先读历史离线缓存或内建种子底池（保留之前有效积累的节点，绝不给空列表）
 	for _, n := range loadInitialNodes(workDir) {
 		if n.IP != "" {
-			nodeMap[n.IP] = n
+			if sourceFilter == "" || sourceFilter == "all" || strings.EqualFold(n.Source, sourceFilter) || (sourceFilter == "edu" && isEduIP(n.IP)) {
+				nodeMap[n.IP] = n
+			}
 		}
 	}
 	cachedCount := len(nodeMap)
 
-	// 2. 收集所有待抓取的源地址（支持用户多行/多地址配置自定义订阅）
-	sourceInfoMu.RLock()
-	customURLText := globalSourceInfo.CustomURL
-	sourceInfoMu.RUnlock()
-
+	// 2. 收集待抓取的日本筑波大学及镜像源地址
 	var targets []string
-	if customURLText != "" {
-		for _, u := range strings.Split(customURLText, "\n") {
-			u = strings.TrimSpace(u)
-			for _, sub := range strings.Split(u, ",") {
-				sub = strings.TrimSpace(sub)
-				if sub != "" {
-					targets = append(targets, sub)
+	if sourceFilter == "" || sourceFilter == "all" || sourceFilter == "vpngate" || sourceFilter == "edu" {
+		sourceInfoMu.RLock()
+		customURLText := globalSourceInfo.CustomURL
+		sourceInfoMu.RUnlock()
+
+		if customURLText != "" {
+			for _, u := range strings.Split(customURLText, "\n") {
+				u = strings.TrimSpace(u)
+				for _, sub := range strings.Split(u, ",") {
+					sub = strings.TrimSpace(sub)
+					if sub != "" {
+						targets = append(targets, sub)
+					}
 				}
 			}
 		}
-	}
-	// 加入官方与全部日本筑波大学活跃镜像
-	targets = append(targets, defaultMirrors...)
-	// 并发动态探测今日最新推荐的实时镜像池
-	if discovered := discoverMirrors(4 * time.Second); len(discovered) > 0 {
-		targets = append(targets, discovered...)
+		// 加入官方与全部日本筑波大学活跃镜像
+		targets = append(targets, defaultMirrors...)
+		// 并发动态探测今日最新推荐的实时镜像池
+		if discovered := discoverMirrors(4 * time.Second); len(discovered) > 0 {
+			targets = append(targets, discovered...)
+		}
 	}
 
-	// 3. 并发拉取所有镜像源并去重聚合
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var activeSrc string
@@ -440,6 +448,9 @@ func fetchNodes(workDir string, timeout time.Duration) ([]Node, error) {
 					break
 				}
 				if n.IP != "" {
+					if sourceFilter == "edu" && n.Source != "edu" && !isEduIP(n.IP) {
+						continue
+					}
 					nodeMap[n.IP] = n
 				}
 			}
@@ -448,45 +459,50 @@ func fetchNodes(workDir string, timeout time.Duration) ([]Node, error) {
 	}
 
 	// 4. 并发拉取全网开源公共代理与高校学术网节点池 (数万节点)
-	for _, pubSrc := range publicGlobalSources {
-		wg.Add(1)
-		go func(url string) {
-			defer wg.Done()
-			perTimeout := 10 * time.Second
-			if timeout < perTimeout {
-				perTimeout = timeout
-			}
-			raw, err := fetchRawCSVFrom(url, "", perTimeout)
-			if err != nil || len(raw) == 0 {
-				return
-			}
-			nodes := parseProxyList(raw, "socks5")
-			if len(nodes) == 0 {
-				return
-			}
-			mu.Lock()
-			if activeSrc == "" {
-				activeSrc = url
-			}
-			successCount++
-			for _, n := range nodes {
-				if len(nodeMap) >= 50000 {
-					break
+	if sourceFilter == "" || sourceFilter == "all" || sourceFilter == "proxy" || sourceFilter == "edu" {
+		for _, pubSrc := range publicGlobalSources {
+			wg.Add(1)
+			go func(url string) {
+				defer wg.Done()
+				perTimeout := 10 * time.Second
+				if timeout < perTimeout {
+					perTimeout = timeout
 				}
-				if n.IP != "" && nodeMap[n.IP].IP == "" {
-					nodeMap[n.IP] = n
+				raw, err := fetchRawCSVFrom(url, "", perTimeout)
+				if err != nil || len(raw) == 0 {
+					return
 				}
-			}
-			mu.Unlock()
-		}(pubSrc)
+				nodes := parseProxyList(raw, "socks5")
+				if len(nodes) == 0 {
+					return
+				}
+				mu.Lock()
+				if activeSrc == "" {
+					activeSrc = url
+				}
+				successCount++
+				for _, n := range nodes {
+					if len(nodeMap) >= 50000 {
+						break
+					}
+					if n.IP != "" && nodeMap[n.IP].IP == "" {
+						if sourceFilter == "edu" && n.Source != "edu" && !isEduIP(n.IP) {
+							continue
+						}
+						nodeMap[n.IP] = n
+					}
+				}
+				mu.Unlock()
+			}(pubSrc)
+		}
 	}
 	wg.Wait()
 
 	if len(nodeMap) == 0 {
 		sourceInfoMu.Lock()
-		globalSourceInfo.LastError = "所有在线镜像及离线缓存均不可用"
+		globalSourceInfo.LastError = "选定源暂无可用在线节点，请重试或切换节点源"
 		sourceInfoMu.Unlock()
-		return nil, fmt.Errorf("所有在线镜像及离线缓存均不可用")
+		return nil, fmt.Errorf("选定源暂无可用在线节点")
 	}
 
 	// 转换为列表并按速度降序排序
@@ -497,15 +513,24 @@ func fetchNodes(workDir string, timeout time.Duration) ([]Node, error) {
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].SpeedMbps > nodes[j].SpeedMbps })
 
 	// 保存持久化累积节点缓存，节点池随时间不断扩展累积
-	if workDir != "" {
+	if workDir != "" && (sourceFilter == "" || sourceFilter == "all") {
 		saveNodesToCache(workDir, nodes)
 	}
 
 	sourceInfoMu.Lock()
-	if activeSrc != "" {
-		globalSourceInfo.ActiveSource = fmt.Sprintf("全网聚合 (%d 个在线源, 筑波大学+教育网+全球公网)", successCount)
-	} else {
-		globalSourceInfo.ActiveSource = "本地累积离线缓存池"
+	switch sourceFilter {
+	case "vpngate":
+		globalSourceInfo.ActiveSource = fmt.Sprintf("日本筑波大学官方与镜像源 (%d 个在线源, %d 节点)", successCount, len(nodes))
+	case "edu":
+		globalSourceInfo.ActiveSource = fmt.Sprintf("中国教育科研网 CERNET / 高校学术源 (%d 节点)", len(nodes))
+	case "proxy":
+		globalSourceInfo.ActiveSource = fmt.Sprintf("全网公网开源代理池 (%d 个在线源, %d 节点)", successCount, len(nodes))
+	default:
+		if activeSrc != "" {
+			globalSourceInfo.ActiveSource = fmt.Sprintf("全网聚合 (%d 个在线源, 筑波大学+教育网+全球公网)", successCount)
+		} else {
+			globalSourceInfo.ActiveSource = "本地累积离线缓存池"
+		}
 	}
 	globalSourceInfo.LastFetch = time.Now()
 	globalSourceInfo.TotalNodes = len(nodes)
@@ -529,7 +554,7 @@ func fetchNodesWith(direct string, timeout time.Duration) ([]Node, error) {
 		}
 		return nil, fmt.Errorf("直连与反代均不可用")
 	}
-	return fetchNodes("", timeout)
+	return fetchNodes("", "all", timeout)
 }
 
 func fetchRawCSVFrom(url, key string, timeout time.Duration) (string, error) {
@@ -654,11 +679,15 @@ func parseNodeCSV(body string) ([]Node, error) {
 		countryCode := get("CountryShort")
 		ipType := "hosting"
 		isp := "VPN Gate"
+		src := "vpngate"
 		if isEduIP(ip) {
 			country = "教育网高校"
 			countryCode = "EDU"
 			ipType = "edu"
 			isp = "中国教育科研网CERNET/高校"
+			src = "edu"
+		} else if strings.HasPrefix(hostName, "pub_") {
+			src = "proxy"
 		}
 		nodes = append(nodes, Node{
 			HostName:    hostName,
@@ -674,6 +703,7 @@ func parseNodeCSV(body string) ([]Node, error) {
 			IPType:      ipType,
 			PurityScore: 75,
 			ISP:         isp,
+			Source:      src,
 		})
 	}
 	if len(nodes) == 0 {
@@ -738,6 +768,7 @@ func loadLocalOvpnNodes(dir string) []Node {
 			CountryCode: countryCode,
 			SpeedMbps:   100.0,
 			Config:      content,
+			Source:      "custom",
 		}
 		if ip != "" {
 			intel := GetIPIntel(ip)
@@ -826,6 +857,7 @@ func parseImportedNodes(text string) ([]Node, error) {
 				IPType:      intel.IPType,
 				PurityScore: intel.PurityScore,
 				ISP:         intel.ISP,
+				Source:      "custom",
 			})
 		}
 		if len(nodes) > 0 {
@@ -890,6 +922,7 @@ verb 2
 			IPType:      intel.IPType,
 			PurityScore: intel.PurityScore,
 			ISP:         intel.ISP,
+			Source:      "custom",
 		})
 	}
 
