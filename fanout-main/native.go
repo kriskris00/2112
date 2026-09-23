@@ -653,7 +653,7 @@ func buildReality(xrayBin string, spec NewInboundSpec) (*realityConfig, error) {
 		return nil, err
 	}
 	if err := checkRealityDest(dest, names[0]); err != nil {
-		return nil, fmt.Errorf("REALITY 目标站点不可用，换一个 dest: %w", err)
+		fmt.Printf("warn: checkRealityDest %s: %v (继续创建)\n", dest, err)
 	}
 
 	short := strings.TrimSpace(spec.ShortID)

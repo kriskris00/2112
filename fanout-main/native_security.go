@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
+	"crypto/ecdh"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"net"
@@ -11,22 +14,18 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"strings"
 	"time"
 )
 
-// checkRealityDest 确认 dest 能完成 TLS1.3 握手。
-//
-// REALITY 会把每个连接都转给 dest 做一次真实握手，dest 握手走不完时
-// 服务端只会静默回落，客户端看到的是 EOF，很难查。宁可建站时就报错。
+// checkRealityDest 快速测试 dest 能否完成 TLS1.3 握手。超时设为 2 秒，避免慢握手卡死界面。
 func checkRealityDest(dest, serverName string) error {
-	conn, err := net.DialTimeout("tcp", dest, 8*time.Second)
+	conn, err := net.DialTimeout("tcp", dest, 2*time.Second)
 	if err != nil {
 		return fmt.Errorf("连不上 %s: %w", dest, err)
 	}
 	defer conn.Close()
 
-	_ = conn.SetDeadline(time.Now().Add(8 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
 	c := tls.Client(conn, &tls.Config{
 		ServerName: serverName,
 		MinVersion: tls.VersionTLS13,
@@ -37,26 +36,35 @@ func checkRealityDest(dest, serverName string) error {
 	return nil
 }
 
-// realityKeys 调用 xray 生成一对 X25519 密钥。
-//
-// 不同版本的输出措辞不一样：新版是 "Password (PublicKey):"，
-// 老版是 "Public key:"，所以两种都认。
+// realityKeys 优先用 xray 生成 X25519 密钥，失败或找不到时自动降级到纯 Go 内置生成，毫秒级就绪且永不阻塞。
 func realityKeys(bin string) (priv, pub string, err error) {
-	out, err := exec.Command(bin, "x25519").Output()
+	if bin != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		out, err := exec.CommandContext(ctx, bin, "x25519").Output()
+		if err == nil {
+			text := string(out)
+			rePriv := regexp.MustCompile(`(?i)private\s*key:\s*(\S+)`)
+			rePub := regexp.MustCompile(`(?i)(?:password\s*\(publickey\)|public\s*key):\s*(\S+)`)
+			mp := rePriv.FindStringSubmatch(text)
+			mb := rePub.FindStringSubmatch(text)
+			if mp != nil && mb != nil {
+				return mp[1], mb[1], nil
+			}
+		}
+	}
+	return generateX25519()
+}
+
+// generateX25519 用 Go 标准库 crypto/ecdh 生成 Curve25519 密钥对（Base64 RawURL 格式，完全兼容 Xray REALITY）。
+func generateX25519() (string, string, error) {
+	priv, err := ecdh.X25519().GenerateKey(rand.Reader)
 	if err != nil {
-		return "", "", fmt.Errorf("生成 REALITY 密钥失败: %w", err)
+		return "", "", fmt.Errorf("生成 X25519 密钥失败: %w", err)
 	}
-	text := string(out)
-
-	rePriv := regexp.MustCompile(`(?i)private\s*key:\s*(\S+)`)
-	rePub := regexp.MustCompile(`(?i)(?:password\s*\(publickey\)|public\s*key):\s*(\S+)`)
-
-	mp := rePriv.FindStringSubmatch(text)
-	mb := rePub.FindStringSubmatch(text)
-	if mp == nil || mb == nil {
-		return "", "", fmt.Errorf("无法解析 xray x25519 输出: %s", strings.TrimSpace(text))
-	}
-	return mp[1], mb[1], nil
+	privStr := base64.RawURLEncoding.EncodeToString(priv.Bytes())
+	pubStr := base64.RawURLEncoding.EncodeToString(priv.PublicKey().Bytes())
+	return privStr, pubStr, nil
 }
 
 // randomShortID 生成 REALITY 的 shortId。

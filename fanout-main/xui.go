@@ -1757,10 +1757,7 @@ func (x *XUI) CreateInbound(spec NewInboundSpec, tunnels []*Tunnel) (*CreatedInb
 		}
 		ib.TLS = conf
 	case "reality":
-		bin, err := findXray(x.workDir)
-		if err != nil {
-			return nil, fmt.Errorf("REALITY 需要 xray 生成密钥: %w", err)
-		}
+		bin, _ := findXray(x.workDir)
 		conf, err := buildReality(bin, spec)
 		if err != nil {
 			return nil, err

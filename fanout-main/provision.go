@@ -24,7 +24,7 @@ func (m *Manager) Provision(req ProvisionRequest) (*Job, error) {
 	if req.Count < 1 {
 		return nil, fmt.Errorf("数量至少为 1")
 	}
-	picks, err := m.pickNodes(req.Region, req.Source, req.Count)
+	picks, err := m.pickNodesSource(req.Region, req.Source, req.Count)
 	if err != nil {
 		return nil, err
 	}
@@ -119,8 +119,13 @@ func (m *Manager) waitUp(t *Tunnel) {
 	}
 }
 
-// pickNodes 按地区和节点源挑 count 个还没被占用的节点，速度优先。
-func (m *Manager) pickNodes(region string, source string, count int) ([]Node, error) {
+// pickNodes 按地区挑 count 个还没被占用的节点（向前兼容，供重连与测试使用）。
+func (m *Manager) pickNodes(region string, count int) ([]Node, error) {
+	return m.pickNodesSource(region, "", count)
+}
+
+// pickNodesSource 按地区和节点源挑 count 个还没被占用的节点，速度优先。
+func (m *Manager) pickNodesSource(region string, source string, count int) ([]Node, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 

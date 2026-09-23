@@ -702,7 +702,7 @@ function apiPath(p) {
 
 async function api(path, opts = {}){
   const timeoutMs = opts.timeout || (
-    path.includes('/refresh') || path.includes('/provision') || path.includes('/update/apply') || path.includes('/import') ? 60000 : 25000
+    path.includes('/refresh') || path.includes('/provision') || path.includes('/update/apply') || path.includes('/import') || path.includes('/inbound') ? 60000 : 25000
   );
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -1195,16 +1195,26 @@ $('#ncreate').onclick = async e => {
     dest:     ($('#ndest').value || '').trim(),
   });
   if($('#nvision').checked) q.set('vision', '1');
-  e.target.disabled = true;
+  const btn = $('#ncreate');
+  const oldText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '创建中...';
+  $('#nnhint').textContent = '正在配置入站规则...';
   try{
-    const r = await api('/api/panel/inbound/new?' + q.toString(), {method:'POST'});
+    const r = await api('/api/panel/inbound/new?' + q.toString(), {method:'POST', timeout: 60000});
     toast('已创建 ' + r.protocol + ' 节点，端口 ' + r.port);
     closeModal('newnodebox');
     $('#nport').value = '';
     $('#nremark').value = '';
+    $('#nnhint').textContent = '';
     poll();
-  }catch(err){ toast(err.message, true); }
-  e.target.disabled = false;
+  }catch(err){
+    toast(err.message, true);
+    $('#nnhint').textContent = err.message;
+  }finally{
+    btn.disabled = false;
+    btn.textContent = oldText;
+  }
 };
 
 $('#rgfilter').oninput = renderRegions;
@@ -1231,14 +1241,24 @@ $('#go').onclick = async e => {
   const want = Math.min(count, avail > 0 ? avail : count);
   const tpl = $('#tpl').value || '0';
   const src = $('#wzSource') ? $('#wzSource').value : 'all';
-  e.target.disabled = true;
+  const btn = $('#go');
+  const oldText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '启动中...';
+  $('#wzhint').textContent = '正在开辟出口隧道...';
   try{
     await api('/api/provision?count=' + want + '&region=' + encodeURIComponent(region)
-      + '&source=' + encodeURIComponent(src) + '&template=' + tpl, {method:'POST'});
+      + '&source=' + encodeURIComponent(src) + '&template=' + tpl, {method:'POST', timeout: 60000});
     closeModal('wizard');
+    $('#wzhint').textContent = '';
     poll();
-  }catch(err){ toast(err.message, true); }
-  e.target.disabled = false;
+  }catch(err){
+    toast(err.message, true);
+    $('#wzhint').textContent = err.message;
+  }finally{
+    btn.disabled = false;
+    btn.textContent = oldText;
+  }
 };
 
 // ---- 出口操作 ----
@@ -1675,7 +1695,7 @@ $('#settingsBtn').onclick = async () => {
     $('#updCheck').textContent = '检查更新';
   }).catch(err => {
     $('#setPathHint').textContent = '界面挂在当前路径下。' + (err.message ? '提示: ' + err.message : '');
-    $('#updCur').textContent = 'v0.2.0-enhanced';
+    $('#updCur').textContent = 'v0.2.5-enhanced';
     $('#updCheck').disabled = false;
   });
 

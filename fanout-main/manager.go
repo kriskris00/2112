@@ -490,8 +490,11 @@ func (m *Manager) Swap(slot int) error {
 		return fmt.Errorf("这个出口正在连接中，稍等一下")
 	}
 
-	// pickNodes 已排除所有在用节点，拿到的必然不是当前这个
-	picks, err := m.pickNodes(t.Node.CountryCode, 1)
+	// pickNodes 已排除所有在用节点，优先尝试原节点源，若无则尝试该地区任意源
+	picks, err := m.pickNodesSource(t.Node.CountryCode, t.Node.Source, 1)
+	if err != nil {
+		picks, err = m.pickNodes(t.Node.CountryCode, 1)
+	}
 	if err != nil {
 		return err
 	}
