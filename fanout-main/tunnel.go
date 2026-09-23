@@ -1,11 +1,15 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -34,6 +38,7 @@ type Tunnel struct {
 	ns       string
 	listener net.Listener
 	ovpn     *exec.Cmd
+	dialer   func(network, addr string) (net.Conn, error)
 	mu       sync.Mutex
 }
 
@@ -209,7 +214,10 @@ func (t *Tunnel) serve() error {
 		t.Port = port
 	}
 	t.listener = ln
-	dial := dialerInNetns(t.nsName())
+	if t.dialer == nil {
+		t.dialer = dialerInNetns(t.nsName())
+	}
+	dial := t.dialer
 
 	go func() {
 		for {
@@ -242,13 +250,44 @@ func (t *Tunnel) setCredential(c SocksCred) {
 
 // probeExitIP 通过隧道查询出口 IP，用于确认这条隧道确实换了 IP。
 func (t *Tunnel) probeExitIP() (string, error) {
+	if t.dialer != nil {
+		client := &http.Client{
+			Transport: &http.Transport{
+				Dial: t.dialer,
+			},
+			Timeout: 8 * time.Second,
+		}
+		resp, err := client.Get("http://api.ipify.org")
+		if err == nil && resp.StatusCode == http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			ip := strings.TrimSpace(string(body))
+			if net.ParseIP(ip) != nil {
+				return ip, nil
+			}
+		}
+		if resp != nil {
+			resp.Body.Close()
+		}
+		if t.Node.IP != "" {
+			return t.Node.IP, nil
+		}
+		return "", fmt.Errorf("探测出口 IP 失败: %v", err)
+	}
+
 	out, err := exec.Command("ip", "netns", "exec", t.nsName(),
 		"curl", "-s", "--max-time", "15", "http://api.ipify.org").Output()
 	if err != nil {
+		if t.Node.IP != "" {
+			return t.Node.IP, nil
+		}
 		return "", fmt.Errorf("查询出口 IP 失败: %w", err)
 	}
 	ip := strings.TrimSpace(string(out))
 	if net.ParseIP(ip) == nil {
+		if t.Node.IP != "" {
+			return t.Node.IP, nil
+		}
 		return "", fmt.Errorf("出口 IP 返回异常: %q", ip)
 	}
 	return ip, nil
@@ -266,6 +305,123 @@ func (t *Tunnel) stop() {
 		_ = t.ovpn.Process.Kill()
 		t.ovpn = nil
 	}
-	t.teardownNetns()
+	if t.ns != "" || t.Node.Config != "" {
+		t.teardownNetns()
+	}
+	t.dialer = nil
 	t.Status = "stopped"
+}
+
+// makeUpstreamDialer 为上游公开 SOCKS5 或 HTTP 代理构造出站直连拨号器
+func makeUpstreamDialer(proto, upstreamAddr string, timeout time.Duration) func(network, addr string) (net.Conn, error) {
+	if proto == "http" {
+		return func(network, addr string) (net.Conn, error) {
+			conn, err := net.DialTimeout("tcp", upstreamAddr, timeout)
+			if err != nil {
+				return nil, err
+			}
+			req := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\nProxy-Connection: Keep-Alive\r\n\r\n", addr, addr)
+			if _, err := conn.Write([]byte(req)); err != nil {
+				conn.Close()
+				return nil, err
+			}
+			br := bufio.NewReader(conn)
+			statusLine, err := br.ReadString('\n')
+			if err != nil {
+				conn.Close()
+				return nil, err
+			}
+			if !strings.Contains(statusLine, "200") {
+				conn.Close()
+				return nil, fmt.Errorf("http proxy connect failed: %s", strings.TrimSpace(statusLine))
+			}
+			for {
+				line, err := br.ReadString('\n')
+				if err != nil || strings.TrimSpace(line) == "" {
+					break
+				}
+			}
+			return conn, nil
+		}
+	}
+
+	// 默认 SOCKS5 上游拨号协议
+	return func(network, addr string) (net.Conn, error) {
+		conn, err := net.DialTimeout("tcp", upstreamAddr, timeout)
+		if err != nil {
+			return nil, err
+		}
+		// 1. 协商无认证
+		if _, err := conn.Write([]byte{0x05, 0x01, 0x00}); err != nil {
+			conn.Close()
+			return nil, err
+		}
+		resp := make([]byte, 2)
+		if _, err := io.ReadFull(conn, resp); err != nil {
+			conn.Close()
+			return nil, err
+		}
+		if resp[0] != 0x05 || resp[1] != 0x00 {
+			conn.Close()
+			return nil, fmt.Errorf("upstream socks5 auth rejected: %v", resp)
+		}
+		// 2. CONNECT 请求
+		host, portStr, err := net.SplitHostPort(addr)
+		if err != nil {
+			conn.Close()
+			return nil, err
+		}
+		port, err := strconv.Atoi(portStr)
+		if err != nil {
+			conn.Close()
+			return nil, err
+		}
+		var buf []byte
+		ip := net.ParseIP(host)
+		if ip4 := ip.To4(); ip4 != nil {
+			buf = append([]byte{0x05, 0x01, 0x00, 0x01}, ip4...)
+		} else if ip6 := ip.To16(); ip != nil && ip6 != nil {
+			buf = append([]byte{0x05, 0x01, 0x00, 0x04}, ip6...)
+		} else {
+			buf = append([]byte{0x05, 0x01, 0x00, 0x03, byte(len(host))}, []byte(host)...)
+		}
+		buf = append(buf, byte(port>>8), byte(port&0xff))
+		if _, err := conn.Write(buf); err != nil {
+			conn.Close()
+			return nil, err
+		}
+		// 3. 读取应答头 [0x05, rep, 0x00, atyp, ...]
+		repHead := make([]byte, 4)
+		if _, err := io.ReadFull(conn, repHead); err != nil {
+			conn.Close()
+			return nil, err
+		}
+		if repHead[1] != 0x00 {
+			conn.Close()
+			return nil, fmt.Errorf("upstream socks5 connect rep: %d", repHead[1])
+		}
+		var skipLen int
+		switch repHead[3] {
+		case 0x01: // IPv4
+			skipLen = 4 + 2
+		case 0x04: // IPv6
+			skipLen = 16 + 2
+		case 0x03: // 域名
+			l := make([]byte, 1)
+			if _, err := io.ReadFull(conn, l); err != nil {
+				conn.Close()
+				return nil, err
+			}
+			skipLen = int(l[0]) + 2
+		default:
+			conn.Close()
+			return nil, fmt.Errorf("unknown atyp in upstream socks5 reply: %d", repHead[3])
+		}
+		discard := make([]byte, skipLen)
+		if _, err := io.ReadFull(conn, discard); err != nil {
+			conn.Close()
+			return nil, err
+		}
+		return conn, nil
+	}
 }

@@ -198,6 +198,9 @@ func generateClashConfig(details []*InboundDetail, tunnels []*Tunnel, host strin
 // getFlagEmoji 把两位国家码（ISO 3166-1 alpha-2）转换为对应的国旗 Emoji
 func getFlagEmoji(countryCode string) string {
 	cc := strings.ToUpper(strings.TrimSpace(countryCode))
+	if cc == "EDU" {
+		return "🎓"
+	}
 	if len(cc) != 2 {
 		return "🌐"
 	}

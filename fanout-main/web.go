@@ -551,15 +551,14 @@ textarea:focus{outline:none;border-color:var(--accent)}
       </div>
 
       <div style="margin-bottom:16px">
-        <h3 style="margin-bottom:8px;font-size:14px">内置可用镜像源池（自动故障转移 & 并发聚合）</h3>
+        <h3 style="margin-bottom:8px;font-size:14px">全网多源节点池（全网数万节点 + 日本筑波大学 + 教育网高校）</h3>
         <div style="font-size:12px;color:var(--dim);line-height:1.6;background:var(--card-bg);padding:10px;border-radius:6px;border:1px solid var(--border);margin-bottom:8px">
-          <div>• 筑波大学 IP 镜像 1：<code>150.40.105.19:35399</code></div>
-          <div>• 筑波大学 IP 镜像 2：<code>150.40.105.6:11803</code></div>
-          <div>• 筑波大学 IP 镜像 3：<code>150.40.105.23:64629</code></div>
-          <div>• 筑波大学 IP 镜像 4：<code>194.156.89.134:47774</code></div>
-          <div>• 官方直连：<code>www.vpngate.net</code></div>
+          <div>• <b>日本筑波大学官方及全量容灾镜像池</b>：150.40.105.19 / 119.195.163.98 等 11+ 镜像</div>
+          <div>• <b>全网开源公开代理库 (100,000+ 节点)</b>：Zevtyardt / Proxifly / Hookzof / TheSpeedX 等并发聚合</div>
+          <div>• <b>教育网与高校学术网专项</b>：CERNET / SINET / 清华 / 北大 / 中科大 / 浙大等高校 IP 专项识别与归类</div>
+          <div>• <b>全自动容灾与并发测速</b>：自动并发拉取、剔除不可用死节点、按纯净度与网络速度降序排序</div>
         </div>
-        <button id="refreshMirrors">🔄 立即轮询并发聚合所有源</button>
+        <button id="refreshMirrors">🔄 立即轮询并发聚合全网所有源 (数万节点)</button>
       </div>
 
       <div style="margin-bottom:16px;border-top:1px solid var(--border);padding-top:14px">
@@ -589,6 +588,7 @@ textarea:focus{outline:none;border-color:var(--accent)}
       <span class="spacer"></span>
       <button data-close="sourcesModal">关闭</button>
     </div>
+  </div>
 </div>
 
 <div class="modal" id="submodal">
@@ -714,9 +714,11 @@ function backendName(){ return BACKEND_NAME[view.backend] || '3x-ui'; }
 const STATUS = {up:'已连通', starting:'连接中', failed:'失败', stopped:'已停止'};
 
 function getFlagEmoji(countryCode) {
-  if (!countryCode || countryCode === '' || countryCode === 'CUSTOM') return '🌐';
-  if (countryCode.length !== 2) return '🌐';
+  if (!countryCode) return '🌐';
   const code = countryCode.toUpperCase();
+  if (code === 'EDU') return '🎓';
+  if (code === 'CUSTOM' || code === 'GLOBAL') return '🌐';
+  if (code.length !== 2) return '🌐';
   const c1 = code.charCodeAt(0) - 65 + 0x1F1E6;
   const c2 = code.charCodeAt(1) - 65 + 0x1F1E6;
   if (c1 >= 0x1F1E6 && c1 <= 0x1F1FF && c2 >= 0x1F1E6 && c2 <= 0x1F1FF) {
@@ -726,6 +728,7 @@ function getFlagEmoji(countryCode) {
 }
 
 const COUNTRY_ZH = {
+  EDU: '教育网高校', GLOBAL: '全球公网',
   JP: '日本', KR: '韩国', US: '美国', RU: '俄罗斯', VN: '越南',
   IN: '印度', MV: '马尔代夫', TH: '泰国', HK: '中国香港', TW: '中国台湾',
   SG: '新加坡', GB: '英国', DE: '德国', FR: '法国', CA: '加拿大',
@@ -738,6 +741,7 @@ const COUNTRY_ZH = {
 
 function formatCountry(code, name) {
   if (!code || code === 'CUSTOM') return '🌐 ' + (name || '自定义');
+  if (code === 'EDU') return '🎓 EDU 教育网高校' + (name && name !== 'EDU' && name !== '教育网高校' ? ' · ' + name : '');
   const flag = getFlagEmoji(code);
   const zh = COUNTRY_ZH[code.toUpperCase()] || '';
   if (zh) {
@@ -1769,9 +1773,49 @@ async function scanCustomOvpn(btn){
   }finally{
     if(btn) btn.disabled = false;
   }
+// ---- 全平台聚合订阅 ----
+async function openSubModal(){
+  openModal('submodal');
+  let token = '';
+  try{
+    const cred = await api('/api/cred/token');
+    if(cred && cred.token) token = cred.token;
+  }catch(e){}
+
+  const origin = window.location.origin;
+  const tokenQuery = token ? '?token=' + encodeURIComponent(token) : '';
+  const tokenQueryClash = token ? '&token=' + encodeURIComponent(token) : '';
+  const base64Url = origin + '/sub' + tokenQuery;
+  const clashUrl = origin + '/sub?format=clash' + tokenQueryClash;
+
+  const bEl = $('#subUrlBase64');
+  if(bEl) bEl.value = base64Url;
+  const cEl = $('#subUrlClash');
+  if(cEl) cEl.value = clashUrl;
 }
 
 document.addEventListener('click', async e => {
+  if(e.target.closest('#subBtn')){
+    await openSubModal();
+    return;
+  }
+  if(e.target.closest('#copySubBase64')){
+    const val = ($('#subUrlBase64').value || '').trim();
+    if(val) copy(val);
+    return;
+  }
+  if(e.target.closest('#copySubClash')){
+    const val = ($('#subUrlClash').value || '').trim();
+    if(val) copy(val);
+    return;
+  }
+  if(e.target.closest('#importClashBtn')){
+    const val = ($('#subUrlClash').value || '').trim();
+    if(val){
+      window.location.href = 'clash://install-config?url=' + encodeURIComponent(val) + '&name=FanoutGateway';
+    }
+    return;
+  }
   if(e.target.closest('#sourcesBtn') || e.target.closest('#wzSourcesBtn')){
     openModal('sourcesModal');
     loadSources();

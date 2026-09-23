@@ -329,7 +329,7 @@ func (m *Manager) tryCandidates(t *Tunnel, notify bool) bool {
 			}
 			return true
 		}
-		t.teardownNetns()
+		t.stop()
 	}
 	return false
 }
@@ -349,6 +349,26 @@ func (m *Manager) tunnelActive(t *Tunnel) bool {
 
 // tryNode 尝试用当前节点把隧道拉起来。
 func (m *Manager) tryNode(t *Tunnel) error {
+	if t.Node.Proto == "socks5" || t.Node.Proto == "http" || (t.Node.Config == "" && t.Node.Port > 0) {
+		proto := t.Node.Proto
+		if proto == "" {
+			proto = "socks5"
+		}
+		upstreamAddr := fmt.Sprintf("%s:%d", t.Node.IP, t.Node.Port)
+		t.dialer = makeUpstreamDialer(proto, upstreamAddr, 6*time.Second)
+		if t.listener == nil {
+			if err := t.serve(); err != nil {
+				return err
+			}
+		}
+		ip, err := t.probeExitIP()
+		if err != nil {
+			return err
+		}
+		t.ExitIP = ip
+		return nil
+	}
+
 	if err := t.setupNetns(); err != nil {
 		return err
 	}
@@ -400,7 +420,7 @@ func (m *Manager) candidatesFor(first Node) []Node {
 			continue
 		}
 		// 地区实在拿不到时不做限制，总比连不上强
-		if region != "" && n.CountryCode != region {
+		if region != "" && !strings.EqualFold(n.CountryCode, region) && !strings.EqualFold(n.Country, region) {
 			continue
 		}
 		out = append(out, n)

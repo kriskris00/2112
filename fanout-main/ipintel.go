@@ -7,9 +7,25 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
+
+// isEduISP 判断运营商是否为高校或教育科研网
+func isEduISP(isp string) bool {
+	low := strings.ToLower(isp)
+	return strings.Contains(low, "cernet") ||
+		strings.Contains(low, "education") ||
+		strings.Contains(low, "university") ||
+		strings.Contains(low, "college") ||
+		strings.Contains(low, "sinet") ||
+		strings.Contains(low, "academic") ||
+		strings.Contains(low, "campus") ||
+		strings.Contains(low, "科研") ||
+		strings.Contains(low, "高校") ||
+		strings.Contains(low, "大学")
+}
 
 // IPIntel 存储单个 IP 的归属类型、运营商与纯净度风控数据
 type IPIntel struct {
@@ -91,6 +107,17 @@ func GetIPIntel(ip string) IPIntel {
 	if ip == "" || ip == "127.0.0.1" {
 		return IPIntel{IP: ip, IPType: "hosting", PurityScore: 50, ISP: "Local"}
 	}
+	if isEduIP(ip) {
+		return IPIntel{
+			IP:          ip,
+			IPType:      "edu",
+			PurityScore: 98,
+			ISP:         "中国教育科研网CERNET/高校",
+			Country:     "教育网高校",
+			CountryCode: "EDU",
+			UpdatedAt:   time.Now().Unix(),
+		}
+	}
 
 	globalIPIntel.mu.RLock()
 	item, ok := globalIPIntel.cache[ip]
@@ -130,6 +157,12 @@ func GetIPIntel(ip string) IPIntel {
 	ispName := data.ISP
 	if ispName == "" {
 		ispName = data.Org
+	}
+	if isEduISP(ispName) || isEduIP(ip) {
+		ipType = "edu"
+		purity = 98
+		data.CountryCode = "EDU"
+		data.Country = "教育网高校"
 	}
 
 	result := IPIntel{
@@ -227,13 +260,21 @@ func BatchEnrichNodes(nodes []Node) {
 		if isp == "" {
 			isp = item.Org
 		}
+		country := item.Country
+		countryCode := item.CountryCode
+		if isEduISP(isp) || isEduIP(item.Query) {
+			ipType = "edu"
+			purity = 98
+			countryCode = "EDU"
+			country = "教育网高校"
+		}
 		globalIPIntel.cache[item.Query] = IPIntel{
 			IP:          item.Query,
 			IPType:      ipType,
 			PurityScore: purity,
 			ISP:         isp,
-			Country:     item.Country,
-			CountryCode: item.CountryCode,
+			Country:     country,
+			CountryCode: countryCode,
 			UpdatedAt:   time.Now().Unix(),
 		}
 	}

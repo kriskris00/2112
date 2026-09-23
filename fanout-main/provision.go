@@ -219,6 +219,12 @@ func (m *Manager) Regions() []RegionStat {
 		out = append(out, a.stat)
 	}
 	sort.Slice(out, func(i, j int) bool {
+		if out[i].Code == "EDU" {
+			return true
+		}
+		if out[j].Code == "EDU" {
+			return false
+		}
 		if out[i].Available != out[j].Available {
 			return out[i].Available > out[j].Available
 		}

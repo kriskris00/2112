@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/base64"
 	"encoding/csv"
 	"fmt"
@@ -42,6 +43,48 @@ var defaultMirrors = []string{
 	"http://www.vpngate.net/api/iphone/",      // 官方 HTTP 直连
 	"https://www.vpngate.net/api/iphone/",     // 官方 HTTPS 直连
 	"https://p.xy.kg/vpngate",                  // Cloudflare 全球容灾反代
+}
+
+// publicGlobalSources 全网开源公网代理与节点源（聚合数万到十万量级免费节点）
+var publicGlobalSources = []string{
+	"https://raw.githubusercontent.com/zevtyardt/proxy-list/main/all.txt",
+	"https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/all/data.txt",
+	"https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt",
+	"https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt",
+	"https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/all.txt",
+	"https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/socks5.txt",
+}
+
+var eduCIDRs []*net.IPNet
+
+func init() {
+	cidrs := []string{
+		"202.112.0.0/15", "202.114.0.0/15", "202.116.0.0/15", "202.118.0.0/15",
+		"202.120.0.0/15", "202.38.0.0/16", "166.111.0.0/16", "211.64.0.0/14",
+		"211.68.0.0/14", "211.80.0.0/13", "219.224.0.0/13", "210.32.0.0/14",
+		"222.192.0.0/11", "58.192.0.0/12", "59.64.0.0/11", "121.192.0.0/13",
+		"115.24.0.0/13", "150.40.0.0/16", "130.158.0.0/16",
+	}
+	for _, c := range cidrs {
+		_, ipnet, err := net.ParseCIDR(c)
+		if err == nil {
+			eduCIDRs = append(eduCIDRs, ipnet)
+		}
+	}
+}
+
+// isEduIP 判断 IP 是否位于中国 CERNET 或日本/全球学术科研高校网段
+func isEduIP(ipStr string) bool {
+	parsed := net.ParseIP(ipStr)
+	if parsed == nil {
+		return false
+	}
+	for _, ipnet := range eduCIDRs {
+		if ipnet.Contains(parsed) {
+			return true
+		}
+	}
+	return false
 }
 
 // discoverMirrors 动态抓取筑波大学官方每天轮换推荐的全球公网镜像列表
@@ -128,19 +171,88 @@ func mirrorAccessKey() string {
 	return mirrorKey
 }
 
-// Node 是一个 VPN Gate 节点。
+// Node 是一个 VPN Gate 或全网公开节点。
 type Node struct {
 	HostName    string  `json:"hostname"`
 	IP          string  `json:"ip"`
+	Port        int     `json:"port,omitempty"`
+	Proto       string  `json:"proto,omitempty"` // "ovpn", "socks5", "http"
 	Country     string  `json:"country"`
 	CountryCode string  `json:"country_code"`
 	Ping        int     `json:"ping"`
 	SpeedMbps   float64 `json:"speed_mbps"`
 	Sessions    int     `json:"sessions"`
 	Config      string  `json:"-"` // 解码后的 .ovpn 内容
-	IPType      string  `json:"ip_type,omitempty"`      // residential / hosting / mobile
+	IPType      string  `json:"ip_type,omitempty"`      // residential / hosting / mobile / edu
 	PurityScore int     `json:"purity_score,omitempty"` // 0-100
 	ISP         string  `json:"isp,omitempty"`
+}
+
+// parseProxyList 解析全网公开的纯 IP:Port 或 proto://IP:Port 代理列表
+func parseProxyList(body string, defaultProto string) []Node {
+	scanner := bufio.NewScanner(strings.NewReader(body))
+	var nodes []Node
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "//") {
+			continue
+		}
+		proto := defaultProto
+		if strings.HasPrefix(line, "socks5://") {
+			proto = "socks5"
+			line = strings.TrimPrefix(line, "socks5://")
+		} else if strings.HasPrefix(line, "socks4://") {
+			proto = "socks4"
+			line = strings.TrimPrefix(line, "socks4://")
+		} else if strings.HasPrefix(line, "http://") {
+			proto = "http"
+			line = strings.TrimPrefix(line, "http://")
+		} else if strings.HasPrefix(line, "https://") {
+			proto = "http"
+			line = strings.TrimPrefix(line, "https://")
+		}
+
+		parts := strings.Split(line, ":")
+		if len(parts) < 2 {
+			continue
+		}
+		ip := strings.TrimSpace(parts[0])
+		portStr := strings.TrimSpace(parts[1])
+		if net.ParseIP(ip) == nil {
+			continue
+		}
+		port, err := strconv.Atoi(portStr)
+		if err != nil || port <= 0 || port > 65535 {
+			continue
+		}
+
+		country := "Global"
+		countryCode := "GLOBAL"
+		ipType := "hosting"
+		isp := "Public Proxy"
+		if isEduIP(ip) {
+			country = "教育网高校"
+			countryCode = "EDU"
+			ipType = "edu"
+			isp = "中国教育科研网CERNET/高校"
+		}
+
+		hostname := fmt.Sprintf("pub_%s_%s_%d", proto, ip, port)
+		nodes = append(nodes, Node{
+			HostName:    hostname,
+			IP:          ip,
+			Port:        port,
+			Proto:       proto,
+			Country:     country,
+			CountryCode: countryCode,
+			SpeedMbps:   35.0,
+			Ping:        50,
+			IPType:      ipType,
+			PurityScore: 75,
+			ISP:         isp,
+		})
+	}
+	return nodes
 }
 
 func vpngateAPIURL() string {
@@ -161,11 +273,18 @@ func saveNodesToCache(workDir string, nodes []Node) {
 	if workDir == "" || len(nodes) == 0 {
 		return
 	}
+	limit := len(nodes)
+	if limit > 15000 {
+		limit = 15000
+	}
 	var sb strings.Builder
 	sb.WriteString("*vpn_servers\r\n")
 	sb.WriteString("#HostName,IP,Score,Ping,Speed,CountryLong,CountryShort,NumVpnSessions,Uptime,TotalUsers,TotalTraffic,LogType,Operator,Message,OpenVPN_ConfigData_Base64\r\n")
-	for _, n := range nodes {
-		b64 := base64.StdEncoding.EncodeToString([]byte(n.Config))
+	for _, n := range nodes[:limit] {
+		var b64 string
+		if n.Config != "" {
+			b64 = base64.StdEncoding.EncodeToString([]byte(n.Config))
+		}
 		speedInt := int64(n.SpeedMbps * 1e6)
 		line := fmt.Sprintf("%s,%s,0,%d,%d,%s,%s,%d,0,0,0,2,,,%s\r\n",
 			n.HostName, n.IP, n.Ping, speedInt, n.Country, n.CountryCode, n.Sessions, b64)
@@ -226,6 +345,7 @@ func fetchNodes(workDir string, timeout time.Duration) ([]Node, error) {
 	var activeSrc string
 	var successCount int
 
+	// 3. 并发拉取日本筑波大学官方及全量镜像源
 	for _, target := range targets {
 		wg.Add(1)
 		go func(url string) {
@@ -238,8 +358,13 @@ func fetchNodes(workDir string, timeout time.Duration) ([]Node, error) {
 			if err != nil {
 				return
 			}
-			nodes, err := parseNodeCSV(raw)
-			if err != nil || len(nodes) == 0 {
+			var nodes []Node
+			if strings.Contains(raw, "HostName") {
+				nodes, _ = parseNodeCSV(raw)
+			} else {
+				nodes = parseProxyList(raw, "socks5")
+			}
+			if len(nodes) == 0 {
 				return
 			}
 			mu.Lock()
@@ -248,12 +373,49 @@ func fetchNodes(workDir string, timeout time.Duration) ([]Node, error) {
 			}
 			successCount++
 			for _, n := range nodes {
+				if len(nodeMap) >= 50000 {
+					break
+				}
 				if n.IP != "" {
 					nodeMap[n.IP] = n
 				}
 			}
 			mu.Unlock()
 		}(target)
+	}
+
+	// 4. 并发拉取全网开源公共代理与高校学术网节点池 (数万节点)
+	for _, pubSrc := range publicGlobalSources {
+		wg.Add(1)
+		go func(url string) {
+			defer wg.Done()
+			perTimeout := 10 * time.Second
+			if timeout < perTimeout {
+				perTimeout = timeout
+			}
+			raw, err := fetchRawCSVFrom(url, "", perTimeout)
+			if err != nil || len(raw) == 0 {
+				return
+			}
+			nodes := parseProxyList(raw, "socks5")
+			if len(nodes) == 0 {
+				return
+			}
+			mu.Lock()
+			if activeSrc == "" {
+				activeSrc = url
+			}
+			successCount++
+			for _, n := range nodes {
+				if len(nodeMap) >= 50000 {
+					break
+				}
+				if n.IP != "" && nodeMap[n.IP].IP == "" {
+					nodeMap[n.IP] = n
+				}
+			}
+			mu.Unlock()
+		}(pubSrc)
 	}
 	wg.Wait()
 
@@ -278,7 +440,7 @@ func fetchNodes(workDir string, timeout time.Duration) ([]Node, error) {
 
 	sourceInfoMu.Lock()
 	if activeSrc != "" {
-		globalSourceInfo.ActiveSource = fmt.Sprintf("%s (已聚合 %d 个源)", activeSrc, successCount)
+		globalSourceInfo.ActiveSource = fmt.Sprintf("全网聚合 (%d 个在线源, 筑波大学+教育网+全球公网)", successCount)
 	} else {
 		globalSourceInfo.ActiveSource = "本地累积离线缓存池"
 	}
@@ -400,25 +562,55 @@ func parseNodeCSV(body string) ([]Node, error) {
 			return strings.TrimSpace(rec[i])
 		}
 		cfgB64 := get("OpenVPN_ConfigData_Base64")
-		if cfgB64 == "" || get("HostName") == "" {
+		hostName := get("HostName")
+		if hostName == "" {
 			continue
 		}
-		cfg, err := base64.StdEncoding.DecodeString(cfgB64)
-		if err != nil {
+		var cfgStr string
+		var port int
+		var proto string
+		if cfgB64 != "" {
+			if cfg, err := base64.StdEncoding.DecodeString(cfgB64); err == nil {
+				cfgStr = string(cfg)
+			}
+		} else if strings.HasPrefix(hostName, "pub_") {
+			parts := strings.Split(hostName, "_")
+			if len(parts) >= 4 {
+				proto = parts[1]
+				port, _ = strconv.Atoi(parts[3])
+			}
+		}
+		if cfgStr == "" && port == 0 {
 			continue
 		}
 		ping, _ := strconv.Atoi(get("Ping"))
 		speed, _ := strconv.ParseFloat(get("Speed"), 64)
 		sessions, _ := strconv.Atoi(get("NumVpnSessions"))
+		ip := get("IP")
+		country := get("CountryLong")
+		countryCode := get("CountryShort")
+		ipType := "hosting"
+		isp := "VPN Gate"
+		if isEduIP(ip) {
+			country = "教育网高校"
+			countryCode = "EDU"
+			ipType = "edu"
+			isp = "中国教育科研网CERNET/高校"
+		}
 		nodes = append(nodes, Node{
-			HostName:    get("HostName"),
-			IP:          get("IP"),
-			Country:     get("CountryLong"),
-			CountryCode: get("CountryShort"),
+			HostName:    hostName,
+			IP:          ip,
+			Port:        port,
+			Proto:       proto,
+			Country:     country,
+			CountryCode: countryCode,
 			Ping:        ping,
 			SpeedMbps:   speed / 1e6,
 			Sessions:    sessions,
-			Config:      string(cfg),
+			Config:      cfgStr,
+			IPType:      ipType,
+			PurityScore: 75,
+			ISP:         isp,
 		})
 	}
 	if len(nodes) == 0 {

@@ -153,7 +153,7 @@ func (a *Auth) Wrap(next http.Handler) http.Handler {
 			return
 		}
 		// 聚合订阅接口：允许通过 ?token= 或 ?key= 或 Basic Auth 口令鉴权，兼容各种代理客户端
-		if r.URL.Path == "/sub" {
+		if r.URL.Path == "/sub" || r.URL.Path == "/sub/" {
 			token := r.URL.Query().Get("token")
 			if token == "" {
 				token = r.URL.Query().Get("key")

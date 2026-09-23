@@ -188,13 +188,19 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 func apiNodes(m *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		nodes, fetched := m.Nodes()
+		limit := 500
 		if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
-			if limit, err := strconv.Atoi(limitStr); err == nil && limit > 0 && limit < len(nodes) {
-				nodes = nodes[:limit]
+			if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+				limit = l
 			}
+		}
+		total := len(nodes)
+		if len(nodes) > limit {
+			nodes = nodes[:limit]
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"nodes":   nodes,
+			"total":   total,
 			"fetched": fetched,
 		})
 	}
