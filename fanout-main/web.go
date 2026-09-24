@@ -1916,9 +1916,16 @@ $('#exportAll').onclick = async () => {
   const socksLinks = upExits.map(e => {
     const host = view.public_ip || window.location.hostname;
     const flag = getFlagEmoji(e.region || e.country_code);
-    const ispName = (e.isp || 'SOCKS5').trim();
+    let ispName = (e.isp || '').trim();
+    if (!ispName || ispName.toLowerCase() === 'public proxy' || ispName.toLowerCase() === 'public pool' || ispName.toLowerCase() === 'vpn gate') {
+      if ((e.region || e.country_code || '').toUpperCase() === 'JP' || ispName.toLowerCase().includes('tsukuba')) {
+        ispName = '筑波大学 VPN Gate';
+      } else {
+        ispName = '优质网络';
+      }
+    }
     return 'socks5://' + encodeURIComponent(e.socks_user || '') + ':' + encodeURIComponent(e.socks_pass || '')
-      + '@' + host + ':' + e.port + '#' + encodeURIComponent(flag + ' ' + ispName + ' (:' + e.port + ')');
+      + '@' + host + ':' + e.port + '#' + encodeURIComponent(flag + ' ' + ispName);
   });
 
   if(!ids.length && !socksLinks.length){

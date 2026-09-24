@@ -19,12 +19,17 @@ var countryNameZH = map[string]string{
 	"GLOBAL": "全球", "EDU": "海外高校学术网",
 }
 
-// formatProxyName 构造规范的订阅节点名称：[国旗Emoji] [企业/ISP名称] (仅国旗表情，不含文字国家，不含"出口"字样)
-func formatProxyName(countryCode, country, isp string, suffix string) string {
+// formatProxyName 构造纯净的订阅节点名称：[国旗Emoji] [企业/高校名称] (仅国旗表情，不含文字国家，不含"出口"字样，完全去除协议与端口)
+func formatProxyName(countryCode, country, isp string) string {
 	cc := strings.ToUpper(strings.TrimSpace(countryCode))
 	flag := getFlagEmoji(cc)
 
 	comp := strings.TrimSpace(isp)
+	if strings.Contains(comp, "出口") {
+		comp = strings.ReplaceAll(comp, "出口", "")
+		comp = strings.TrimPrefix(comp, "-")
+		comp = strings.TrimSpace(comp)
+	}
 	if comp == "" || strings.EqualFold(comp, "Public Proxy") || strings.EqualFold(comp, "Public Pool") || strings.EqualFold(comp, "VPN Gate") {
 		if strings.Contains(strings.ToLower(isp), "tsukuba") || strings.EqualFold(cc, "JP") {
 			comp = "筑波大学 VPN Gate"
@@ -33,20 +38,10 @@ func formatProxyName(countryCode, country, isp string, suffix string) string {
 		}
 	}
 	runes := []rune(comp)
-	if len(runes) > 24 {
-		comp = string(runes[:22]) + "..."
+	if len(runes) > 28 {
+		comp = string(runes[:26]) + "..."
 	}
 
-	cleanSuffix := strings.TrimSpace(suffix)
-	if strings.Contains(cleanSuffix, "出口") {
-		cleanSuffix = strings.TrimSpace(strings.ReplaceAll(cleanSuffix, "出口", ""))
-		cleanSuffix = strings.TrimPrefix(cleanSuffix, "-")
-		cleanSuffix = strings.TrimSpace(cleanSuffix)
-	}
-
-	if cleanSuffix != "" {
-		return fmt.Sprintf("%s %s (%s)", flag, comp, cleanSuffix)
-	}
 	return fmt.Sprintf("%s %s", flag, comp)
 }
 
@@ -118,6 +113,15 @@ func apiSubscription(m *Manager, a *Auth) http.HandlerFunc {
 		coveredSlots := make(map[int]bool)
 		var validDetails []*InboundDetail
 		var allLinks []string
+		seenLinks := make(map[string]int)
+		makeUniqueLinkName := func(raw string) string {
+			count := seenLinks[raw]
+			seenLinks[raw] = count + 1
+			if count > 0 {
+				return fmt.Sprintf("%s (%d)", raw, count+1)
+			}
+			return raw
+		}
 
 		p, err := openPanel()
 		if err == nil && p != nil {
@@ -135,7 +139,7 @@ func apiSubscription(m *Manager, a *Auth) http.HandlerFunc {
 
 					for _, rawLink := range d.Links {
 						idx := strings.LastIndex(rawLink, "#")
-						cleanName := formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP, fmt.Sprintf("%s :%d", strings.ToUpper(d.Protocol), d.Port))
+						cleanName := makeUniqueLinkName(formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP))
 						if idx != -1 {
 							rawLink = rawLink[:idx] + "#" + url.QueryEscape(cleanName)
 						} else {
@@ -147,13 +151,13 @@ func apiSubscription(m *Manager, a *Auth) http.HandlerFunc {
 			}
 		}
 
-		// 仅对尚未绑定入站的独立出口隧道补充 SOCKS5 节点（仅国旗表情，无文字国家，无出口字样）
+		// 仅对尚未绑定入站的独立出口隧道补充 SOCKS5 节点（纯净 [国旗Emoji] [企业/高校]，无协议与端口）
 		for _, t := range upTunnels {
 			if coveredSlots[t.Slot] {
 				continue
 			}
 			cred := t.credential()
-			label := formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP, fmt.Sprintf(":%d", t.Port))
+			label := makeUniqueLinkName(formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP))
 			s5Link := fmt.Sprintf("socks5://%s:%s@%s:%d#%s", cred.User, cred.Pass, host, t.Port, url.QueryEscape(label))
 			allLinks = append(allLinks, s5Link)
 		}
@@ -265,16 +269,8 @@ func generateClashConfig(details []*InboundDetail, tunnels []*Tunnel, host strin
 		}
 		coveredSlots[t.Slot] = true
 
-		for idx, c := range d.Clients {
-			clientEmail := c.Email
-			if clientEmail == "" {
-				clientEmail = fmt.Sprintf("client-%d", idx+1)
-			}
-			suffix := fmt.Sprintf("%s :%d", strings.ToUpper(proto), d.Port)
-			if len(d.Clients) > 1 {
-				suffix += fmt.Sprintf(" - %s", clientEmail)
-			}
-			pName := makeUniqueName(formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP, suffix))
+		for _, c := range d.Clients {
+			pName := makeUniqueName(formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP))
 
 			switch proto {
 			case "vless":
@@ -328,13 +324,13 @@ func generateClashConfig(details []*InboundDetail, tunnels []*Tunnel, host strin
 		}
 	}
 
-	// 2. 仅对未绑定入站的独立出口隧道补充 SOCKS5 节点（仅国旗表情，无文字国家，无出口字样）
+	// 2. 仅对未绑定入站的独立出口隧道补充 SOCKS5 节点（纯净 [国旗Emoji] [企业/高校]，无协议与端口）
 	for _, t := range tunnels {
 		if coveredSlots[t.Slot] {
 			continue
 		}
 		cred := t.credential()
-		pName := makeUniqueName(formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP, fmt.Sprintf(":%d", t.Port)))
+		pName := makeUniqueName(formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP))
 		py := fmt.Sprintf("  - name: %q\r\n    type: socks5\r\n    server: %q\r\n    port: %d\r\n    username: %q\r\n    password: %q\r\n    udp: true\r\n",
 			pName, host, t.Port, cred.User, cred.Pass)
 		proxies = append(proxies, proxyItem{name: pName, yaml: py})
@@ -433,16 +429,8 @@ func generateQuanXConfig(details []*InboundDetail, tunnels []*Tunnel, host strin
 		}
 		coveredSlots[t.Slot] = true
 
-		for idx, c := range d.Clients {
-			clientEmail := c.Email
-			if clientEmail == "" {
-				clientEmail = fmt.Sprintf("client-%d", idx+1)
-			}
-			suffix := fmt.Sprintf("%s :%d", strings.ToUpper(proto), d.Port)
-			if len(d.Clients) > 1 {
-				suffix += fmt.Sprintf(" - %s", clientEmail)
-			}
-			pName := makeUniqueName(formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP, suffix))
+		for _, c := range d.Clients {
+			pName := makeUniqueName(formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP))
 
 			switch proto {
 			case "trojan":
@@ -489,13 +477,13 @@ func generateQuanXConfig(details []*InboundDetail, tunnels []*Tunnel, host strin
 		}
 	}
 
-	// 2. 仅对未绑定入站的独立出口隧道补充 SOCKS5 节点（仅国旗表情，无文字国家，无出口字样）
+	// 2. 仅对未绑定入站的独立出口隧道补充 SOCKS5 节点（纯净 [国旗Emoji] [企业/高校]，无协议与端口）
 	for _, t := range tunnels {
 		if coveredSlots[t.Slot] {
 			continue
 		}
 		cred := t.credential()
-		pName := makeUniqueName(formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP, fmt.Sprintf(":%d", t.Port)))
+		pName := makeUniqueName(formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP))
 		if cred.User != "" && cred.Pass != "" {
 			sb.WriteString(fmt.Sprintf("socks5 = %s:%d, username=%s, password=%s, fast-open=false, udp-relay=true, tag=%s\r\n",
 				host, t.Port, cred.User, cred.Pass, pName))

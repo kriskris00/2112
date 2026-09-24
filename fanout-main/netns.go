@@ -14,7 +14,24 @@ import (
 const cloneNewNet = 0x40000000
 
 func setns(fd int) error {
-	_, _, errno := syscall.Syscall(syscall.SYS_SETNS, uintptr(fd), uintptr(cloneNewNet), 0)
+	var sysSetns uintptr = 308 // Linux amd64
+	switch runtime.GOARCH {
+	case "amd64":
+		sysSetns = 308
+	case "arm64":
+		sysSetns = 268
+	case "386":
+		sysSetns = 346
+	case "arm":
+		sysSetns = 375
+	case "mips", "mipsel":
+		sysSetns = 4344
+	case "mips64", "mips64le":
+		sysSetns = 5303
+	case "riscv64":
+		sysSetns = 268
+	}
+	_, _, errno := syscall.Syscall(sysSetns, uintptr(fd), uintptr(cloneNewNet), 0)
 	if errno != 0 {
 		return errno
 	}

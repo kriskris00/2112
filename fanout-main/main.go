@@ -14,7 +14,6 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-	"time"
 )
 
 // version 由构建时通过 -ldflags 注入。
@@ -860,7 +859,7 @@ func apiXUIDetail(mgr *Manager) http.HandlerFunc {
 				}
 			}
 			if matchedTunnel != nil {
-				cleanName := formatProxyName(matchedTunnel.Node.CountryCode, matchedTunnel.Node.Country, matchedTunnel.Node.ISP, fmt.Sprintf("%s :%d", strings.ToUpper(detail.Protocol), detail.Port))
+				cleanName := formatProxyName(matchedTunnel.Node.CountryCode, matchedTunnel.Node.Country, matchedTunnel.Node.ISP)
 				for i, rawLink := range detail.Links {
 					idx := strings.LastIndex(rawLink, "#")
 					if idx != -1 {
