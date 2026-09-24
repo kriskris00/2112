@@ -300,6 +300,7 @@ do_update() {
     if command -v go >/dev/null 2>&1; then
       cd "$tmp/2112/fanout-main"
       echo "  正在整理依赖并编译新版 fanout (已优化 1C1G 内存、多镜像容灾与全协议支持)..."
+      export GOPROXY="https://goproxy.cn,https://proxy.golang.org,direct"
       go mod tidy 2>/dev/null || true
       if go build -trimpath -ldflags "-s -w" -o "$tmp/fanout" .; then
         svc_stop
