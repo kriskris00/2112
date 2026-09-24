@@ -19,18 +19,18 @@ const indexHTML = `<!DOCTYPE html>
 <title>fanout</title>
 <style>
 :root{
-  --bg:#071018;
-  --panel:rgba(12, 20, 32, 0.68);
-  --line:rgba(255, 255, 255, 0.12);
-  --text:#f8fafc;
-  --dim:#94a3b8;
+  --bg:#9ca3af;
+  --panel:rgba(15, 23, 42, 0.74);
+  --line:rgba(255, 255, 255, 0.18);
+  --text:#ffffff;
+  --dim:#cbd5e1;
   --accent:#38bdf8;
   --accent-glow:0 0 20px rgba(56, 189, 248, 0.45);
   --ok:#10b981;
   --warn:#f59e0b;
   --bad:#f43f5e;
-  --glass-shadow:0 14px 40px -4px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.12);
-  --glass-blur:blur(32px) saturate(200%);
+  --glass-shadow:0 24px 60px rgba(0, 0, 0, 0.38), 0 0 0 1px rgba(255, 255, 255, 0.18);
+  --glass-blur:blur(36px) saturate(200%);
   --apple-font:-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   --mono-font:ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
@@ -38,68 +38,81 @@ const indexHTML = `<!DOCTYPE html>
 body{
   margin:0;color:var(--text);font:13px/1.55 var(--apple-font);-webkit-font-smoothing:antialiased;min-height:100vh;
   background-attachment:fixed;
-  animation:energy6Flow 36s cubic-bezier(0.4, 0, 0.2, 1) infinite alternate;
+  animation:energy6ClusterFlow 36s cubic-bezier(0.4, 0, 0.2, 1) infinite alternate;
 }
 .noise-overlay{
-  position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:99;opacity:0.048;
-  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.88' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+  position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:99;opacity:0.085;
+  mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
   background-repeat:repeat;
 }
-@keyframes energy6Flow {
-  /* 1. INFINITE: 空灵珍珠白、冰青水绿、细碎微粉与金斑 */
+@keyframes energy6ClusterFlow {
+  /* 1. INFINITE: 珍珠白核心 + 腮红粉体 + 冰青水蓝光晕 + 金斑闪烁 */
   0%, 100% {
-    background: radial-gradient(circle at 20% 20%, rgba(128, 222, 234, 0.25), transparent 45%),
-                radial-gradient(circle at 80% 25%, rgba(248, 187, 208, 0.22), transparent 50%),
-                radial-gradient(circle at 50% 75%, rgba(254, 240, 138, 0.18), transparent 45%),
-                radial-gradient(circle at 15% 85%, rgba(165, 243, 252, 0.20), transparent 50%),
-                linear-gradient(135deg, #061118 0%, #0d1e28 50%, #07131b 100%);
+    background:
+      radial-gradient(circle at 50% 42%, rgba(255, 255, 255, 0.96) 0%, rgba(254, 240, 138, 0.85) 15%, rgba(244, 114, 182, 0.82) 32%, transparent 58%),
+      radial-gradient(circle at 55% 38%, rgba(244, 114, 182, 0.90) 0%, rgba(251, 207, 232, 0.65) 28%, transparent 55%),
+      radial-gradient(circle at 45% 46%, rgba(103, 232, 249, 0.92) 0%, rgba(56, 189, 248, 0.78) 35%, transparent 68%),
+      radial-gradient(circle at 48% 54%, rgba(253, 224, 71, 0.85) 0%, transparent 35%),
+      radial-gradient(ellipse at 50% 45%, rgba(224, 242, 254, 0.75) 0%, transparent 75%),
+      linear-gradient(135deg, #a3a8b0 0%, #b8bdc5 50%, #9ba0a9 100%);
   }
-  /* 2. WARMTH: 炽烈红宝石、珊瑚绯红、暖红霞光与炽金火苗 */
+  /* 2. WARMTH: 炽烈红宝石/草莓红 + 黑暗樱桃心 + 炽焰橘橙 + 外围天青色寒雾 */
   16.66% {
-    background: radial-gradient(circle at 25% 25%, rgba(220, 38, 38, 0.28), transparent 48%),
-                radial-gradient(circle at 75% 20%, rgba(251, 113, 133, 0.24), transparent 45%),
-                radial-gradient(circle at 50% 80%, rgba(249, 115, 22, 0.20), transparent 50%),
-                radial-gradient(circle at 10% 70%, rgba(153, 27, 27, 0.25), transparent 45%),
-                linear-gradient(135deg, #180507 0%, #29080c 50%, #150305 100%);
+    background:
+      radial-gradient(circle at 52% 43%, rgba(255, 247, 237, 0.95) 0%, rgba(251, 146, 60, 0.85) 18%, transparent 32%),
+      radial-gradient(circle at 50% 50%, rgba(92, 8, 30, 0.98) 0%, rgba(220, 38, 38, 0.92) 28%, transparent 58%),
+      radial-gradient(circle at 48% 46%, rgba(236, 33, 89, 0.95) 0%, rgba(225, 29, 72, 0.88) 36%, transparent 68%),
+      radial-gradient(circle at 54% 45%, rgba(249, 115, 22, 0.90) 0%, rgba(251, 146, 60, 0.75) 42%, transparent 70%),
+      radial-gradient(circle at 50% 30%, rgba(125, 211, 252, 0.88) 0%, rgba(56, 189, 248, 0.65) 42%, transparent 72%),
+      linear-gradient(135deg, #a3a8b0 0%, #b0b5be 50%, #9ea3ac 100%);
   }
-  /* 3. UPLIFTING: 电光洋红、高亮荧光玫粉、明艳兰花紫霞 */
+  /* 3. UPLIFTING: 电光洋红粉 + 嫩青柠/薄荷绿顶冠 + 顶端深紫李 + 纵向能量光柱 */
   33.33% {
-    background: radial-gradient(circle at 20% 20%, rgba(236, 72, 153, 0.30), transparent 48%),
-                radial-gradient(circle at 80% 30%, rgba(168, 85, 247, 0.26), transparent 50%),
-                radial-gradient(circle at 50% 85%, rgba(244, 114, 182, 0.22), transparent 45%),
-                radial-gradient(circle at 15% 80%, rgba(192, 38, 211, 0.25), transparent 50%),
-                linear-gradient(135deg, #17041a 0%, #28072e 50%, #130316 100%);
+    background:
+      radial-gradient(ellipse at 50% 45%, rgba(255, 255, 255, 0.98) 0%, rgba(253, 231, 243, 0.75) 16%, transparent 38%),
+      radial-gradient(circle at 50% 48%, rgba(237, 29, 115, 0.96) 0%, rgba(219, 39, 119, 0.90) 36%, transparent 70%),
+      radial-gradient(circle at 50% 26%, rgba(190, 242, 100, 0.92) 0%, rgba(134, 239, 172, 0.78) 32%, transparent 58%),
+      radial-gradient(circle at 50% 21%, rgba(112, 26, 117, 0.92) 0%, transparent 32%),
+      radial-gradient(circle at 53% 53%, rgba(244, 63, 94, 0.82) 0%, transparent 66%),
+      linear-gradient(135deg, #a2a7b0 0%, #b2b7c0 50%, #9ca1aa 100%);
   }
-  /* 4. UNIVERSAL: 幽深星云蓝、皇家深蓝宝石、黑莓紫星团核心 */
+  /* 4. UNIVERSAL: 广袤电光蔚蓝天宇 + 核心深邃桑葚紫/天鹅绒李 + 散落金砂星光 */
   50.00% {
-    background: radial-gradient(circle at 20% 25%, rgba(37, 99, 235, 0.28), transparent 50%),
-                radial-gradient(circle at 85% 20%, rgba(147, 51, 234, 0.26), transparent 48%),
-                radial-gradient(circle at 50% 75%, rgba(56, 189, 248, 0.22), transparent 45%),
-                radial-gradient(circle at 15% 85%, rgba(107, 33, 168, 0.28), transparent 50%),
-                linear-gradient(135deg, #04091a 0%, #08142d 50%, #040817 100%);
+    background:
+      radial-gradient(circle at 51% 49%, rgba(255, 255, 255, 0.95) 0%, transparent 18%),
+      radial-gradient(circle at 47% 42%, rgba(251, 191, 36, 0.90) 0%, transparent 26%),
+      radial-gradient(circle at 50% 48%, rgba(131, 59, 96, 0.98) 0%, rgba(112, 26, 117, 0.90) 35%, transparent 60%),
+      radial-gradient(circle at 50% 45%, rgba(14, 165, 233, 0.96) 0%, rgba(56, 189, 248, 0.88) 38%, rgba(2, 132, 199, 0.7) 65%, transparent 82%),
+      radial-gradient(circle at 50% 55%, rgba(74, 4, 78, 0.88) 0%, transparent 48%),
+      linear-gradient(135deg, #9da2ab 0%, #aeb4be 50%, #9aa0a9 100%);
   }
-  /* 5. RECIPROCATED: 晨露薄荷翡翠青、青柠绿晕染、双生柔粉珊瑚心 */
+  /* 5. RECIPROCATED: 晨露薄荷翡翠青海 + 嵌套双生红宝石/玫瑰心 + 环绕金黄柠檬光环 */
   66.66% {
-    background: radial-gradient(circle at 25% 20%, rgba(16, 185, 129, 0.26), transparent 48%),
-                radial-gradient(circle at 75% 25%, rgba(244, 63, 94, 0.24), transparent 46%),
-                radial-gradient(circle at 50% 80%, rgba(52, 211, 153, 0.22), transparent 45%),
-                radial-gradient(circle at 20% 75%, rgba(251, 113, 133, 0.20), transparent 50%),
-                linear-gradient(135deg, #051611 0%, #07261d 50%, #041410 100%);
+    background:
+      radial-gradient(circle at 50% 47%, rgba(255, 255, 255, 0.96) 0%, transparent 18%),
+      radial-gradient(circle at 46% 38%, rgba(236, 44, 104, 0.98) 0%, rgba(244, 63, 94, 0.88) 22%, rgba(254, 240, 138, 0.75) 32%, transparent 52%),
+      radial-gradient(circle at 54% 56%, rgba(236, 44, 104, 0.98) 0%, rgba(225, 29, 72, 0.88) 22%, rgba(254, 240, 138, 0.75) 32%, transparent 52%),
+      radial-gradient(circle at 50% 46%, rgba(110, 231, 183, 0.95) 0%, rgba(190, 242, 100, 0.85) 36%, rgba(52, 211, 153, 0.7) 62%, transparent 80%),
+      linear-gradient(135deg, #a1a6af 0%, #b0b6bf 50%, #9ca1aa 100%);
   }
-  /* 6. VITAL: 幻彩欧珀流光、七彩虹光光晕、粉杏与淡紫珠光 */
+  /* 6. VITAL: 盛大落日珊瑚粉霞 + 幻彩欧珀彩虹光环(金桃紫青) + 雾银石青中央茧 */
   83.33% {
-    background: radial-gradient(circle at 20% 20%, rgba(244, 114, 182, 0.25), transparent 46%),
-                radial-gradient(circle at 80% 25%, rgba(192, 132, 252, 0.25), transparent 48%),
-                radial-gradient(circle at 50% 75%, rgba(103, 232, 249, 0.22), transparent 45%),
-                radial-gradient(circle at 15% 80%, rgba(253, 224, 71, 0.18), transparent 50%),
-                linear-gradient(135deg, #13071d 0%, #200d2f 50%, #100618 100%);
+    background:
+      radial-gradient(ellipse at 50% 36%, rgba(255, 255, 255, 0.96) 0%, transparent 22%),
+      radial-gradient(ellipse at 50% 56%, rgba(255, 255, 255, 0.96) 0%, transparent 22%),
+      radial-gradient(ellipse at 50% 46%, rgba(144, 148, 157, 0.95) 0%, rgba(203, 213, 225, 0.82) 28%, transparent 55%),
+      radial-gradient(circle at 53% 42%, rgba(254, 215, 170, 0.90) 0%, rgba(254, 240, 138, 0.80) 28%, transparent 54%),
+      radial-gradient(circle at 47% 50%, rgba(196, 181, 253, 0.88) 0%, rgba(147, 197, 253, 0.78) 32%, transparent 58%),
+      radial-gradient(circle at 50% 46%, rgba(251, 113, 133, 0.95) 0%, rgba(244, 114, 182, 0.86) 38%, rgba(253, 164, 175, 0.65) 66%, transparent 84%),
+      linear-gradient(135deg, #a4a9b2 0%, #b4b9c2 50%, #9ea3ac 100%);
   }
 }
 header{display:flex;align-items:center;gap:14px;padding:12px 20px;
   position:sticky;top:0;z-index:40;
-  border-bottom:1px solid var(--line);background:rgba(8, 26, 36, 0.78);
+  border-bottom:1px solid rgba(255,255,255,0.18);background:rgba(15, 23, 42, 0.78);
   backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);
-  box-shadow:0 4px 24px rgba(0,20,30,0.35)}
+  box-shadow:0 8px 32px rgba(0,0,0,0.25)}
 .brand-wrap{display:flex;align-items:center;gap:8px}
 h1{font-size:16px;font-weight:700;margin:0;letter-spacing:-0.3px;
   background:linear-gradient(135deg, #ffffff 0%, #a7f3d0 60%, #67e8f9 100%);
