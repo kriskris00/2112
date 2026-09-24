@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -17,7 +18,7 @@ import (
 )
 
 // version 由构建时通过 -ldflags 注入。
-var version = "v0.3.2-enhanced"
+var version = "v0.3.3-enhanced"
 
 func main() {
 	var (
@@ -62,7 +63,6 @@ func main() {
 	mgr := NewManager(*maxSlots, *workDir)
 	initNodes, _ := mgr.Nodes()
 	log.Printf("节点底池已就绪: %d 个节点 (含海外高校学术网、日本筑波大学及全球节点)", len(initNodes))
-	go BatchEnrichNodes(initNodes)
 
 	// 后台并发拉取全网最新节点与筑波大学镜像，不阻塞服务极速启动
 	go func() {
@@ -71,8 +71,6 @@ func main() {
 			log.Printf("后台拉取提示（底池正常运作）: %v", err)
 		} else {
 			log.Printf("全网节点池已聚合扩展至 %d 个节点", n)
-			nodes, _ := mgr.Nodes()
-			go BatchEnrichNodes(nodes)
 		}
 	}()
 
@@ -86,17 +84,6 @@ func main() {
 	}
 
 	go mgr.WatchHealth()
-
-	// 后台全网自动爬取并持续累积节点池（每 15 分钟自动聚合发现新可用节点）
-	go func() {
-		ticker := time.NewTicker(15 * time.Minute)
-		defer ticker.Stop()
-		for range ticker.C {
-			if n, err := mgr.RefreshNodes(); err == nil {
-				log.Printf("自动全网抓取并更新节点池成功，当前池中共有 %d 个可用节点", n)
-			}
-		}
-	}()
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
@@ -199,19 +186,84 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 
 func apiNodes(m *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		nodes, fetched := m.Nodes()
-		limit := 500
-		if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		q := r.URL.Query()
+		region := strings.ToUpper(strings.TrimSpace(q.Get("region")))
+		source := strings.ToLower(strings.TrimSpace(q.Get("source")))
+		search := strings.ToLower(strings.TrimSpace(q.Get("search")))
+		limit := 300
+		if limitStr := q.Get("limit"); limitStr != "" {
 			if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
 				limit = l
 			}
 		}
-		total := len(nodes)
-		if len(nodes) > limit {
-			nodes = nodes[:limit]
+
+		allNodes, fetched := m.Nodes()
+		tunnels := m.Tunnels()
+		usedHosts := make(map[string]bool, len(tunnels))
+		for _, t := range tunnels {
+			usedHosts[t.Node.HostName] = true
 		}
+
+		var filtered []Node
+		for _, n := range allNodes {
+			if region != "" && region != "ALL" {
+				if strings.ToUpper(n.CountryCode) != region && !strings.Contains(strings.ToUpper(n.Country), region) {
+					continue
+				}
+			}
+			if source != "" && source != "all" {
+				if source == "edu" {
+					if n.Source != "edu" && !isEduIP(n.IP) {
+						continue
+					}
+				} else if !strings.EqualFold(n.Source, source) {
+					continue
+				}
+			}
+			if search != "" {
+				s := strings.ToLower(n.HostName + " " + n.IP + " " + n.ISP + " " + n.Country + " " + n.CountryCode)
+				if !strings.Contains(s, search) {
+					continue
+				}
+			}
+			filtered = append(filtered, n)
+		}
+
+		// 排序优选推荐：网络最好的排在最前面 (Ping 低优先，Speed 高优先)
+		sort.Slice(filtered, func(i, j int) bool {
+			pi := filtered[i].Ping
+			pj := filtered[j].Ping
+			if pi <= 0 {
+				pi = 9999
+			}
+			if pj <= 0 {
+				pj = 9999
+			}
+			if pi != pj {
+				return pi < pj
+			}
+			return filtered[i].SpeedMbps > filtered[j].SpeedMbps
+		})
+
+		total := len(filtered)
+		if len(filtered) > limit {
+			filtered = filtered[:limit]
+		}
+
+		type NodeView struct {
+			Node
+			InUse bool `json:"in_use"`
+		}
+		views := make([]NodeView, len(filtered))
+		for i, n := range filtered {
+			views[i] = NodeView{
+				Node:  n,
+				InUse: usedHosts[n.HostName],
+			}
+		}
+
 		writeJSON(w, http.StatusOK, map[string]any{
-			"nodes":   nodes,
+			"nodes":   views,
 			"total":   total,
 			"fetched": fetched,
 		})
@@ -231,26 +283,37 @@ func apiStart(m *Manager) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "缺少 host 参数"})
 			return
 		}
+		tpl := 0
+		if s := r.URL.Query().Get("template"); s != "" {
+			tpl, _ = strconv.Atoi(s)
+		}
+
+		startNode := func(vn Node) {
+			t, err := m.Start(vn)
+			if err != nil {
+				writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+				return
+			}
+			// 自动克隆绑定节点链接（与新建出口一致）
+			go func(tun *Tunnel, tplID int) {
+				m.waitUp(tun)
+				if tun.Status == "up" {
+					_, _ = cloneTemplateToTunnels(tplID, []string{tun.Node.HostName}, m.Tunnels())
+				}
+			}(t, tpl)
+			writeJSON(w, http.StatusOK, t)
+		}
+
 		if globalScanner != nil {
 			if vn, ok := globalScanner.GetNodeByHost(host); ok {
-				t, err := m.Start(vn)
-				if err != nil {
-					writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
-					return
-				}
-				writeJSON(w, http.StatusOK, t)
+				startNode(vn)
 				return
 			}
 		}
 		nodes, _ := m.Nodes()
 		for _, n := range nodes {
 			if n.HostName == host {
-				t, err := m.Start(n)
-				if err != nil {
-					writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
-					return
-				}
-				writeJSON(w, http.StatusOK, t)
+				startNode(n)
 				return
 			}
 		}
@@ -490,32 +553,45 @@ func apiExits(m *Manager) http.HandlerFunc {
 	}
 }
 
-// apiProvision 接收"开 N 个某地区的出口"这个意图，返回作业 id 供轮询。
+// apiProvision 接收"开 N 个某地区的出口"或批量自选节点启动这个意图，返回作业 id 供轮询。
 func apiProvision(m *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		count, err := strconv.Atoi(q.Get("count"))
-		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "count 参数无效"})
-			return
-		}
-		// 推荐 3 个，允许范围 1 ~ 20 (单机负载保护)
-		if count < 1 {
-			count = 1
-		}
-		if count > 20 {
-			count = 20
-		}
-		tpl := 0
-		if s := q.Get("template"); s != "" {
-			if tpl, err = strconv.Atoi(s); err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "template 参数无效"})
-				return
+		var hosts []string
+		if rawHosts := q.Get("hosts"); rawHosts != "" {
+			for _, h := range strings.Split(rawHosts, ",") {
+				if trimmed := strings.TrimSpace(h); trimmed != "" {
+					hosts = append(hosts, trimmed)
+				}
 			}
 		}
+
+		tpl := 0
+		if s := q.Get("template"); s != "" {
+			if parsedTpl, err := strconv.Atoi(s); err == nil {
+				tpl = parsedTpl
+			}
+		}
+
+		count := len(hosts)
+		if count == 0 {
+			var err error
+			count, err = strconv.Atoi(q.Get("count"))
+			if err != nil || count < 1 {
+				count = 3
+			}
+			if count > 100 {
+				count = 100
+			}
+		}
+
 		source := q.Get("source")
 		job, err := m.Provision(ProvisionRequest{
-			Region: q.Get("region"), Source: source, Count: count, TemplateID: tpl,
+			Region:     q.Get("region"),
+			Source:     source,
+			Count:      count,
+			TemplateID: tpl,
+			Hosts:      hosts,
 		})
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})

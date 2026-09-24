@@ -586,7 +586,8 @@ func apiLiveScan(scanner *LiveScanner, mgr *Manager) http.HandlerFunc {
 func apiBatchStart(mgr *Manager, scanner *LiveScanner) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
-			Hosts []string `json:"hosts"`
+			Hosts    []string `json:"hosts"`
+			Template int      `json:"template"`
 		}
 		if r.Body != nil {
 			_ = json.NewDecoder(r.Body).Decode(&in)
@@ -598,6 +599,13 @@ func apiBatchStart(mgr *Manager, scanner *LiveScanner) http.HandlerFunc {
 						in.Hosts = append(in.Hosts, trimmed)
 					}
 				}
+			}
+		}
+
+		tpl := in.Template
+		if tpl <= 0 {
+			if s := r.URL.Query().Get("template"); s != "" {
+				tpl, _ = strconv.Atoi(s)
 			}
 		}
 
@@ -633,6 +641,21 @@ func apiBatchStart(mgr *Manager, scanner *LiveScanner) http.HandlerFunc {
 				continue
 			}
 			started = append(started, t)
+		}
+
+		if len(started) > 0 {
+			go func(tList []*Tunnel, tplID int) {
+				var upHosts []string
+				for _, t := range tList {
+					mgr.waitUp(t)
+					if t.Status == "up" {
+						upHosts = append(upHosts, t.Node.HostName)
+					}
+				}
+				if len(upHosts) > 0 {
+					_, _ = cloneTemplateToTunnels(tplID, upHosts, mgr.Tunnels())
+				}
+			}(started, tpl)
 		}
 
 		writeJSON(w, http.StatusOK, map[string]any{

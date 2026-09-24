@@ -306,22 +306,42 @@ textarea:focus{outline:none;border-color:var(--accent)}
         <input type="search" id="rgfilter" placeholder="搜索或筛选国家/地区，如 日本、JP、美国、海外学术...">
         <div class="regions" id="regions" style="margin-top:6px"></div>
       </label>
+      <div id="wzCandidateSection" style="margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;padding:8px 12px;background:var(--subtle);border-radius:6px;border:1px solid var(--border)" id="toggleWzCandidates">
+          <span style="font-size:12px;font-weight:600;display:flex;align-items:center;gap:6px">
+            <span id="wzCandArrow">▶</span> 展开候选节点详情 (<span id="wzCandCount">0</span> 个候选 · 优劣推荐 / 自由选择启动)
+          </span>
+          <span style="font-size:11px;color:var(--accent)" id="wzCandStatus">点击展开</span>
+        </div>
+        <div id="wzCandidatesWrap" style="display:none;margin-top:8px;border:1px solid var(--border);border-radius:6px;padding:10px;background:var(--card-bg)">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-size:12px;color:var(--dim)">
+            <span>已选 <b id="wzSelCount" style="color:var(--primary)">0</b> 个节点</span>
+            <div style="display:flex;gap:6px">
+              <button type="button" id="wzSelectTop3" style="font-size:11px;padding:2px 8px">⚡ 优选前 3 个</button>
+              <button type="button" id="wzSelectTop10" style="font-size:11px;padding:2px 8px">⚡ 优选前 10 个</button>
+              <button type="button" id="wzSelectAll" style="font-size:11px;padding:2px 8px">全选</button>
+              <button type="button" id="wzClearSel" style="font-size:11px;padding:2px 8px">清空</button>
+            </div>
+          </div>
+          <div id="wzCandidatesList" style="max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:4px"></div>
+        </div>
+      </div>
       <label class="f">
         <div style="display:flex;justify-content:space-between;align-items:center">
-          <span>出口数量</span>
+          <span>出口数量 (未勾选具体节点时自动开辟)</span>
           <span style="font-size:12px;color:var(--primary);font-weight:600">推荐 3 个 (最佳性能与稳定性)</span>
         </div>
         <div class="stepper">
           <button id="minus" type="button" title="减少">
             <svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg>
           </button>
-          <input id="count" type="number" min="1" max="20" step="1" value="3" placeholder="3" style="text-align:center;font-weight:700;font-size:15px">
+          <input id="count" type="number" min="1" max="100" step="1" value="3" placeholder="3" style="text-align:center;font-weight:700;font-size:15px">
           <button id="plus" type="button" title="增加">
             <svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
           </button>
         </div>
         <div class="hint" style="color:var(--dim);font-size:12px;margin-top:4px">
-          ⚙️ 默认推荐 <b>3</b> 个出口 · 允许范围: <b>1 ~ 20</b> 个 (单机 1C1G 内存负载最佳)
+          ⚙️ 默认推荐 <b>3</b> 个出口 · 允许范围: <b>1 ~ 100</b> 个 (自选节点不限数量)
         </div>
         <div class="hint" id="availhint"></div>
       </label>
@@ -742,6 +762,13 @@ textarea:focus{outline:none;border-color:var(--accent)}
           <input type="search" id="lsSearch" placeholder="如 tsukuba、edu、sinet、150.40..." style="font-size:12px;padding:6px 8px;background:#0e1116;border:1px solid var(--line);color:var(--text);border-radius:4px">
         </div>
 
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <span style="font-size:11px;color:var(--dim)">对接节点链接 (与新建出口一致)</span>
+          <select id="lsTpl" style="padding:6px 8px;font-size:12px;min-width:160px;background:#0e1116;border:1px solid var(--line);color:var(--text);border-radius:4px">
+            <option value="0">自动匹配活跃节点链接</option>
+          </select>
+        </div>
+
         <div style="display:flex;align-items:center;gap:8px">
           <button class="primary" id="lsStartScanBtn" style="height:32px;font-weight:600;padding:0 12px">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
@@ -1139,7 +1166,7 @@ const DEFAULT_CORE_REGIONS = [
 function clampCount(val) {
   let n = parseInt(val, 10);
   if (isNaN(n) || n < 1) n = 3;
-  if (n > 20) n = 20;
+  if (n > 100) n = 100;
   return n;
 }
 
@@ -1257,7 +1284,11 @@ document.addEventListener('click', e => {
     if(!regionsLoaded) loadWizard(); else { renderRegions(); loadWizard(); }
   }
   const rg = e.target.closest('[data-rg]');
-  if(rg){ region = rg.dataset.rg; renderRegions(); }
+  if(rg){
+    region = rg.dataset.rg;
+    renderRegions();
+    if(wzCandidatesExpanded) loadWizardCandidates();
+  }
 });
 
 // ---- 新建节点 ----
@@ -1357,23 +1388,158 @@ $('#count').onblur = updateAvail;
 if($('#wzSource')){
   $('#wzSource').onchange = () => {
     loadWizard($('#wzSource').value);
+    if(wzCandidatesExpanded) loadWizardCandidates();
   };
 }
 
+let wzCandidatesExpanded = false;
+let wzCandidatesList = [];
+let selectedWzHosts = new Set();
+
+async function loadWizardCandidates(){
+  const wrap = $('#wzCandidatesWrap');
+  if(!wrap || !wzCandidatesExpanded) return;
+  const listEl = $('#wzCandidatesList');
+  const countEl = $('#wzCandCount');
+  const src = $('#wzSource') ? $('#wzSource').value : 'all';
+  listEl.innerHTML = '<div style="padding:12px;text-align:center;color:var(--dim);font-size:12px">正在载入候选节点并根据网络质量测速优选推荐…</div>';
+
+  try{
+    const res = await api('/api/nodes?region=' + encodeURIComponent(region || '') + '&source=' + encodeURIComponent(src || 'all') + '&limit=300');
+    wzCandidatesList = (res && res.nodes) ? res.nodes : [];
+    if(countEl) countEl.textContent = wzCandidatesList.length;
+    renderWizardCandidates();
+  }catch(e){
+    listEl.innerHTML = '<div style="padding:12px;text-align:center;color:var(--warn);font-size:12px">读取候选失败: ' + esc(e.message) + '</div>';
+  }
+}
+
+function renderWizardCandidates(){
+  const listEl = $('#wzCandidatesList');
+  if(!listEl) return;
+  if(!wzCandidatesList.length){
+    listEl.innerHTML = '<div style="padding:12px;text-align:center;color:var(--dim);font-size:12px">该地区/筛选条件下暂无空闲候选节点</div>';
+    return;
+  }
+
+  listEl.innerHTML = wzCandidatesList.map((n, idx) => {
+    const isChecked = selectedWzHosts.has(n.hostname);
+    const flag = getFlagEmoji(n.country_code);
+    const ping = n.ping || 0;
+    const pingColor = ping > 0 && ping < 100 ? 'var(--ok)' : (ping > 0 && ping < 200 ? 'var(--accent)' : 'var(--warn)');
+    const pingText = ping > 0 ? ping + ' ms' : '就绪';
+    const proto = (n.proto || (n.config ? 'ovpn' : 'socks5')).toUpperCase();
+    const isp = n.isp || n.country || '公网节点';
+    const speed = n.speed_mbps ? n.speed_mbps.toFixed(1) + ' Mbps' : '';
+    const inUseBadge = n.in_use ? '<span style="color:var(--warn);font-size:10px;padding:1px 4px;border:1px solid var(--warn);border-radius:3px;margin-left:4px">已占用</span>' : '';
+
+    return '<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:4px;background:' + (isChecked ? 'var(--subtle)' : 'transparent') + ';cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.04)">'
+      + '<input type="checkbox" class="wz-cand-chk" data-host="' + esc(n.hostname) + '" ' + (isChecked ? 'checked' : '') + (n.in_use ? ' disabled' : '') + '>'
+      + '<span style="font-size:11px;color:var(--dim);width:24px;text-align:right">#' + (idx + 1) + '</span>'
+      + '<span style="font-size:14px">' + flag + '</span>'
+      + '<span style="flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(n.ip + ' ' + isp) + '">'
+      + '<b style="color:var(--text)">' + esc(n.ip || n.hostname) + '</b> '
+      + '<span style="color:var(--dim);font-size:11px">' + esc(isp) + '</span>' + inUseBadge
+      + '</span>'
+      + (speed ? '<span style="font-size:11px;color:var(--dim)">' + speed + '</span>' : '')
+      + '<span style="font-size:10px;padding:2px 6px;border-radius:3px;background:rgba(255,255,255,0.06);color:var(--dim)">' + proto + '</span>'
+      + '<span style="font-size:11px;font-weight:600;color:' + pingColor + ';min-width:55px;text-align:right">' + pingText + '</span>'
+      + '</label>';
+  }).join('');
+
+  updateWzSelectedCount();
+}
+
+function updateWzSelectedCount(){
+  const el = $('#wzSelCount');
+  if(el) el.textContent = selectedWzHosts.size;
+  const goBtn = $('#go');
+  if(selectedWzHosts.size > 0){
+    if(goBtn) goBtn.textContent = '⚡ 启动选中 (' + selectedWzHosts.size + ' 个)';
+  } else {
+    if(goBtn) goBtn.textContent = '开始';
+  }
+}
+
+if($('#toggleWzCandidates')){
+  $('#toggleWzCandidates').onclick = () => {
+    wzCandidatesExpanded = !wzCandidatesExpanded;
+    const wrap = $('#wzCandidatesWrap');
+    const arrow = $('#wzCandArrow');
+    const status = $('#wzCandStatus');
+    if(wrap) wrap.style.display = wzCandidatesExpanded ? 'block' : 'none';
+    if(arrow) arrow.textContent = wzCandidatesExpanded ? '▼' : '▶';
+    if(status) status.textContent = wzCandidatesExpanded ? '点击收起' : '点击展开';
+    if(wzCandidatesExpanded){
+      loadWizardCandidates();
+    }
+  };
+}
+
+if($('#wzSelectTop3')){
+  $('#wzSelectTop3').onclick = () => {
+    selectedWzHosts.clear();
+    const available = wzCandidatesList.filter(n => !n.in_use);
+    available.slice(0, 3).forEach(n => selectedWzHosts.add(n.hostname));
+    renderWizardCandidates();
+  };
+}
+
+if($('#wzSelectTop10')){
+  $('#wzSelectTop10').onclick = () => {
+    selectedWzHosts.clear();
+    const available = wzCandidatesList.filter(n => !n.in_use);
+    available.slice(0, 10).forEach(n => selectedWzHosts.add(n.hostname));
+    renderWizardCandidates();
+  };
+}
+
+if($('#wzSelectAll')){
+  $('#wzSelectAll').onclick = () => {
+    const available = wzCandidatesList.filter(n => !n.in_use);
+    available.forEach(n => selectedWzHosts.add(n.hostname));
+    renderWizardCandidates();
+  };
+}
+
+if($('#wzClearSel')){
+  $('#wzClearSel').onclick = () => {
+    selectedWzHosts.clear();
+    renderWizardCandidates();
+  };
+}
+
+document.addEventListener('change', e => {
+  if(e.target.matches('.wz-cand-chk')){
+    const host = e.target.dataset.host;
+    if(host){
+      if(e.target.checked) selectedWzHosts.add(host);
+      else selectedWzHosts.delete(host);
+      updateWzSelectedCount();
+    }
+  }
+});
+
 $('#go').onclick = async e => {
-  const count = clampCount($('#count').value);
-  const avail = availOf(region);
-  const want = Math.min(count, avail > 0 ? avail : count);
   const tpl = $('#tpl').value || '0';
   const src = $('#wzSource') ? $('#wzSource').value : 'all';
   const btn = $('#go');
   const oldText = btn.textContent;
   btn.disabled = true;
   btn.textContent = '启动中...';
-  $('#wzhint').textContent = '正在开辟出口隧道...';
+  $('#wzhint').textContent = '正在开辟出口隧道并对接节点链接...';
   try{
-    await api('/api/provision?count=' + want + '&region=' + encodeURIComponent(region)
-      + '&source=' + encodeURIComponent(src) + '&template=' + tpl, {method:'POST', timeout: 60000});
+    if(selectedWzHosts.size > 0){
+      const hosts = Array.from(selectedWzHosts).join(',');
+      await api('/api/provision?hosts=' + encodeURIComponent(hosts) + '&template=' + tpl, {method:'POST', timeout: 60000});
+      selectedWzHosts.clear();
+    } else {
+      const count = clampCount($('#count').value);
+      const avail = availOf(region);
+      const want = Math.min(count, avail > 0 ? avail : count);
+      await api('/api/provision?count=' + want + '&region=' + encodeURIComponent(region)
+        + '&source=' + encodeURIComponent(src) + '&template=' + tpl, {method:'POST', timeout: 60000});
+    }
     closeModal('wizard');
     $('#wzhint').textContent = '';
     poll();
@@ -1750,8 +1916,9 @@ $('#exportAll').onclick = async () => {
   const socksLinks = upExits.map(e => {
     const host = view.public_ip || window.location.hostname;
     const flag = getFlagEmoji(e.region || e.country_code);
+    const ispName = (e.isp || 'SOCKS5').trim();
     return 'socks5://' + encodeURIComponent(e.socks_user || '') + ':' + encodeURIComponent(e.socks_pass || '')
-      + '@' + host + ':' + e.port + '#' + encodeURIComponent(flag + ' 出口-' + e.slot + ' (' + (e.region || 'GLOBAL') + ')');
+      + '@' + host + ':' + e.port + '#' + encodeURIComponent(flag + ' ' + ispName + ' (:' + e.port + ')');
   });
 
   if(!ids.length && !socksLinks.length){
@@ -1820,7 +1987,7 @@ $('#settingsBtn').onclick = async () => {
     $('#updCheck').textContent = '检查更新';
   }).catch(err => {
     $('#setPathHint').textContent = '界面挂在当前路径下。' + (err.message ? '提示: ' + err.message : '');
-    $('#updCur').textContent = 'v0.3.2-enhanced';
+    $('#updCur').textContent = 'v0.3.3-enhanced';
     $('#updCheck').disabled = false;
   });
 
@@ -2139,7 +2306,32 @@ let selectedLiveHosts = new Set();
 
 async function openLiveScanModal(){
   openModal('liveScanModal');
+  loadLiveScanTemplates();
   await fetchAndRenderLiveNodes();
+}
+
+async function loadLiveScanTemplates(){
+  const sel = $('#lsTpl');
+  if(!sel) return;
+  try{
+    const v = await api('/api/exits');
+    const free = v.direct || [];
+    const bound = (v.exits || []).flatMap(e => e.inbounds || []);
+    const inbounds = free.concat(bound);
+    if(!inbounds.length){
+      sel.innerHTML = '<option value="0">自动匹配活跃节点链接</option>';
+      return;
+    }
+    const opt = i => '<option value="' + i.id + '">'
+      + esc(i.remark || ('端口 ' + i.port)) + ' · ' + esc(i.protocol)
+      + ' :' + i.port + '</option>';
+    sel.innerHTML =
+      '<option value="0">⚡ 自动匹配活跃节点链接 (推荐)</option>'
+      + (free.length ? '<optgroup label="未绑定出口">' + free.map(opt).join('') + '</optgroup>' : '')
+      + (bound.length ? '<optgroup label="已挂在出口上">' + bound.map(opt).join('') + '</optgroup>' : '');
+  }catch(e){
+    sel.innerHTML = '<option value="0">自动匹配活跃节点链接</option>';
+  }
 }
 
 async function fetchAndRenderLiveNodes(isBackgroundPoll = false){
@@ -2307,9 +2499,10 @@ function updateLiveBatchState(){
 
 async function startSingleLiveNode(host, btn){
   if(btn) btn.disabled = true;
-  toast('正在启动该实测节点...');
+  toast('正在启动该实测节点并对接节点链接...');
+  const tpl = $('#lsTpl') ? ($('#lsTpl').value || '0') : '0';
   try{
-    const res = await api('/api/start?host=' + encodeURIComponent(host));
+    const res = await api('/api/start?host=' + encodeURIComponent(host) + '&template=' + encodeURIComponent(tpl));
     toast('节点启动成功！SOCKS5 端口: ' + (res.port || '已分配') + '，出口IP: ' + (res.exit_ip || '协商中'));
     closeModal('liveScanModal');
     poll();
@@ -2327,17 +2520,18 @@ async function startBatchLiveNodes(){
   }
   const btn = $('#lsBatchStartBtn');
   if(btn) btn.disabled = true;
-  toast('正在批量启动 ' + hosts.length + ' 个实测节点...');
+  const tpl = $('#lsTpl') ? (parseInt($('#lsTpl').value, 10) || 0) : 0;
+  toast('正在批量启动 ' + hosts.length + ' 个实测节点并对接节点链接...');
   try{
     const res = await api('/api/nodes/batch_start', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({hosts: hosts})
+      body: JSON.stringify({hosts: hosts, template: tpl})
     });
     const started = (res.started || []).length;
     const errCount = (res.errors || []).length;
     if(started > 0){
-      toast('成功启动 ' + started + ' 个出口节点！' + (errCount ? ' (' + errCount + ' 个冲突/失败)' : ''));
+      toast('成功启动 ' + started + ' 个出口节点并对接节点链接！' + (errCount ? ' (' + errCount + ' 个冲突/失败)' : ''));
       selectedLiveHosts.clear();
       closeModal('liveScanModal');
       poll();

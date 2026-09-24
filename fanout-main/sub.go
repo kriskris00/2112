@@ -19,21 +19,10 @@ var countryNameZH = map[string]string{
 	"GLOBAL": "全球", "EDU": "海外高校学术网",
 }
 
-// formatProxyName 构造规范的订阅节点名称：[国旗Emoji] [国家名称] · [企业/ISP名称] ([规格/出口])
+// formatProxyName 构造规范的订阅节点名称：[国旗Emoji] [企业/ISP名称] (仅国旗表情，不含文字国家，不含"出口"字样)
 func formatProxyName(countryCode, country, isp string, suffix string) string {
 	cc := strings.ToUpper(strings.TrimSpace(countryCode))
 	flag := getFlagEmoji(cc)
-
-	cName := countryNameZH[cc]
-	if cName == "" {
-		cName = country
-	}
-	if cName == "" {
-		cName = cc
-	}
-	if cName == "" {
-		cName = "全球节点"
-	}
 
 	comp := strings.TrimSpace(isp)
 	if comp == "" || strings.EqualFold(comp, "Public Proxy") || strings.EqualFold(comp, "Public Pool") || strings.EqualFold(comp, "VPN Gate") {
@@ -48,10 +37,17 @@ func formatProxyName(countryCode, country, isp string, suffix string) string {
 		comp = string(runes[:22]) + "..."
 	}
 
-	if suffix != "" {
-		return fmt.Sprintf("%s %s · %s (%s)", flag, cName, comp, suffix)
+	cleanSuffix := strings.TrimSpace(suffix)
+	if strings.Contains(cleanSuffix, "出口") {
+		cleanSuffix = strings.TrimSpace(strings.ReplaceAll(cleanSuffix, "出口", ""))
+		cleanSuffix = strings.TrimPrefix(cleanSuffix, "-")
+		cleanSuffix = strings.TrimSpace(cleanSuffix)
 	}
-	return fmt.Sprintf("%s %s · %s", flag, cName, comp)
+
+	if cleanSuffix != "" {
+		return fmt.Sprintf("%s %s (%s)", flag, comp, cleanSuffix)
+	}
+	return fmt.Sprintf("%s %s", flag, comp)
 }
 
 // apiCredToken 供已登录 Web 界面的管理员获取口令，方便一键生成带 token 的聚合订阅链接
@@ -118,8 +114,9 @@ func apiSubscription(m *Manager, a *Auth) http.HandlerFunc {
 			return nil
 		}
 
-		// 收集所有 3x-ui 入站及其分享链接
-		var details []*InboundDetail
+		// 收集运行中的出口节点与绑定的 3x-ui 入站（严格 1:1 实时同步，绝不重复生成 20->40 个）
+		coveredSlots := make(map[int]bool)
+		var validDetails []*InboundDetail
 		var allLinks []string
 
 		p, err := openPanel()
@@ -128,17 +125,17 @@ func apiSubscription(m *Manager, a *Auth) http.HandlerFunc {
 			for _, ib := range inbounds {
 				d, dErr := p.InboundDetail(ib.ID, host)
 				if dErr == nil && d != nil {
-					details = append(details, d)
-					// 处理链接名称：改成国家表情和企业名称
 					t := findTunnel(d.BoundTo)
+					// 严格只同步当前正在运行(up)的出口节点，未绑定或已停止的不入订阅
+					if t == nil {
+						continue
+					}
+					coveredSlots[t.Slot] = true
+					validDetails = append(validDetails, d)
+
 					for _, rawLink := range d.Links {
 						idx := strings.LastIndex(rawLink, "#")
-						var cleanName string
-						if t != nil {
-							cleanName = formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP, fmt.Sprintf("%s :%d", strings.ToUpper(d.Protocol), d.Port))
-						} else {
-							cleanName = fmt.Sprintf("🚀 聚合出海 · %s :%d", strings.ToUpper(d.Protocol), d.Port)
-						}
+						cleanName := formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP, fmt.Sprintf("%s :%d", strings.ToUpper(d.Protocol), d.Port))
 						if idx != -1 {
 							rawLink = rawLink[:idx] + "#" + url.QueryEscape(cleanName)
 						} else {
@@ -150,10 +147,13 @@ func apiSubscription(m *Manager, a *Auth) http.HandlerFunc {
 			}
 		}
 
-		// 收集运行中的出口隧道（SOCKS5 形式补充，国旗表情 + 企业名称）
+		// 仅对尚未绑定入站的独立出口隧道补充 SOCKS5 节点（仅国旗表情，无文字国家，无出口字样）
 		for _, t := range upTunnels {
+			if coveredSlots[t.Slot] {
+				continue
+			}
 			cred := t.credential()
-			label := formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP, fmt.Sprintf("出口-%d", t.Slot))
+			label := formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP, fmt.Sprintf(":%d", t.Port))
 			s5Link := fmt.Sprintf("socks5://%s:%s@%s:%d#%s", cred.User, cred.Pass, host, t.Port, url.QueryEscape(label))
 			allLinks = append(allLinks, s5Link)
 		}
@@ -165,7 +165,7 @@ func apiSubscription(m *Manager, a *Auth) http.HandlerFunc {
 		if isClash {
 			w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
 			w.Header().Set("Content-Disposition", "attachment; filename=\"fanout-clash.yaml\"")
-			yamlContent := generateClashConfig(details, upTunnels, host)
+			yamlContent := generateClashConfig(validDetails, upTunnels, host)
 			_, _ = w.Write([]byte(yamlContent))
 			return
 		}
@@ -173,7 +173,7 @@ func apiSubscription(m *Manager, a *Auth) http.HandlerFunc {
 		if isQuanX {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			w.Header().Set("Content-Disposition", "attachment; filename=\"fanout-quanx.txt\"")
-			qxContent := generateQuanXConfig(details, upTunnels, host)
+			qxContent := generateQuanXConfig(validDetails, upTunnels, host)
 			if r.URL.Query().Get("raw") == "1" {
 				_, _ = w.Write([]byte(qxContent))
 				return
@@ -255,27 +255,26 @@ func generateClashConfig(details []*InboundDetail, tunnels []*Tunnel, host strin
 		return raw
 	}
 
-	// 1. 处理 3x-ui 入站（节点名称采用：国家表情 + 企业名称）
+	// 1. 处理 3x-ui 入站（严格 1:1 绑定到运行中的出口）
+	coveredSlots := make(map[int]bool)
 	for _, d := range details {
 		proto := strings.ToLower(d.Protocol)
 		t := findTunnel(d.BoundTo)
+		if t == nil {
+			continue
+		}
+		coveredSlots[t.Slot] = true
 
 		for idx, c := range d.Clients {
 			clientEmail := c.Email
 			if clientEmail == "" {
 				clientEmail = fmt.Sprintf("client-%d", idx+1)
 			}
-			var pName string
-			if t != nil {
-				suffix := fmt.Sprintf("%s :%d", strings.ToUpper(proto), d.Port)
-				if len(d.Clients) > 1 {
-					suffix += fmt.Sprintf(" - %s", clientEmail)
-				}
-				pName = formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP, suffix)
-			} else {
-				pName = fmt.Sprintf("🚀 入站 · %s :%d (%s)", strings.ToUpper(proto), d.Port, clientEmail)
+			suffix := fmt.Sprintf("%s :%d", strings.ToUpper(proto), d.Port)
+			if len(d.Clients) > 1 {
+				suffix += fmt.Sprintf(" - %s", clientEmail)
 			}
-			pName = makeUniqueName(pName)
+			pName := makeUniqueName(formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP, suffix))
 
 			switch proto {
 			case "vless":
@@ -329,10 +328,13 @@ func generateClashConfig(details []*InboundDetail, tunnels []*Tunnel, host strin
 		}
 	}
 
-	// 2. 处理运行中的出口隧道 (SOCKS5 出口，国家表情 + 企业名称)
+	// 2. 仅对未绑定入站的独立出口隧道补充 SOCKS5 节点（仅国旗表情，无文字国家，无出口字样）
 	for _, t := range tunnels {
+		if coveredSlots[t.Slot] {
+			continue
+		}
 		cred := t.credential()
-		pName := makeUniqueName(formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP, fmt.Sprintf("出口-%d", t.Slot)))
+		pName := makeUniqueName(formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP, fmt.Sprintf(":%d", t.Port)))
 		py := fmt.Sprintf("  - name: %q\r\n    type: socks5\r\n    server: %q\r\n    port: %d\r\n    username: %q\r\n    password: %q\r\n    udp: true\r\n",
 			pName, host, t.Port, cred.User, cred.Pass)
 		proxies = append(proxies, proxyItem{name: pName, yaml: py})
@@ -421,27 +423,26 @@ func generateQuanXConfig(details []*InboundDetail, tunnels []*Tunnel, host strin
 		return raw
 	}
 
-	// 1. 处理 3x-ui 入站
+	// 1. 处理 3x-ui 入站（严格 1:1 绑定到运行中的出口）
+	coveredSlots := make(map[int]bool)
 	for _, d := range details {
 		proto := strings.ToLower(d.Protocol)
 		t := findTunnel(d.BoundTo)
+		if t == nil {
+			continue
+		}
+		coveredSlots[t.Slot] = true
 
 		for idx, c := range d.Clients {
 			clientEmail := c.Email
 			if clientEmail == "" {
 				clientEmail = fmt.Sprintf("client-%d", idx+1)
 			}
-			var pName string
-			if t != nil {
-				suffix := fmt.Sprintf("%s :%d", strings.ToUpper(proto), d.Port)
-				if len(d.Clients) > 1 {
-					suffix += fmt.Sprintf(" - %s", clientEmail)
-				}
-				pName = formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP, suffix)
-			} else {
-				pName = fmt.Sprintf("🚀 入站 · %s :%d (%s)", strings.ToUpper(proto), d.Port, clientEmail)
+			suffix := fmt.Sprintf("%s :%d", strings.ToUpper(proto), d.Port)
+			if len(d.Clients) > 1 {
+				suffix += fmt.Sprintf(" - %s", clientEmail)
 			}
-			pName = makeUniqueName(pName)
+			pName := makeUniqueName(formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP, suffix))
 
 			switch proto {
 			case "trojan":
@@ -488,10 +489,13 @@ func generateQuanXConfig(details []*InboundDetail, tunnels []*Tunnel, host strin
 		}
 	}
 
-	// 2. 处理运行中的出口隧道 (SOCKS5 出口，国家表情 + 企业名称)
+	// 2. 仅对未绑定入站的独立出口隧道补充 SOCKS5 节点（仅国旗表情，无文字国家，无出口字样）
 	for _, t := range tunnels {
+		if coveredSlots[t.Slot] {
+			continue
+		}
 		cred := t.credential()
-		pName := makeUniqueName(formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP, fmt.Sprintf("出口-%d", t.Slot)))
+		pName := makeUniqueName(formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP, fmt.Sprintf(":%d", t.Port)))
 		if cred.User != "" && cred.Pass != "" {
 			sb.WriteString(fmt.Sprintf("socks5 = %s:%d, username=%s, password=%s, fast-open=false, udp-relay=true, tag=%s\r\n",
 				host, t.Port, cred.User, cred.Pass, pName))

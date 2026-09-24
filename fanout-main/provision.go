@@ -10,10 +10,11 @@ import (
 
 // ProvisionRequest 是"给我 N 个某地区的出口"这个意图。
 type ProvisionRequest struct {
-	Region     string // 国家码，空表示不限
-	Source     string // 节点源："all", "vpngate", "edu", "proxy", "custom"
+	Region     string   // 国家码，空表示不限
+	Source     string   // 节点源："all", "vpngate", "edu", "proxy", "custom"
 	Count      int
-	TemplateID int // 3x-ui 入站模板；0 表示只开隧道不建入站
+	TemplateID int      // 3x-ui 入站模板；0 表示只开隧道不建入站
+	Hosts      []string // 指定要启动的主机名列表；非空时直接选用
 }
 
 // Provision 异步执行一次批量开出口，立刻返回作业句柄供界面轮询。
@@ -21,12 +22,35 @@ type ProvisionRequest struct {
 // 隧道并行拉起（每条都要等 openvpn 握手，串行会线性累加等待），
 // 面板侧的入站创建则统一放到最后串行做一次，因为每次改路由都要重启 Xray。
 func (m *Manager) Provision(req ProvisionRequest) (*Job, error) {
-	if req.Count < 1 {
-		return nil, fmt.Errorf("数量至少为 1")
-	}
-	picks, err := m.pickNodesSource(req.Region, req.Source, req.Count)
-	if err != nil {
-		return nil, err
+	var picks []Node
+	if len(req.Hosts) > 0 {
+		m.mu.RLock()
+		nodeMap := make(map[string]Node, len(m.nodes))
+		for _, n := range m.nodes {
+			nodeMap[n.HostName] = n
+		}
+		m.mu.RUnlock()
+		for _, h := range req.Hosts {
+			if n, ok := nodeMap[h]; ok {
+				picks = append(picks, n)
+			} else if globalScanner != nil {
+				if n, ok := globalScanner.GetNodeByHost(h); ok {
+					picks = append(picks, n)
+				}
+			}
+		}
+		if len(picks) == 0 {
+			return nil, fmt.Errorf("指定的候选节点已不存在或已下线")
+		}
+	} else {
+		if req.Count < 1 {
+			return nil, fmt.Errorf("数量至少为 1")
+		}
+		var err error
+		picks, err = m.pickNodesSource(req.Region, req.Source, req.Count)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	labels := make([]string, 0, len(picks)+1)
@@ -38,13 +62,45 @@ func (m *Manager) Provision(req ProvisionRequest) (*Job, error) {
 	}
 
 	where := req.Region
-	if where == "" {
+	if len(req.Hosts) > 0 {
+		where = "自选节点"
+	} else if where == "" {
 		where = "任意地区"
 	}
 	job := m.jobs.New(fmt.Sprintf("开 %d 个 %s 出口", len(picks), where), labels)
 
 	go m.runProvision(job, picks, req.TemplateID)
 	return job, nil
+}
+
+// cloneTemplateToTunnels 为指定主机名列表的隧道复制并绑定入站模板（与新建出口完全一致）
+func cloneTemplateToTunnels(templateID int, hosts []string, tunnels []*Tunnel) ([]int, error) {
+	if len(hosts) == 0 {
+		return nil, nil
+	}
+	x, err := openPanel()
+	if err != nil {
+		return nil, err
+	}
+	// 如果 templateID <= 0，自动寻找第一个可用的非直连入站模板
+	if templateID <= 0 {
+		inbounds, _ := x.Inbounds(nil)
+		for _, ib := range inbounds {
+			if ib.Enable && ib.ID > 0 {
+				templateID = ib.ID
+				break
+			}
+		}
+		if templateID <= 0 && len(inbounds) > 0 {
+			templateID = inbounds[0].ID
+		}
+	}
+	if templateID <= 0 {
+		return nil, nil
+	}
+	ports, err := x.CloneToTunnels(templateID, hosts, tunnels)
+	invalidateInbounds()
+	return ports, err
 }
 
 func (m *Manager) runProvision(job *Job, picks []Node, templateID int) {
@@ -92,13 +148,7 @@ func (m *Manager) runProvision(job *Job, picks []Node, templateID int) {
 	}
 
 	job.Set(step, "running", fmt.Sprintf("为 %d 个出口建入站", len(hosts)))
-	x, err := openPanel()
-	if err != nil {
-		job.Set(step, "failed", err.Error())
-		return
-	}
-	ports, err := x.CloneToTunnels(templateID, hosts, m.Tunnels())
-	invalidateInbounds()
+	ports, err := cloneTemplateToTunnels(templateID, hosts, m.Tunnels())
 	if err != nil {
 		job.Set(step, "failed", firstLine(err.Error()))
 		return

@@ -10,9 +10,9 @@ import (
 )
 
 const (
-	healthInterval = 30 * time.Second
+	healthInterval = 60 * time.Second
 	healthFailures = 4 // 连续失败 4 次才判定掉线，容忍偶发抖动
-	healthTimeout  = 8 * time.Second
+	healthTimeout  = 6 * time.Second
 )
 
 // WatchHealth 周期检查每条隧道是否还能出网，掉线的自动换节点重连。
@@ -27,18 +27,21 @@ func (m *Manager) WatchHealth() {
 			}
 			if m.tunnelHealthy(t) {
 				fails[t.Slot] = 0
+				time.Sleep(300 * time.Millisecond)
 				continue
 			}
 
 			fails[t.Slot]++
 			if fails[t.Slot] < healthFailures {
 				log.Printf("隧道 %d (%s) 探测失败 %d 次", t.Slot, t.Node.HostName, fails[t.Slot])
+				time.Sleep(300 * time.Millisecond)
 				continue
 			}
 
 			log.Printf("隧道 %d (%s) 已掉线，正在换节点重连", t.Slot, t.Node.HostName)
 			fails[t.Slot] = 0
 			m.reconnect(t, t.Node.HostName)
+			time.Sleep(500 * time.Millisecond)
 		}
 	}
 }

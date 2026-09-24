@@ -62,6 +62,34 @@ func initIPIntel(workDir string) {
 	}
 }
 
+var (
+	intelDirty     bool
+	intelDirtyMu   sync.Mutex
+	intelSaveOnce  sync.Once
+)
+
+func markIPIntelDirty() {
+	intelDirtyMu.Lock()
+	intelDirty = true
+	intelDirtyMu.Unlock()
+
+	intelSaveOnce.Do(func() {
+		go func() {
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+			for range ticker.C {
+				intelDirtyMu.Lock()
+				dirty := intelDirty
+				intelDirty = false
+				intelDirtyMu.Unlock()
+				if dirty {
+					saveIPIntel()
+				}
+			}
+		}()
+	})
+}
+
 func saveIPIntel() {
 	globalIPIntel.mu.RLock()
 	defer globalIPIntel.mu.RUnlock()
@@ -69,7 +97,7 @@ func saveIPIntel() {
 	if globalIPIntel.filePath == "" {
 		return
 	}
-	blob, err := json.MarshalIndent(globalIPIntel.cache, "", "  ")
+	blob, err := json.Marshal(globalIPIntel.cache)
 	if err != nil {
 		return
 	}
@@ -202,7 +230,7 @@ func enrichSingleIPAsync(ip string) {
 	globalIPIntel.cache[ip] = result
 	globalIPIntel.mu.Unlock()
 
-	saveIPIntel()
+	markIPIntelDirty()
 }
 
 // ResolveIPIntel 同步或从缓存获取 IP 情报（支持本地海外学术网段、ip-api 与 ipwho.is 双重在线容灾）
@@ -259,7 +287,7 @@ func ResolveIPIntel(ip string) IPIntel {
 		globalIPIntel.mu.Lock()
 		globalIPIntel.cache[ip] = res
 		globalIPIntel.mu.Unlock()
-		saveIPIntel()
+		markIPIntelDirty()
 		return res
 	}
 
@@ -349,7 +377,7 @@ func ResolveIPIntel(ip string) IPIntel {
 	globalIPIntel.mu.Lock()
 	globalIPIntel.cache[ip] = res
 	globalIPIntel.mu.Unlock()
-	saveIPIntel()
+	markIPIntelDirty()
 	return res
 }
 
@@ -467,5 +495,5 @@ func BatchEnrichNodes(nodes []Node) {
 	}
 	globalIPIntel.mu.Unlock()
 
-	saveIPIntel()
+	markIPIntelDirty()
 }

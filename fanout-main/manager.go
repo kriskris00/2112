@@ -330,13 +330,10 @@ func (m *Manager) bringUpPersist(t *Tunnel, notify bool, persist bool) {
 
 		t.Status = "starting"
 		t.Err = fmt.Sprintf("暂无可用节点，%.0f 秒后重试", backoff.Seconds())
-		log.Printf("隧道 %d 一轮候选均失败，%.0f 秒后刷新节点重试", t.Slot, backoff.Seconds())
+		log.Printf("隧道 %d 一轮候选均失败，%.0f 秒后重试", t.Slot, backoff.Seconds())
 		time.Sleep(backoff)
 		if !m.tunnelActive(t) {
 			return
-		}
-		if _, err := m.RefreshNodes(); err != nil {
-			log.Printf("重试前刷新节点列表失败: %v", err)
 		}
 		if backoff < reconnectBackoffMax {
 			backoff *= 2

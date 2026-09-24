@@ -551,7 +551,7 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 			}
 			successCount++
 			for _, n := range nodes {
-				if len(nodeMap) >= 200000 {
+				if len(nodeMap) >= 6000 {
 					break
 				}
 				if n.IP != "" {
@@ -589,7 +589,7 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 				}
 				successCount++
 				for _, n := range nodes {
-					if len(nodeMap) >= 200000 {
+					if len(nodeMap) >= 6000 {
 						break
 					}
 					if n.IP != "" && nodeMap[n.IP].IP == "" {
