@@ -4,11 +4,9 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 )
 
 // Panel 是 fanout 管理节点链接的后端。
@@ -127,7 +125,10 @@ func savePanelMode(dir, mode string) error {
 	return os.WriteFile(path, []byte(mode), 0600)
 }
 
-// openPanel 专一接管本机 3x-ui 面板
+// openPanel 返回当前可用的后端。
+//
+// 优先接管本机已装的 3x-ui：用户既然装了面板，入站大概率在那边管着，
+// fanout 另起一个 Xray 会和面板抢端口。探测不到才用自建模式。
 func openPanel() (Panel, error) {
 	panelState.mu.Lock()
 	defer panelState.mu.Unlock()
@@ -136,49 +137,83 @@ func openPanel() (Panel, error) {
 		return panelState.current, nil
 	}
 
-	// 专一联动 3x-ui 面板
-	x, err := DetectXUI(panelState.workDir)
-	if err == nil && x != nil {
+	switch panelState.forced {
+	case "3x-ui":
+		x, err := DetectXUI(panelState.workDir)
+		if err != nil {
+			return nil, fmt.Errorf("指定了 3x-ui 模式但探测失败: %w", err)
+		}
 		panelState.current = x
 		return x, nil
+	case "native":
+		n, err := openNative(panelState.workDir)
+		if err != nil {
+			return nil, err
+		}
+		panelState.current = n
+		return n, nil
+	case "xray-cf-lite":
+		xc, err := DetectXCL()
+		if err != nil {
+			return nil, fmt.Errorf("指定了 xray-cf-lite 模式但探测失败: %w", err)
+		}
+		panelState.current = xc
+		return xc, nil
 	}
 
-	// 若 3x-ui 暂未启动，尝试唤醒系统服务
-	if hasCmd("systemctl") {
-		_ = exec.Command("systemctl", "start", "x-ui").Run()
-		time.Sleep(1 * time.Second)
-		if x2, err2 := DetectXUI(panelState.workDir); err2 == nil && x2 != nil {
-			panelState.current = x2
-			return x2, nil
-		}
-	} else if hasCmd("rc-service") {
-		_ = exec.Command("rc-service", "x-ui", "start").Run()
-		time.Sleep(1 * time.Second)
-		if x2, err2 := DetectXUI(panelState.workDir); err2 == nil && x2 != nil {
-			panelState.current = x2
-			return x2, nil
-		}
+	if xc, err := DetectXCL(); err == nil {
+		panelState.current = xc
+		return xc, nil
 	}
 
+	if x, err := DetectXUI(panelState.workDir); err == nil {
+		panelState.current = x
+		return x, nil
+	} else if !xuiAbsent() {
+		// 面板装了却读不出配置，这时自建模式会和它抢端口，宁可报错让用户看见
+		return nil, fmt.Errorf("检测到 3x-ui 但读取配置失败: %w", err)
+	}
+
+	n, err := openNative(panelState.workDir)
 	if err != nil {
-		return nil, fmt.Errorf("联动 3x-ui 面板失败: %w (请确保 3x-ui 服务已启动)", err)
+		return nil, err
 	}
-	return nil, fmt.Errorf("未检测到 3x-ui 面板，请确认已安装并运行")
+	panelState.current = n
+	return n, nil
 }
 
-// currentPanelMode 返回当前生效的后端类型（统一为 3x-ui）。
+// currentPanelMode 返回当前生效的后端类型（forced 为空时按已选定的 current 推断）。
 func currentPanelMode() string {
-	return "3x-ui"
+	panelState.mu.Lock()
+	defer panelState.mu.Unlock()
+	if panelState.forced != "" {
+		return panelState.forced
+	}
+	if panelState.current != nil {
+		return panelState.current.Kind()
+	}
+	return ""
 }
 
-// availablePanelModes 探测 3x-ui 在本机是否可用。
+// availablePanelModes 探测每种后端在本机是否可用，供界面渲染可选项。
 func availablePanelModes(workDir string) []map[string]any {
 	modes := []map[string]any{}
+
+	xcOK, xcReason := true, ""
+	if _, err := DetectXCL(); err != nil {
+		xcOK, xcReason = false, err.Error()
+	}
+	modes = append(modes, map[string]any{"mode": "xray-cf-lite", "label": "xray-cf-lite", "available": xcOK, "reason": xcReason})
+
 	xuiOK, xuiReason := true, ""
 	if _, err := DetectXUI(workDir); err != nil {
 		xuiOK, xuiReason = false, err.Error()
 	}
-	modes = append(modes, map[string]any{"mode": "3x-ui", "label": "3x-ui 面板 (专一联动)", "available": xuiOK, "reason": xuiReason})
+	modes = append(modes, map[string]any{"mode": "3x-ui", "label": "3x-ui 面板", "available": xuiOK, "reason": xuiReason})
+
+	// 自建模式总是可用（fanout 自己跑 Xray），前提是能找到 xray 二进制，这里不预判，交给切换时报错。
+	modes = append(modes, map[string]any{"mode": "native", "label": "自建 Xray", "available": true, "reason": ""})
+
 	return modes
 }
 
