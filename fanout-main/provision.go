@@ -83,7 +83,7 @@ func cloneTemplateToTunnels(templateID int, hosts []string, tunnels []*Tunnel) (
 	if err != nil {
 		return nil, err
 	}
-	// 如果 templateID <= 0，自动寻找第一个可用的非直连入站模板
+	// 1. 如果 templateID <= 0，自动寻找第一个可用的非直连入站模板
 	if templateID <= 0 {
 		inbounds, _ := x.Inbounds(nil)
 		for _, ib := range inbounds {
@@ -96,8 +96,20 @@ func cloneTemplateToTunnels(templateID int, hosts []string, tunnels []*Tunnel) (
 			templateID = inbounds[0].ID
 		}
 	}
+	// 2. 如果面板没有任何入站模板（如刚安装 3x-ui 或自建模式为空），自动创建高兼容性的 VLESS 基础模板
 	if templateID <= 0 {
-		return nil, nil
+		created, err := x.CreateInbound(NewInboundSpec{
+			Protocol: "vless",
+			Network:  "tcp",
+			Security: "none",
+			Remark:   "VLESS 节点",
+		}, tunnels)
+		if err == nil && created != nil {
+			templateID = created.ID
+		}
+	}
+	if templateID <= 0 {
+		return nil, fmt.Errorf("未能获取或创建可用入站模板")
 	}
 	ports, err := x.CloneToTunnels(templateID, hosts, tunnels)
 	invalidateInbounds()
@@ -132,9 +144,6 @@ func (m *Manager) runProvision(job *Job, picks []Node, templateID int) {
 	}
 	wg.Wait()
 
-	if templateID <= 0 {
-		return
-	}
 
 	step := len(picks)
 	var hosts []string
@@ -486,63 +495,9 @@ func (m *Manager) AutoOrchestrate() {
 	}
 	defer m.orchestrateMu.Unlock()
 
+	// 1. 统计当前运行中或启动中的各国家出口数量
 	tunnels := m.Tunnels()
-
-	// 0. 严格执行 1 出口 = 1 节点：清理 3x-ui / native 面板中的重复入站与废弃孤儿入站
-	if p, err := openPanel(); err == nil && p != nil {
-		inbounds, _ := p.Inbounds(nil)
-		byExitInbounds := make(map[string][]int) // host -> []inboundID
-		existingTunnelHosts := make(map[string]bool)
-		for _, t := range tunnels {
-			existingTunnelHosts[t.Node.HostName] = true
-			existingTunnelHosts[sanitizeTag(t.Node.HostName)] = true
-			if t.Node.IP != "" {
-				existingTunnelHosts[t.Node.IP] = true
-			}
-			if t.ExitIP != "" {
-				existingTunnelHosts[t.ExitIP] = true
-			}
-		}
-
-		var orphanIDs []int
-		for _, ib := range inbounds {
-			bTo := strings.TrimSpace(ib.BoundTo)
-			if bTo == "" || strings.EqualFold(bTo, "direct") || strings.EqualFold(bTo, "none") {
-				continue
-			}
-			matchedHost := ""
-			for _, t := range tunnels {
-				if bTo == t.Node.HostName || sanitizeTag(bTo) == sanitizeTag(t.Node.HostName) ||
-					(t.Node.IP != "" && bTo == t.Node.IP) || (t.ExitIP != "" && bTo == t.ExitIP) ||
-					bTo == fmt.Sprintf("exit-%d", t.Slot) || bTo == fmt.Sprintf("slot-%d", t.Slot) {
-					matchedHost = t.Node.HostName
-					break
-				}
-			}
-			if matchedHost != "" {
-				byExitInbounds[matchedHost] = append(byExitInbounds[matchedHost], ib.ID)
-			} else {
-				orphanIDs = append(orphanIDs, ib.ID)
-			}
-		}
-
-		var duplicateIDs []int
-		for _, ids := range byExitInbounds {
-			if len(ids) > 1 {
-				// 严格 1:1，只保留第 1 个正常入站，多余的全部删除
-				duplicateIDs = append(duplicateIDs, ids[1:]...)
-			}
-		}
-		toDelete := append(duplicateIDs, orphanIDs...)
-		if len(toDelete) > 0 {
-			log.Printf("[1出口1节点] 正在清理面板中 %d 个冗余/孤儿入站...", len(toDelete))
-			_ = p.DeleteInbounds(toDelete, tunnels)
-			invalidateInbounds()
-		}
-	}
-
-	// 1. 统计当前运行中或启动中的各国家出口数量并收集按国家分组的隧道
-	activeTunnelsByCountry := make(map[string][]*Tunnel)
+	activeByCountry := make(map[string]int)
 	usedHosts := make(map[string]bool, len(tunnels))
 	usedIPs := make(map[string]bool, len(tunnels))
 	for _, t := range tunnels {
@@ -552,7 +507,7 @@ func (m *Manager) AutoOrchestrate() {
 				c = strings.ToUpper(strings.TrimSpace(t.Node.CountryCode))
 			}
 			if c != "" {
-				activeTunnelsByCountry[c] = append(activeTunnelsByCountry[c], t)
+				activeByCountry[c]++
 			}
 			usedHosts[t.Node.HostName] = true
 			if t.Node.IP != "" {
@@ -561,34 +516,7 @@ func (m *Manager) AutoOrchestrate() {
 		}
 	}
 
-	// 2. 超额出口自动精简：热门国家严格限制最多 3 个，冷门国家严格限制最多 1 个
-	for cc, tList := range activeTunnelsByCountry {
-		target := 1
-		if hotCountries[cc] {
-			target = 3
-		}
-		if len(tList) > target {
-			// 排序保留最优质/最稳定运行的出口，剔除超额出口
-			sort.Slice(tList, func(i, j int) bool {
-				if (tList[i].Status == "up") != (tList[j].Status == "up") {
-					return tList[i].Status == "up"
-				}
-				return tList[i].Since.Before(tList[j].Since)
-			})
-			for idx := target; idx < len(tList); idx++ {
-				excess := tList[idx]
-				log.Printf("[配额精简] 国家 %s 运行出口数 (%d) 超过目标配额 (%d)，自动移除超额出口 槽位 %d (%s)...", cc, len(tList), target, excess.Slot, excess.Node.HostName)
-				_ = m.Stop(excess.Slot)
-				delete(usedHosts, excess.Node.HostName)
-				if excess.Node.IP != "" {
-					delete(usedIPs, excess.Node.IP)
-				}
-			}
-			activeTunnelsByCountry[cc] = tList[:target]
-		}
-	}
-
-	// 3. 汇集节点池中所有国家（仅限真实可用 OpenVPN 节点）
+	// 2. 汇集节点池中所有国家（仅限真实可用 OpenVPN 节点）
 	m.mu.RLock()
 	allNodes := make([]Node, len(m.nodes))
 	copy(allNodes, m.nodes)
@@ -609,7 +537,7 @@ func (m *Manager) AutoOrchestrate() {
 		countryCandidates[cc] = append(countryCandidates[cc], n)
 	}
 
-	// 4. 收集并按热门程度与可用节点数排序国家列表
+	// 3. 收集并按热门程度与可用节点数排序国家列表
 	allCountries := make(map[string]bool)
 	for cc := range countryCandidates {
 		allCountries[cc] = true
@@ -637,15 +565,14 @@ func (m *Manager) AutoOrchestrate() {
 		return len(countryCandidates[sortedCountries[i]]) > len(countryCandidates[sortedCountries[j]])
 	})
 
-	// 5. 为每个国家补齐所需出口配额（热门各 3 个，冷门各 1 个，稳定运行绝不触动）
+	// 4. 为每个国家补齐所需出口配额（热门 3 个，冷门 1 个）
 	var newStarted []*Tunnel
 	for _, cc := range sortedCountries {
 		target := 1
 		if hotCountries[cc] {
 			target = 3
 		}
-		curCount := len(activeTunnelsByCountry[cc])
-		needed := target - curCount
+		needed := target - activeByCountry[cc]
 		if needed <= 0 {
 			continue
 		}
@@ -701,7 +628,7 @@ func (m *Manager) AutoOrchestrate() {
 			if pick.IP != "" {
 				usedIPs[pick.IP] = true
 			}
-			activeTunnelsByCountry[cc] = append(activeTunnelsByCountry[cc], t)
+			activeByCountry[cc]++
 			newStarted = append(newStarted, t)
 		}
 	}
@@ -723,6 +650,36 @@ func (m *Manager) AutoOrchestrate() {
 			}
 		}(newStarted)
 	}
+
+	// 5. 巡检所有运行中的出口，确保 100% 具备对应的入站节点链接（彻底解决"出口在跑但无节点"）
+	go func() {
+		time.Sleep(3 * time.Second)
+		x, pErr := openPanel()
+		if pErr != nil || x == nil {
+			return
+		}
+		inbounds, _ := x.Inbounds(nil)
+		boundHosts := make(map[string]bool)
+		for _, ib := range inbounds {
+			if ib.BoundTo != "" && ib.BoundTo != "direct" && ib.BoundTo != "none" {
+				boundHosts[ib.BoundTo] = true
+				boundHosts[sanitizeTag(ib.BoundTo)] = true
+			}
+		}
+		var needHosts []string
+		for _, t := range m.Tunnels() {
+			if t.Status == "up" {
+				h := t.Node.HostName
+				if !boundHosts[h] && !boundHosts[sanitizeTag(h)] {
+					needHosts = append(needHosts, h)
+				}
+			}
+		}
+		if len(needHosts) > 0 {
+			log.Printf("[全网智能编排] 巡检发现 %d 个运行中出口尚未创建节点链接，立即自动补齐...", len(needHosts))
+			_, _ = cloneTemplateToTunnels(0, needHosts, m.Tunnels())
+		}
+	}()
 }
 
 // WatchAutoOrchestrate 守护线程：定期巡检全网国家出口配额与自愈，并每 30 分钟定时拉取全网最新节点源
@@ -745,7 +702,6 @@ func (m *Manager) WatchAutoOrchestrate() {
 		case <-sourceTicker.C:
 			log.Printf("[自动拉源] 定时拉取全网最新节点源 (30 分钟周期)...")
 			_, _ = m.RefreshNodesSource("all")
-			m.AutoOrchestrate()
 		}
 	}
 }

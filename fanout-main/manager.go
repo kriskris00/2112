@@ -580,28 +580,6 @@ func (m *Manager) Stop(slot int) error {
 	if err := m.saveState(); err != nil {
 		log.Printf("保存状态失败: %v", err)
 	}
-
-	// 坏死彻底剔除：从 3x-ui 与面板中同步移除与此出口绑定的入站，绝不留任何失效死节点
-	if p, err := openPanel(); err == nil && p != nil {
-		inbounds, _ := p.Inbounds(nil)
-		var toDel []int
-		for _, ib := range inbounds {
-			bTo := strings.TrimSpace(ib.BoundTo)
-			if bTo == "" || strings.EqualFold(bTo, "direct") || strings.EqualFold(bTo, "none") {
-				continue
-			}
-			if bTo == t.Node.HostName || sanitizeTag(bTo) == sanitizeTag(t.Node.HostName) ||
-				(t.Node.IP != "" && bTo == t.Node.IP) || (t.ExitIP != "" && bTo == t.ExitIP) ||
-				bTo == fmt.Sprintf("exit-%d", t.Slot) || bTo == fmt.Sprintf("slot-%d", t.Slot) {
-				toDel = append(toDel, ib.ID)
-			}
-		}
-		if len(toDel) > 0 {
-			_ = p.DeleteInbounds(toDel, m.Tunnels())
-			invalidateInbounds()
-		}
-	}
-
 	m.notifyPanel()
 	return nil
 }

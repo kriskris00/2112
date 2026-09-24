@@ -170,9 +170,6 @@ func apiSubscription(m *Manager, a *Auth) http.HandlerFunc {
 					if t == nil {
 						continue
 					}
-					if coveredSlots[t.Slot] {
-						continue // 严格 1 出口 = 1 节点，同一出口绝不重复输出多个入站
-					}
 					coveredSlots[t.Slot] = true
 					validDetails = append(validDetails, d)
 				}
@@ -361,7 +358,7 @@ func generateClashConfig(details []*InboundDetail, tunnels []*Tunnel, host strin
 	for _, d := range details {
 		proto := strings.ToLower(d.Protocol)
 		t := findTunnel(d.BoundTo)
-		if t == nil || coveredSlots[t.Slot] {
+		if t == nil {
 			continue
 		}
 		coveredSlots[t.Slot] = true
@@ -521,7 +518,7 @@ func generateQuanXConfig(details []*InboundDetail, tunnels []*Tunnel, host strin
 	for _, d := range details {
 		proto := strings.ToLower(d.Protocol)
 		t := findTunnel(d.BoundTo)
-		if t == nil || coveredSlots[t.Slot] {
+		if t == nil {
 			continue
 		}
 		coveredSlots[t.Slot] = true

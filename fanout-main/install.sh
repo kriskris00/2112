@@ -220,45 +220,35 @@ else
   rm -rf "$TMP"
 fi
 
-echo "[3/6] 准备 Xray"
-# 没有现成面板接管时 fanout 自己跑 Xray，需要一份二进制。
-# 装到 WORK_DIR/bin 下而不是 /usr/local/bin，避免和机器上别人的 xray 抢版本。
-mkdir -p "${WORK_DIR}/bin"
-if command -v /usr/local/x-ui/x-ui >/dev/null 2>&1 || [[ -x /usr/bin/x-ui ]]; then
-  echo "      检测到 3x-ui，入站交给面板管，跳过"
-elif [[ -d /etc/xray-cf-lite && -f /usr/local/etc/xray/config.json ]]; then
-  echo "      检测到 xray-cf-lite，入站交给它管，跳过"
-elif [[ -x "${WORK_DIR}/bin/xray" ]]; then
-  echo "      已有 $("${WORK_DIR}/bin/xray" version 2>/dev/null | head -1)"
+echo "[3/6] 联动安装 3x-ui 面板"
+if command -v /usr/local/x-ui/x-ui >/dev/null 2>&1 || [[ -x /usr/bin/x-ui ]] || [[ -d /usr/local/x-ui ]]; then
+  echo "      检测到 3x-ui 已安装，确保服务正常运行中"
+  systemctl enable --now x-ui >/dev/null 2>&1 || true
 else
+  echo "      正在自动联动安装最新版 3x-ui 面板..."
+  XUI_ARCH="amd64"
   case "$GOARCH" in
-    amd64) XRAY_ASSET=Xray-linux-64.zip ;;
-    arm64) XRAY_ASSET=Xray-linux-arm64-v8a.zip ;;
+    amd64) XUI_ARCH="amd64" ;;
+    arm64) XUI_ARCH="arm64" ;;
+    arm)   XUI_ARCH="armv7" ;;
   esac
-  echo "      下载 Xray (${XRAY_ASSET})"
-  XT=$(mktemp -d)
-  XURL="https://github.com/XTLS/Xray-core/releases/latest/download/${XRAY_ASSET}"
-  if curl -fsSL "$XURL" -o "$XT/x.zip"; then
-    # 只为解一个 zip 装 unzip 有点重，busybox 环境常自带
-    if command -v unzip >/dev/null; then
-      unzip -qo "$XT/x.zip" -d "$XT"
-    elif command -v busybox >/dev/null && busybox unzip -h >/dev/null 2>&1; then
-      busybox unzip -qo "$XT/x.zip" -d "$XT"
-    else
-      [[ -n "$MGR" ]] && install_pkgs "$MGR" unzip >/dev/null 2>&1 || true
-      command -v unzip >/dev/null && unzip -qo "$XT/x.zip" -d "$XT"
-    fi
-    if [[ -f "$XT/xray" ]]; then
-      install -m 755 "$XT/xray" "${WORK_DIR}/bin/xray"
-      echo "      $("${WORK_DIR}/bin/xray" version 2>/dev/null | head -1)"
-    else
-      echo "      解压失败，自建模式不可用（装了 3x-ui 则不受影响）" >&2
-    fi
+  XUI_TMP=$(mktemp -d)
+  if curl -fsSL -o "$XUI_TMP/x-ui.tar.gz" "https://github.com/MHSanaei/3x-ui/releases/latest/download/x-ui-linux-${XUI_ARCH}.tar.gz" 2>/dev/null; then
+    tar -zxvf "$XUI_TMP/x-ui.tar.gz" -C /usr/local/ >/dev/null 2>&1
+    cd /usr/local/x-ui
+    chmod +x x-ui bin/xray-* 2>/dev/null || true
+    cp -f x-ui.service /etc/systemd/system/ 2>/dev/null || true
+    systemctl daemon-reload 2>/dev/null || true
+    systemctl enable --now x-ui 2>/dev/null || true
+    cd - >/dev/null
+    echo "      3x-ui 面板联动部署成功！"
   else
-    echo "      下载失败，自建模式不可用（装了 3x-ui 则不受影响）" >&2
+    echo "      直接下载失败，尝试执行 3x-ui 在线一键安装..."
+    printf "n\n" | bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh) || true
   fi
-  rm -rf "$XT"
+  rm -rf "$XUI_TMP"
 fi
+systemctl is-active x-ui >/dev/null 2>&1 || systemctl restart x-ui 2>/dev/null || true
 
 echo "[4/6] 放行转发"
 sysctl -qw net.ipv4.ip_forward=1
