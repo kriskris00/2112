@@ -83,7 +83,7 @@ func cloneTemplateToTunnels(templateID int, hosts []string, tunnels []*Tunnel) (
 	if err != nil {
 		return nil, err
 	}
-	// 1. 如果 templateID <= 0，自动寻找第一个可用的非直连入站模板
+	// 如果 templateID <= 0，自动寻找第一个可用的非直连入站模板
 	if templateID <= 0 {
 		inbounds, _ := x.Inbounds(nil)
 		for _, ib := range inbounds {
@@ -96,20 +96,8 @@ func cloneTemplateToTunnels(templateID int, hosts []string, tunnels []*Tunnel) (
 			templateID = inbounds[0].ID
 		}
 	}
-	// 2. 如果面板没有任何入站模板（如刚安装 3x-ui 或自建模式为空），自动创建高兼容性的 VLESS 基础模板
 	if templateID <= 0 {
-		created, err := x.CreateInbound(NewInboundSpec{
-			Protocol: "vless",
-			Network:  "tcp",
-			Security: "none",
-			Remark:   "VLESS 节点",
-		}, tunnels)
-		if err == nil && created != nil {
-			templateID = created.ID
-		}
-	}
-	if templateID <= 0 {
-		return nil, fmt.Errorf("未能获取或创建可用入站模板")
+		return nil, nil
 	}
 	ports, err := x.CloneToTunnels(templateID, hosts, tunnels)
 	invalidateInbounds()
@@ -144,6 +132,9 @@ func (m *Manager) runProvision(job *Job, picks []Node, templateID int) {
 	}
 	wg.Wait()
 
+	if templateID <= 0 {
+		return
+	}
 
 	step := len(picks)
 	var hosts []string
@@ -650,36 +641,6 @@ func (m *Manager) AutoOrchestrate() {
 			}
 		}(newStarted)
 	}
-
-	// 5. 巡检所有运行中的出口，确保 100% 具备对应的入站节点链接（彻底解决"出口在跑但无节点"）
-	go func() {
-		time.Sleep(3 * time.Second)
-		x, pErr := openPanel()
-		if pErr != nil || x == nil {
-			return
-		}
-		inbounds, _ := x.Inbounds(nil)
-		boundHosts := make(map[string]bool)
-		for _, ib := range inbounds {
-			if ib.BoundTo != "" && ib.BoundTo != "direct" && ib.BoundTo != "none" {
-				boundHosts[ib.BoundTo] = true
-				boundHosts[sanitizeTag(ib.BoundTo)] = true
-			}
-		}
-		var needHosts []string
-		for _, t := range m.Tunnels() {
-			if t.Status == "up" {
-				h := t.Node.HostName
-				if !boundHosts[h] && !boundHosts[sanitizeTag(h)] {
-					needHosts = append(needHosts, h)
-				}
-			}
-		}
-		if len(needHosts) > 0 {
-			log.Printf("[全网智能编排] 巡检发现 %d 个运行中出口尚未创建节点链接，立即自动补齐...", len(needHosts))
-			_, _ = cloneTemplateToTunnels(0, needHosts, m.Tunnels())
-		}
-	}()
 }
 
 // WatchAutoOrchestrate 守护线程：定期巡检全网国家出口配额与自愈，并每 30 分钟定时拉取全网最新节点源

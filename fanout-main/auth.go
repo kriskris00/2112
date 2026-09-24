@@ -279,119 +279,165 @@ const loginHTML = `<!DOCTYPE html>
 <title>fanout</title>
 <style>
 :root{
-  --accent:#38bdf8;
-  --text:#f8fafc;
-  --dim:#94a3b8;
+  --accent:#0284c7;
+  --text:#0f172a;
+  --dim:#475569;
   --apple-font:-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", sans-serif;
 }
+*{box-sizing:border-box}
 body{
   margin:0;min-height:100vh;display:flex;flex-direction:column;gap:18px;
   align-items:center;justify-content:center;
   color:var(--text);font:13px/1.5 var(--apple-font);-webkit-font-smoothing:antialiased;
-  background-attachment:fixed;
-  animation:energy6ClusterFlow 36s cubic-bezier(0.4, 0, 0.2, 1) infinite alternate;
+  background:#a9aeb7;position:relative;overflow-x:hidden;
 }
+
+.fluid-aura-container{
+  position:fixed;inset:0;width:100vw;height:100vh;overflow:hidden;pointer-events:none;z-index:0;
+  background:#a9aeb7;filter:blur(75px);-webkit-filter:blur(75px);transform:translateZ(0);
+}
+.aura-blob{
+  position:absolute;border-radius:45% 55% 65% 35% / 40% 50% 60% 50%;
+  opacity:0.92;will-change:transform, background;
+}
+.blob-1{
+  width:75vw;height:75vw;top:-15%;left:-10%;
+  animation:fluidOrbit1 22s ease-in-out infinite alternate, colorCycleBlob1 48s ease-in-out infinite;
+}
+.blob-2{
+  width:70vw;height:70vw;bottom:-15%;right:-10%;
+  animation:fluidOrbit2 26s ease-in-out infinite alternate, colorCycleBlob2 48s ease-in-out infinite;
+}
+.blob-3{
+  width:65vw;height:65vw;top:20%;left:20%;
+  animation:fluidOrbit3 18s ease-in-out infinite alternate, colorCycleBlob3 48s ease-in-out infinite;
+}
+.blob-4{
+  width:60vw;height:60vw;bottom:10%;left:-5%;
+  animation:fluidOrbit4 24s ease-in-out infinite alternate, colorCycleBlob4 48s ease-in-out infinite;
+}
+.blob-5{
+  width:55vw;height:55vw;top:10%;right:-5%;
+  animation:fluidOrbit5 20s ease-in-out infinite alternate, colorCycleBlob5 48s ease-in-out infinite;
+}
+
+@keyframes fluidOrbit1{
+  0%{transform:translate(-5%, -10%) rotate(0deg) scale(1);}
+  33%{transform:translate(30%, 15%) rotate(120deg) scale(1.15);}
+  66%{transform:translate(15%, 35%) rotate(240deg) scale(0.92);}
+  100%{transform:translate(-15%, 20%) rotate(360deg) scale(1.08);}
+}
+@keyframes fluidOrbit2{
+  0%{transform:translate(10%, 15%) rotate(0deg) scale(1.1);}
+  33%{transform:translate(-25%, -10%) rotate(-120deg) scale(0.95);}
+  66%{transform:translate(-10%, -30%) rotate(-240deg) scale(1.18);}
+  100%{transform:translate(25%, -15%) rotate(-360deg) scale(1);}
+}
+@keyframes fluidOrbit3{
+  0%{transform:translate(0%, 0%) scale(0.95) rotate(0deg);}
+  50%{transform:translate(-20%, 25%) scale(1.22) rotate(180deg);}
+  100%{transform:translate(25%, -15%) scale(1.05) rotate(360deg);}
+}
+@keyframes fluidOrbit4{
+  0%{transform:translate(15%, -15%) scale(1.05) rotate(0deg);}
+  50%{transform:translate(-20%, 20%) scale(1.2) rotate(180deg);}
+  100%{transform:translate(20%, 5%) scale(0.92) rotate(360deg);}
+}
+@keyframes fluidOrbit5{
+  0%{transform:translate(-10%, 10%) scale(1);}
+  50%{transform:translate(15%, -20%) scale(1.25);}
+  100%{transform:translate(-5%, 15%) scale(1.05);}
+}
+
+@keyframes colorCycleBlob1{
+  0%, 100%{background:#67e8f9;}
+  16.66%{background:#7dd3fc;}
+  33.33%{background:#bef264;}
+  50.00%{background:#0ea5e9;}
+  66.66%{background:#6ee7b7;}
+  83.33%{background:#a5f3fc;}
+}
+@keyframes colorCycleBlob2{
+  0%, 100%{background:#f472b6;}
+  16.66%{background:#ec2159;}
+  33.33%{background:#ed1d73;}
+  50.00%{background:#833b60;}
+  66.66%{background:#ec2c68;}
+  83.33%{background:#fb7185;}
+}
+@keyframes colorCycleBlob3{
+  0%, 100%{background:#ffffff;}
+  16.66%{background:#5c081e;}
+  33.33%{background:#ffffff;}
+  50.00%{background:#4a044e;}
+  66.66%{background:#ffffff;}
+  83.33%{background:#90949d;}
+}
+@keyframes colorCycleBlob4{
+  0%, 100%{background:#fde047;}
+  16.66%{background:#f97316;}
+  33.33%{background:#701a75;}
+  50.00%{background:#fbbf24;}
+  66.66%{background:#fef08a;}
+  83.33%{background:#fed7aa;}
+}
+@keyframes colorCycleBlob5{
+  0%, 100%{background:#e879f9;}
+  16.66%{background:#fff7ed;}
+  33.33%{background:#f43f5e;}
+  50.00%{background:#ffffff;}
+  66.66%{background:#34d399;}
+  83.33%{background:#c4b5fd;}
+}
+
 .noise-overlay{
-  position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:99;opacity:0.085;
+  position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:2;opacity:0.085;
   mix-blend-mode:overlay;
   background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
   background-repeat:repeat;
 }
-@keyframes energy6ClusterFlow {
-  /* 1. INFINITE: 珍珠白核心 + 腮红粉体 + 冰青水蓝光晕 + 金斑闪烁 */
-  0%, 100% {
-    background:
-      radial-gradient(circle at 50% 42%, rgba(255, 255, 255, 0.96) 0%, rgba(254, 240, 138, 0.85) 15%, rgba(244, 114, 182, 0.82) 32%, transparent 58%),
-      radial-gradient(circle at 55% 38%, rgba(244, 114, 182, 0.90) 0%, rgba(251, 207, 232, 0.65) 28%, transparent 55%),
-      radial-gradient(circle at 45% 46%, rgba(103, 232, 249, 0.92) 0%, rgba(56, 189, 248, 0.78) 35%, transparent 68%),
-      radial-gradient(circle at 48% 54%, rgba(253, 224, 71, 0.85) 0%, transparent 35%),
-      radial-gradient(ellipse at 50% 45%, rgba(224, 242, 254, 0.75) 0%, transparent 75%),
-      linear-gradient(135deg, #a3a8b0 0%, #b8bdc5 50%, #9ba0a9 100%);
-  }
-  /* 2. WARMTH: 炽烈红宝石/草莓红 + 黑暗樱桃心 + 炽焰橘橙 + 外围天青色寒雾 */
-  16.66% {
-    background:
-      radial-gradient(circle at 52% 43%, rgba(255, 247, 237, 0.95) 0%, rgba(251, 146, 60, 0.85) 18%, transparent 32%),
-      radial-gradient(circle at 50% 50%, rgba(92, 8, 30, 0.98) 0%, rgba(220, 38, 38, 0.92) 28%, transparent 58%),
-      radial-gradient(circle at 48% 46%, rgba(236, 33, 89, 0.95) 0%, rgba(225, 29, 72, 0.88) 36%, transparent 68%),
-      radial-gradient(circle at 54% 45%, rgba(249, 115, 22, 0.90) 0%, rgba(251, 146, 60, 0.75) 42%, transparent 70%),
-      radial-gradient(circle at 50% 30%, rgba(125, 211, 252, 0.88) 0%, rgba(56, 189, 248, 0.65) 42%, transparent 72%),
-      linear-gradient(135deg, #a3a8b0 0%, #b0b5be 50%, #9ea3ac 100%);
-  }
-  /* 3. UPLIFTING: 电光洋红粉 + 嫩青柠/薄荷绿顶冠 + 顶端深紫李 + 纵向能量光柱 */
-  33.33% {
-    background:
-      radial-gradient(ellipse at 50% 45%, rgba(255, 255, 255, 0.98) 0%, rgba(253, 231, 243, 0.75) 16%, transparent 38%),
-      radial-gradient(circle at 50% 48%, rgba(237, 29, 115, 0.96) 0%, rgba(219, 39, 119, 0.90) 36%, transparent 70%),
-      radial-gradient(circle at 50% 26%, rgba(190, 242, 100, 0.92) 0%, rgba(134, 239, 172, 0.78) 32%, transparent 58%),
-      radial-gradient(circle at 50% 21%, rgba(112, 26, 117, 0.92) 0%, transparent 32%),
-      radial-gradient(circle at 53% 53%, rgba(244, 63, 94, 0.82) 0%, transparent 66%),
-      linear-gradient(135deg, #a2a7b0 0%, #b2b7c0 50%, #9ca1aa 100%);
-  }
-  /* 4. UNIVERSAL: 广袤电光蔚蓝天宇 + 核心深邃桑葚紫/天鹅绒李 + 散落金砂星光 */
-  50.00% {
-    background:
-      radial-gradient(circle at 51% 49%, rgba(255, 255, 255, 0.95) 0%, transparent 18%),
-      radial-gradient(circle at 47% 42%, rgba(251, 191, 36, 0.90) 0%, transparent 26%),
-      radial-gradient(circle at 50% 48%, rgba(131, 59, 96, 0.98) 0%, rgba(112, 26, 117, 0.90) 35%, transparent 60%),
-      radial-gradient(circle at 50% 45%, rgba(14, 165, 233, 0.96) 0%, rgba(56, 189, 248, 0.88) 38%, rgba(2, 132, 199, 0.7) 65%, transparent 82%),
-      radial-gradient(circle at 50% 55%, rgba(74, 4, 78, 0.88) 0%, transparent 48%),
-      linear-gradient(135deg, #9da2ab 0%, #aeb4be 50%, #9aa0a9 100%);
-  }
-  /* 5. RECIPROCATED: 晨露薄荷翡翠青海 + 嵌套双生红宝石/玫瑰心 + 环绕金黄柠檬光环 */
-  66.66% {
-    background:
-      radial-gradient(circle at 50% 47%, rgba(255, 255, 255, 0.96) 0%, transparent 18%),
-      radial-gradient(circle at 46% 38%, rgba(236, 44, 104, 0.98) 0%, rgba(244, 63, 94, 0.88) 22%, rgba(254, 240, 138, 0.75) 32%, transparent 52%),
-      radial-gradient(circle at 54% 56%, rgba(236, 44, 104, 0.98) 0%, rgba(225, 29, 72, 0.88) 22%, rgba(254, 240, 138, 0.75) 32%, transparent 52%),
-      radial-gradient(circle at 50% 46%, rgba(110, 231, 183, 0.95) 0%, rgba(190, 242, 100, 0.85) 36%, rgba(52, 211, 153, 0.7) 62%, transparent 80%),
-      linear-gradient(135deg, #a1a6af 0%, #b0b6bf 50%, #9ca1aa 100%);
-  }
-  /* 6. VITAL: 盛大落日珊瑚粉霞 + 幻彩欧珀彩虹光环(金桃紫青) + 雾银石青中央茧 */
-  83.33% {
-    background:
-      radial-gradient(ellipse at 50% 36%, rgba(255, 255, 255, 0.96) 0%, transparent 22%),
-      radial-gradient(ellipse at 50% 56%, rgba(255, 255, 255, 0.96) 0%, transparent 22%),
-      radial-gradient(ellipse at 50% 46%, rgba(144, 148, 157, 0.95) 0%, rgba(203, 213, 225, 0.82) 28%, transparent 55%),
-      radial-gradient(circle at 53% 42%, rgba(254, 215, 170, 0.90) 0%, rgba(254, 240, 138, 0.80) 28%, transparent 54%),
-      radial-gradient(circle at 47% 50%, rgba(196, 181, 253, 0.88) 0%, rgba(147, 197, 253, 0.78) 32%, transparent 58%),
-      radial-gradient(circle at 50% 46%, rgba(251, 113, 133, 0.95) 0%, rgba(244, 114, 182, 0.86) 38%, rgba(253, 164, 175, 0.65) 66%, transparent 84%),
-      linear-gradient(135deg, #a4a9b2 0%, #b4b9c2 50%, #9ea3ac 100%);
-  }
-}
-.card{background:rgba(15, 23, 42, 0.78);border:1px solid rgba(255, 255, 255, 0.20);
-  border-top:1px solid rgba(255, 255, 255, 0.45);border-radius:26px;
-  backdrop-filter:blur(36px) saturate(200%);-webkit-backdrop-filter:blur(36px) saturate(200%);
-  box-shadow:0 30px 70px rgba(0,0,0,0.45), inset 0 1px 1px rgba(255,255,255,0.30);
-  padding:32px 34px;width:340px}
+
+/* 2026 Apple Liquid Glass 纯白/高透质感 */
+.card{background:rgba(255, 255, 255, 0.58);border:1px solid rgba(255, 255, 255, 0.85);
+  border-top:1.5px solid #ffffff;border-radius:28px;
+  backdrop-filter:blur(42px) saturate(210%) brightness(110%);-webkit-backdrop-filter:blur(42px) saturate(210%) brightness(110%);
+  box-shadow:0 30px 70px rgba(0,0,0,0.10), inset 0 1px 2px rgba(255,255,255,0.95);
+  padding:34px 38px;width:340px;position:relative;z-index:10}
 .brand{display:flex;align-items:center;gap:8px;margin-bottom:18px}
 h1{font-size:18px;font-weight:700;margin:0;letter-spacing:-0.4px;
-  background:linear-gradient(135deg, #ffffff 0%, #a7f3d0 60%, #67e8f9 100%);
+  background:linear-gradient(135deg, #0f172a 0%, #0369a1 60%, #0d9488 100%);
   -webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.badge{font-size:10px;font-weight:600;padding:2px 7px;border-radius:9999px;
-  background:linear-gradient(135deg, rgba(56,189,248,0.24), rgba(168,85,247,0.24));
-  color:#7dd3fc;border:1px solid rgba(56,189,248,0.45);box-shadow:0 0 12px rgba(56,189,248,0.2)}
-label{display:block;color:var(--dim);font-size:11px;margin-bottom:7px}
-input{width:100%;box-sizing:border-box;background:rgba(8, 14, 24, 0.75);
-  border:1px solid rgba(255, 255, 255, 0.14);color:var(--text);border-radius:12px;
-  padding:9px 12px;font:inherit;backdrop-filter:blur(10px);transition:border-color .15s}
-input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(56,189,248,0.3)}
+.badge{font-size:10px;font-weight:600;padding:2px 8px;border-radius:9999px;
+  background:rgba(2, 132, 199, 0.12);color:#0284c7;border:1px solid rgba(2, 132, 199, 0.3);
+  box-shadow:0 2px 6px rgba(2, 132, 199, 0.1)}
+label{display:block;color:var(--dim);font-size:11px;margin-bottom:7px;font-weight:600}
+input{width:100%;box-sizing:border-box;background:rgba(255, 255, 255, 0.70);
+  border:1px solid rgba(255, 255, 255, 0.90);color:var(--text);border-radius:12px;
+  padding:9px 12px;font:inherit;backdrop-filter:blur(10px);box-shadow:inset 0 1px 2px rgba(0,0,0,0.04);transition:all .15s}
+input:focus{outline:none;border-color:var(--accent);background:#ffffff;box-shadow:0 0 0 3px rgba(2, 132, 199, 0.25)}
 button{width:100%;margin-top:16px;background:linear-gradient(135deg, #0284c7 0%, #2563eb 100%);
-  border:0;color:#fff;font:inherit;font-weight:600;border-radius:9999px;padding:9px;
-  cursor:pointer;box-shadow:0 4px 18px rgba(37,99,235,0.42), inset 0 1px 0 rgba(255,255,255,0.35);
+  border:1px solid rgba(255, 255, 255, 0.4);color:#fff;font:inherit;font-weight:600;border-radius:9999px;padding:9px;
+  cursor:pointer;box-shadow:0 4px 16px rgba(2, 132, 199, 0.35), inset 0 1px 1px rgba(255,255,255,0.4);
   transition:all .18s ease}
-button:hover{background:linear-gradient(135deg, #38bdf8 0%, #3b82f6 100%);transform:translateY(-1px);
-  box-shadow:0 6px 24px rgba(56,189,248,0.6)}
-.err{color:#f43f5e;font-size:11px;margin-top:10px;min-height:14px;text-align:center}
-.credits{font-size:11px;color:var(--dim);display:flex;align-items:center;gap:6px}
+button:hover{background:linear-gradient(135deg, #0ea5e9 0%, #3b82f6 100%);transform:translateY(-1px);
+  box-shadow:0 6px 22px rgba(2, 132, 199, 0.48)}
+.err{color:#dc2626;font-size:11px;margin-top:10px;min-height:14px;text-align:center}
+.credits{font-size:11px;color:var(--dim);display:flex;align-items:center;gap:6px;position:relative;z-index:10}
 .credits a{color:var(--text);text-decoration:none;font-weight:600}
 .credits a:hover{color:var(--accent)}
-.links{display:flex;gap:14px}
+.links{display:flex;gap:14px;position:relative;z-index:10}
 .links a{color:var(--dim);text-decoration:none;font-size:12px;transition:color .15s}
 .links a:hover{color:var(--accent)}
 </style>
 </head>
 <body>
+<div class="fluid-aura-container" aria-hidden="true">
+  <div class="aura-blob blob-1"></div>
+  <div class="aura-blob blob-2"></div>
+  <div class="aura-blob blob-3"></div>
+  <div class="aura-blob blob-4"></div>
+  <div class="aura-blob blob-5"></div>
+</div>
 <div class="noise-overlay" aria-hidden="true"></div>
 <form class="card" id="f">
   <div class="brand">
