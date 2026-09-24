@@ -29,25 +29,26 @@ const mirrorKey = "8rhIFzFKRJMFAe-xP5OQPclDEvSjKlHo"
 
 // defaultMirrors 日本筑波大学 VPN Gate 官方活跃公网 IP 镜像与直连候选池
 var defaultMirrors = []string{
-	"https://www.vpngate.net/api/iphone/",     // 官方 HTTPS 直连
-	"http://www.vpngate.net/api/iphone/",      // 官方 HTTP 直连
-	"http://150.40.105.19:35399/api/iphone/",  // 筑波大学 IP 镜像 1 (克罗地亚)
+	"https://www.vpngate.net/api/iphone/",      // 官方 HTTPS 直连
+	"http://www.vpngate.net/api/iphone/",       // 官方 HTTP 直连
+	"http://150.40.105.19:35399/api/iphone/",   // 筑波大学 IP 镜像 1 (克罗地亚)
 	"http://119.195.163.98:23340/api/iphone/",  // 筑波大学 IP 镜像 2 (韩国)
-	"http://150.40.105.6:11803/api/iphone/",   // 筑波大学 IP 镜像 3 (克罗地亚)
-	"http://150.40.105.23:64629/api/iphone/",  // 筑波大学 IP 镜像 4 (克罗地亚)
+	"http://150.40.105.6:11803/api/iphone/",    // 筑波大学 IP 镜像 3 (克罗地亚)
+	"http://150.40.105.23:64629/api/iphone/",   // 筑波大学 IP 镜像 4 (克罗地亚)
 	"http://103.172.220.133:3946/api/iphone/",  // 筑波大学 IP 镜像 5 (印度)
-	"http://194.156.89.134:47774/api/iphone/", // 筑波大学 IP 镜像 6 (德国)
-	"http://219.100.37.234:25500/api/iphone/", // 筑波大学 IP 镜像 7 (日本)
-	"http://153.125.233.158:19641/api/iphone/",// 筑波大学 IP 镜像 8 (日本)
-	"http://130.158.75.33:14631/api/iphone/",  // 筑波大学 IP 镜像 9 (日本筑波大学本部)
-	"http://219.100.37.238:52158/api/iphone/", // 筑波大学 IP 镜像 10 (日本)
-	"http://219.100.37.244:11075/api/iphone/", // 筑波大学 IP 镜像 11 (日本)
+	"http://194.156.89.134:47774/api/iphone/",  // 筑波大学 IP 镜像 6 (德国)
+	"http://219.100.37.234:25500/api/iphone/",  // 筑波大学 IP 镜像 7 (日本)
+	"http://153.125.233.158:19641/api/iphone/", // 筑波大学 IP 镜像 8 (日本)
+	"http://130.158.75.33:14631/api/iphone/",   // 筑波大学 IP 镜像 9 (日本筑波大学本部)
+	"http://219.100.37.238:52158/api/iphone/",  // 筑波大学 IP 镜像 10 (日本)
+	"http://219.100.37.244:11075/api/iphone/",  // 筑波大学 IP 镜像 11 (日本)
 	"http://103.201.129.246:44837/api/iphone/", // 筑波大学亚太镜像
 	"http://185.220.101.4:1194/api/iphone/",    // 筑波大学欧洲镜像
 	"https://raw.githubusercontent.com/aimili-vpngate/vpngate-crawler/main/vpngate.csv", // GitHub 实时同步全球镜像
 }
 
-// 已全面移除低质/高风险全网开放代理抓取源，全量收敛为官方认证与原生 OpenVPN 优质节点池
+// 质量策略：全量收敛为 VPN Gate 志愿者住宅家宽原生节点 + 学术网 + 政府专网
+// 一律不接入公网开放代理池（datacenter/hosting IP 风控高、纯净度低、易被封禁）
 
 var eduCIDRs []*net.IPNet
 
@@ -645,7 +646,7 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 			}
 			successCount++
 			for _, n := range nodes {
-				if len(nodeMap) >= 6000 {
+				if len(nodeMap) >= 15000 {
 					break
 				}
 				if n.IP != "" && n.Config != "" {
@@ -665,6 +666,39 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 		}(target)
 	}
 	wg.Wait()
+
+	// 4. 质量过滤：剔除所有 hosting/datacenter 低质 IP，只保留住宅/家宽/学术/政府原生节点
+	mu.Lock()
+	for key, n := range nodeMap {
+		// 查询已有 IP 情报缓存
+		globalIPIntel.mu.RLock()
+		intel, hasIntel := globalIPIntel.cache[n.IP]
+		globalIPIntel.mu.RUnlock()
+
+		if hasIntel {
+			// 已知 hosting/datacenter IP 直接踢掉
+			if intel.IPType == "hosting" {
+				delete(nodeMap, key)
+				continue
+			}
+			// proxy 标记的也踢掉
+			if intel.PurityScore < 50 {
+				delete(nodeMap, key)
+				continue
+			}
+		}
+		// 来源标记为 proxy 的全部踢掉
+		if n.Source == "proxy" {
+			delete(nodeMap, key)
+			continue
+		}
+		// ipType 标记为 hosting 的踢掉
+		if n.IPType == "hosting" && n.Source != "vpngate" && n.Source != "edu" && n.Source != "gov" && n.Source != "residential" {
+			delete(nodeMap, key)
+			continue
+		}
+	}
+	mu.Unlock()
 
 	if len(nodeMap) == 0 {
 		sourceInfoMu.Lock()
@@ -697,7 +731,7 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 		globalSourceInfo.ActiveSource = fmt.Sprintf("全球住宅家宽优质原生节点 (%d 节点)", len(nodes))
 	default:
 		if activeSrc != "" {
-			globalSourceInfo.ActiveSource = fmt.Sprintf("官方认证与原生镜像池 (%d 个在线源, 筑波大学+海外名校学术+优质住宅宽带)", successCount)
+			globalSourceInfo.ActiveSource = fmt.Sprintf("高质量原生节点池 (%d 个在线源, 住宅家宽+学术+政府 · %d 纯净节点)", successCount, len(nodes))
 		} else {
 			globalSourceInfo.ActiveSource = "本地优质离线缓存池"
 		}
