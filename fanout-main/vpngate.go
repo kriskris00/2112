@@ -374,6 +374,7 @@ var builtinSeedNodes = []Node{
 	{HostName: "vg_tsukuba_osaka_gw", IP: "219.100.37.238", Port: 52158, Proto: "ovpn", Country: "日本筑波大学 (学术网络)", CountryCode: "JP", SpeedMbps: 80.0, Ping: 48, IPType: "edu", PurityScore: 98, ISP: "筑波大学大阪出口", Source: "edu"},
 	{HostName: "vg_korea_university_gw", IP: "119.195.163.98", Port: 23340, Proto: "ovpn", Country: "韩国高校学术网", CountryCode: "KR", SpeedMbps: 78.0, Ping: 55, IPType: "edu", PurityScore: 95, ISP: "韩国首尔高校网关", Source: "edu"},
 	{HostName: "vg_us_academic_transit", IP: "198.18.0.1", Port: 443, Proto: "ovpn", Country: "美国高校学术网络", CountryCode: "US", SpeedMbps: 90.0, Ping: 135, IPType: "edu", PurityScore: 95, ISP: "US Higher Education Transit", Source: "edu"},
+	{HostName: "vg_jp_gov_prefecture_gw", IP: "210.140.10.12", Port: 443, Proto: "ovpn", Country: "日本政府公共网络", CountryCode: "JP", SpeedMbps: 85.0, Ping: 46, IPType: "gov", PurityScore: 99, ISP: "日本自治体政府网络", Source: "gov"},
 }
 
 // loadInitialNodes 快速启动读取底池（先读本地持久化缓存，若为空则由内建种子节点瞬间补足）
@@ -709,7 +710,56 @@ func parseNodeCSV(body string) ([]Node, error) {
 			strings.Contains(strings.ToLower(get("Operator")), "university") ||
 			strings.Contains(strings.ToLower(get("Message")), "university"))
 
-		if isAcademic {
+		isGov := !isChina && (
+			strings.Contains(hostLower, ".go.jp") ||
+			strings.Contains(hostLower, ".gov") ||
+			strings.Contains(hostLower, ".mil") ||
+			strings.Contains(hostLower, ".gov.uk") ||
+			strings.Contains(hostLower, ".gov.tw") ||
+			strings.Contains(hostLower, ".gov.hk") ||
+			strings.Contains(hostLower, ".gov.sg") ||
+			strings.Contains(hostLower, ".gov.kr") ||
+			strings.Contains(hostLower, ".gov.au") ||
+			strings.Contains(hostLower, "prefecture") ||
+			strings.Contains(hostLower, "municipal") ||
+			isGovISP(isp) ||
+			isGovISP(get("Operator")) ||
+			isGovISP(get("Message")))
+
+		if isGov {
+			ipType = "gov"
+			src = "gov"
+			purityScore = 99
+			if strings.Contains(hostLower, ".go.jp") || strings.Contains(strings.ToLower(get("Operator")), "japan") || countryCode == "JP" {
+				isp = "日本自治体政府网络"
+				if countryCode == "" {
+					countryCode = "JP"
+				}
+			} else if strings.Contains(hostLower, ".gov.tw") || countryCode == "TW" {
+				isp = "台湾公部门政务专网"
+				if countryCode == "" {
+					countryCode = "TW"
+				}
+			} else if strings.Contains(hostLower, ".gov.kr") || countryCode == "KR" {
+				isp = "韩国政府公共网络"
+				if countryCode == "" {
+					countryCode = "KR"
+				}
+			} else if strings.Contains(hostLower, ".gov.uk") || countryCode == "GB" {
+				isp = "英国政府公共事务网"
+				if countryCode == "" {
+					countryCode = "GB"
+				}
+			} else if countryCode == "US" {
+				isp = "美国联邦公共政务网"
+			} else {
+				if zh, ok := countryNameZH[countryCode]; ok && zh != "" {
+					isp = zh + " 政府公共机构网络"
+				} else {
+					isp = "政府公共政务专网"
+				}
+			}
+		} else if isAcademic {
 			ipType = "edu"
 			src = "edu"
 			purityScore = 99
