@@ -19,79 +19,102 @@ const indexHTML = `<!DOCTYPE html>
 <title>fanout</title>
 <style>
 :root{
-  --bg:#090d14;
-  --bg-gradient:radial-gradient(135% 100% at 50% 0%, #151d2e 0%, #0d121c 50%, #07090f 100%);
-  --panel:rgba(22, 29, 44, 0.65);
-  --line:rgba(255, 255, 255, 0.10);
-  --text:#f0f4fc;
-  --dim:#94a3b8;
-  --accent:#0a84ff;
-  --accent-glow:0 0 18px rgba(10, 132, 255, 0.38);
-  --ok:#30d158;
-  --warn:#ffd60a;
-  --bad:#ff453a;
-  --glass-shadow:0 12px 32px -4px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.08);
-  --glass-blur:blur(26px) saturate(185%);
+  --bg:#07151e;
+  --panel:rgba(10, 28, 38, 0.62);
+  --line:rgba(255, 255, 255, 0.12);
+  --text:#f0fdf4;
+  --dim:#8ecae6;
+  --accent:#06b6d4;
+  --accent-glow:0 0 20px rgba(6, 182, 212, 0.45);
+  --ok:#10b981;
+  --warn:#f59e0b;
+  --bad:#f43f5e;
+  --cyan:#06b6d4;
+  --mint:#34d399;
+  --azure:#38bdf8;
+  --lavender:#a78bfa;
+  --glass-shadow:0 12px 36px -4px rgba(0, 20, 30, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.10);
+  --glass-blur:blur(28px) saturate(190%);
   --apple-font:-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   --mono-font:ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg-gradient);background-attachment:fixed;color:var(--text);
-  font:13px/1.55 var(--apple-font);-webkit-font-smoothing:antialiased;min-height:100vh}
+body{
+  margin:0;color:var(--text);font:13px/1.55 var(--apple-font);-webkit-font-smoothing:antialiased;min-height:100vh;
+  background: radial-gradient(circle at 18% 22%, rgba(6, 182, 212, 0.18), transparent 45%),
+              radial-gradient(circle at 82% 18%, rgba(52, 211, 153, 0.17), transparent 45%),
+              radial-gradient(circle at 50% 82%, rgba(56, 189, 248, 0.16), transparent 50%),
+              radial-gradient(circle at 20% 75%, rgba(167, 139, 250, 0.14), transparent 48%),
+              linear-gradient(135deg, #05141c 0%, #08212c 50%, #061822 100%);
+  background-size: 180% 180%;
+  animation: freshAuroraFlow 24s ease-in-out infinite alternate;
+  background-attachment: fixed;
+}
+@keyframes freshAuroraFlow {
+  0% {
+    background-position: 0% 0%, 100% 10%, 50% 100%, 0% 50%, 0% 0%;
+  }
+  50% {
+    background-position: 50% 70%, 50% 90%, 20% 30%, 60% 80%, 100% 100%;
+  }
+  100% {
+    background-position: 80% 20%, 10% 40%, 80% 50%, 100% 20%, 0% 0%;
+  }
+}
 header{display:flex;align-items:center;gap:14px;padding:12px 20px;
   position:sticky;top:0;z-index:40;
-  border-bottom:1px solid var(--line);background:rgba(13, 18, 28, 0.76);
+  border-bottom:1px solid var(--line);background:rgba(8, 26, 36, 0.78);
   backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);
-  box-shadow:0 4px 24px rgba(0,0,0,0.32)}
+  box-shadow:0 4px 24px rgba(0,20,30,0.35)}
 .brand-wrap{display:flex;align-items:center;gap:8px}
 h1{font-size:16px;font-weight:700;margin:0;letter-spacing:-0.3px;
-  background:linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%);
+  background:linear-gradient(135deg, #ffffff 0%, #a7f3d0 60%, #67e8f9 100%);
   -webkit-background-clip:text;-webkit-text-fill-color:transparent}
 .badge-jesee{font-size:11px;font-weight:600;padding:2px 8px;border-radius:9999px;
-  background:linear-gradient(135deg, rgba(10,132,255,0.22), rgba(191,90,242,0.22));
-  color:#70b8ff;border:1px solid rgba(10,132,255,0.45);
-  box-shadow:0 0 12px rgba(10,132,255,0.2);letter-spacing:0.3px}
+  background:linear-gradient(135deg, rgba(6,182,212,0.24), rgba(52,211,153,0.24));
+  color:#67e8f9;border:1px solid rgba(6,182,212,0.45);
+  box-shadow:0 0 14px rgba(6,182,212,0.25);letter-spacing:0.3px}
 .author-banner{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--dim);
-  padding:3px 10px;border-radius:9999px;background:rgba(255,255,255,0.04);
-  border:1px solid rgba(255,255,255,0.08);backdrop-filter:blur(10px)}
+  padding:3px 10px;border-radius:9999px;background:rgba(255,255,255,0.06);
+  border:1px solid rgba(255,255,255,0.12);backdrop-filter:blur(10px)}
 .author-banner a{color:var(--text);text-decoration:none;font-weight:600}
 .author-banner a:hover{color:var(--accent)}
 .dot-sep{opacity:0.3}
 .spacer{flex:1}
-button{font:inherit;color:var(--text);background:rgba(255, 255, 255, 0.06);
-  border:1px solid rgba(255, 255, 255, 0.12);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+button{font:inherit;color:var(--text);background:rgba(255, 255, 255, 0.08);
+  border:1px solid rgba(255, 255, 255, 0.14);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
   border-radius:9999px;padding:5px 12px;cursor:pointer;display:inline-flex;
   align-items:center;gap:6px;white-space:nowrap;touch-action:manipulation;
-  box-shadow:0 2px 6px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.12);
+  box-shadow:0 2px 6px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.14);
   transition:all .18s cubic-bezier(0.16, 1, 0.3, 1)}
 button, a, input, select, textarea, [data-rg], [data-close], [data-detail], [data-cred],
 [data-stop], [data-swap], [data-job], [data-del], [data-delone], [data-delclient],
 [data-resetclient], [data-togglejobfailed], [data-cleanjobfailed], .chip, .rg, .step, .btn-xs {
   cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
-button:hover:not(:disabled){background:rgba(255, 255, 255, 0.12);border-color:rgba(255, 255, 255, 0.24);
-  color:#fff;transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,0.25)}
-button:active:not(:disabled){transform:translateY(0);background:rgba(255,255,255,0.05)}
+button:hover:not(:disabled){background:rgba(255, 255, 255, 0.15);border-color:rgba(255, 255, 255, 0.28);
+  color:#fff;transform:translateY(-1px);box-shadow:0 4px 14px rgba(0,0,0,0.25)}
+button:active:not(:disabled){transform:translateY(0);background:rgba(255,255,255,0.06)}
 button:disabled{opacity:.4;cursor:default}
-button.primary{background:linear-gradient(135deg, #0a84ff 0%, #0066cc 100%);
-  border-color:rgba(255,255,255,0.2);color:#ffffff;font-weight:600;
-  box-shadow:0 4px 16px rgba(10,132,255,0.4), inset 0 1px 0 rgba(255,255,255,0.3)}
-button.primary:hover:not(:disabled){background:linear-gradient(135deg, #2693ff 0%, #0077ee 100%);
-  box-shadow:0 6px 22px rgba(10,132,255,0.55);border-color:rgba(255,255,255,0.3)}
-button.icon{padding:5px 8px;background:rgba(255,255,255,0.04);border-color:transparent;color:var(--dim)}
-button.icon:hover:not(:disabled){color:#fff;background:rgba(255,255,255,0.1);border-color:rgba(255,255,255,0.15)}
-button.icon.danger:hover:not(:disabled){color:var(--bad);background:rgba(255,69,58,0.15);border-color:rgba(255,69,58,0.3)}
+button.primary{background:linear-gradient(135deg, #06b6d4 0%, #059669 100%);
+  border-color:rgba(255,255,255,0.25);color:#ffffff;font-weight:600;
+  box-shadow:0 4px 18px rgba(6,182,212,0.42), inset 0 1px 0 rgba(255,255,255,0.35)}
+button.primary:hover:not(:disabled){background:linear-gradient(135deg, #22d3ee 0%, #10b981 100%);
+  box-shadow:0 6px 24px rgba(6,182,212,0.6);border-color:rgba(255,255,255,0.4)}
+button.icon{padding:5px 8px;background:rgba(255,255,255,0.05);border-color:transparent;color:var(--dim)}
+button.icon:hover:not(:disabled){color:#fff;background:rgba(255,255,255,0.12);border-color:rgba(255,255,255,0.18)}
+button.icon.danger:hover:not(:disabled){color:var(--bad);background:rgba(244,63,94,0.15);border-color:rgba(244,63,94,0.3)}
 svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.8;
   stroke-linecap:round;stroke-linejoin:round;flex:none}
 main{padding:18px 20px 48px;max-width:1200px;margin:0 auto}
 .bar{display:flex;align-items:center;gap:12px;margin-bottom:14px}
 .bar h2{font-size:13px;margin:0;font-weight:600;color:var(--dim);letter-spacing:0.2px}
-.exit{border:1px solid rgba(255, 255, 255, 0.10);border-top:1px solid rgba(255, 255, 255, 0.22);
-  border-radius:14px;margin-bottom:10px;background:rgba(22, 29, 44, 0.55);
+.exit{border:1px solid rgba(255, 255, 255, 0.12);border-top:1px solid rgba(255, 255, 255, 0.28);
+  border-radius:14px;margin-bottom:10px;background:rgba(9, 28, 38, 0.58);
   backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);
   box-shadow:var(--glass-shadow);overflow:hidden;
   transition:all .2s cubic-bezier(0.16, 1, 0.3, 1)}
-.exit:hover{transform:translateY(-1px);border-color:rgba(255, 255, 255, 0.24);
-  box-shadow:0 18px 40px -4px rgba(0, 0, 0, 0.55), inset 0 1px 1px rgba(255, 255, 255, 0.2)}
+.exit:hover{transform:translateY(-1px);border-color:rgba(6, 182, 212, 0.4);
+  box-shadow:0 18px 40px -4px rgba(0, 20, 30, 0.65), inset 0 1px 1px rgba(255, 255, 255, 0.25)}
 .exit>.row{display:grid;gap:8px 14px;align-items:center;padding:11px 16px;
   grid-template-columns:14px auto 1fr auto auto auto;
   grid-template-areas:"dot ip meta chips socks acts"}
@@ -191,11 +214,11 @@ main{padding:18px 20px 48px;max-width:1200px;margin:0 auto}
   backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);
   display:none;align-items:center;justify-content:center;z-index:50;padding:20px}
 .modal.open{display:flex}
-.sheet{background:rgba(20, 27, 40, 0.88);
+.sheet{background:rgba(8, 25, 36, 0.90);
   backdrop-filter:blur(36px) saturate(200%);-webkit-backdrop-filter:blur(36px) saturate(200%);
-  border:1px solid rgba(255, 255, 255, 0.14);border-top:1px solid rgba(255, 255, 255, 0.32);
+  border:1px solid rgba(255, 255, 255, 0.16);border-top:1px solid rgba(255, 255, 255, 0.35);
   border-radius:20px;width:min(700px,100%);max-height:86vh;display:flex;flex-direction:column;
-  box-shadow:0 32px 70px rgba(0,0,0,0.65), inset 0 1px 1px rgba(255,255,255,0.22);
+  box-shadow:0 32px 70px rgba(0,20,30,0.7), inset 0 1px 1px rgba(255,255,255,0.22);
   animation:popIn .2s cubic-bezier(0.16, 1, 0.3, 1)}
 @keyframes popIn{from{opacity:0;transform:scale(0.96) translateY(8px)}to{opacity:1;transform:scale(1) translateY(0)}}
 .sheet .head{display:flex;align-items:center;gap:10px;padding:14px 18px;

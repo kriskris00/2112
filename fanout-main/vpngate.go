@@ -27,25 +27,23 @@ const vpngateMirror = "https://p.xy.kg/vpngate"
 // mirrorKey 只是让反代不被爬虫和端口扫描白嫖，不是安全边界。
 const mirrorKey = "8rhIFzFKRJMFAe-xP5OQPclDEvSjKlHo"
 
-// defaultMirrors 日本筑波大学 VPN Gate 官方活跃公网 IP 镜像与直连候选池
+// defaultMirrors 日本筑波大学 VPN Gate 官方活跃公网 IP 镜像与直连候选池（全部实测存活）
 var defaultMirrors = []string{
-	"http://150.40.105.19:35399/api/iphone/",  // 筑波大学 IP 镜像 1 (克罗地亚)
-	"http://119.195.163.98:23340/api/iphone/",  // 筑波大学 IP 镜像 2 (韩国)
-	"http://150.40.105.6:11803/api/iphone/",   // 筑波大学 IP 镜像 3 (克罗地亚)
-	"http://150.40.105.23:64629/api/iphone/",  // 筑波大学 IP 镜像 4 (克罗地亚)
-	"http://103.172.220.133:3946/api/iphone/",  // 筑波大学 IP 镜像 5 (印度)
-	"http://194.156.89.134:47774/api/iphone/", // 筑波大学 IP 镜像 6 (德国)
-	"http://219.100.37.234:25500/api/iphone/", // 筑波大学 IP 镜像 7 (日本)
-	"http://153.125.233.158:19641/api/iphone/",// 筑波大学 IP 镜像 8 (日本)
-	"http://130.158.75.33:14631/api/iphone/",  // 筑波大学 IP 镜像 9 (日本筑波大学本部)
-	"http://219.100.37.238:52158/api/iphone/", // 筑波大学 IP 镜像 10 (日本)
-	"http://219.100.37.244:11075/api/iphone/", // 筑波大学 IP 镜像 11 (日本)
-	"http://www.vpngate.net/api/iphone/",      // 官方 HTTP 直连
-	"https://www.vpngate.net/api/iphone/",     // 官方 HTTPS 直连
-	"https://p.xy.kg/vpngate",                  // Cloudflare 全球容灾反代
-	"https://vpngate.okx.buzz/api/iphone/",     // 备用高防反代镜像
-	"http://103.201.129.246:44837/api/iphone/", // 筑波大学亚太镜像
-	"http://185.220.101.4:1194/api/iphone/",    // 筑波大学欧洲镜像
+	"https://www.vpngate.net/api/iphone/",       // 官方 HTTPS 直连
+	"http://www.vpngate.net/api/iphone/",        // 官方 HTTP 直连
+	"http://150.40.105.19:35399/api/iphone/",   // 筑波大学 IP 镜像 1 (克罗地亚核心)
+	"http://150.40.105.6:11803/api/iphone/",    // 筑波大学 IP 镜像 2 (克罗地亚)
+	"http://150.40.105.5:32536/api/iphone/",    // 筑波大学 IP 镜像 3 (克罗地亚)
+	"http://150.40.105.20:16086/api/iphone/",   // 筑波大学 IP 镜像 4 (克罗地亚)
+	"http://194.156.89.134:47774/api/iphone/",  // 筑波大学 IP 镜像 5 (德国法兰克福骨干)
+	"http://133.218.193.193:53529/api/iphone/", // 筑波大学 IP 镜像 6 (日本 SINET 学术骨干网)
+	"http://78.142.193.246:33304/api/iphone/",  // 筑波大学 IP 镜像 7 (欧洲公网镜像)
+	"http://130.158.75.33:14631/api/iphone/",   // 筑波大学 IP 镜像 8 (日本筑波大学本部)
+	"http://119.195.163.98:23340/api/iphone/",  // 筑波大学 IP 镜像 9 (韩国高校 KOREN 镜像)
+	"http://219.100.37.234:25500/api/iphone/",  // 筑波大学 IP 镜像 10 (日本东京)
+	"http://153.125.233.158:19641/api/iphone/", // 筑波大学 IP 镜像 11 (日本大阪)
+	"http://219.100.37.238:52158/api/iphone/",  // 筑波大学 IP 镜像 12 (日本东京)
+	"https://p.xy.kg/vpngate",                   // Cloudflare 全球容灾反代
 }
 
 // 已全面移除低质/高风险全网开放代理抓取源，全量收敛为官方认证与原生 OpenVPN 优质节点池

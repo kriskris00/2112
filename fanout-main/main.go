@@ -86,6 +86,7 @@ func main() {
 
 	go mgr.WatchHealth()
 	go mgr.WatchAutoOrchestrate()
+	go WatchXrayCoreUpdates(*workDir)
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)

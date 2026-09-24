@@ -279,39 +279,58 @@ const loginHTML = `<!DOCTYPE html>
 <title>fanout</title>
 <style>
 :root{
-  --bg-gradient:radial-gradient(135% 100% at 50% 0%, #151d2e 0%, #0d121c 50%, #07090f 100%);
-  --accent:#0a84ff;
-  --text:#f0f4fc;
-  --dim:#94a3b8;
+  --accent:#06b6d4;
+  --text:#f0fdf4;
+  --dim:#8ecae6;
   --apple-font:-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", sans-serif;
 }
-body{margin:0;min-height:100vh;display:flex;flex-direction:column;gap:18px;
+body{
+  margin:0;min-height:100vh;display:flex;flex-direction:column;gap:18px;
   align-items:center;justify-content:center;
-  background:var(--bg-gradient);color:var(--text);
-  font:13px/1.5 var(--apple-font);-webkit-font-smoothing:antialiased}
-.card{background:rgba(20, 27, 40, 0.72);border:1px solid rgba(255, 255, 255, 0.12);
-  border-top:1px solid rgba(255, 255, 255, 0.28);border-radius:20px;
-  backdrop-filter:blur(32px) saturate(190%);-webkit-backdrop-filter:blur(32px) saturate(190%);
-  box-shadow:0 24px 60px rgba(0,0,0,0.55), inset 0 1px 1px rgba(255,255,255,0.18);
-  padding:26px 28px;width:320px}
+  color:var(--text);font:13px/1.5 var(--apple-font);-webkit-font-smoothing:antialiased;
+  background: radial-gradient(circle at 20% 20%, rgba(6, 182, 212, 0.20), transparent 50%),
+              radial-gradient(circle at 80% 20%, rgba(52, 211, 153, 0.18), transparent 50%),
+              radial-gradient(circle at 50% 80%, rgba(56, 189, 248, 0.16), transparent 55%),
+              linear-gradient(135deg, #05141c 0%, #08212c 50%, #061822 100%);
+  background-size: 180% 180%;
+  animation: freshAuroraFlow 24s ease-in-out infinite alternate;
+  background-attachment: fixed;
+}
+@keyframes freshAuroraFlow {
+  0% {
+    background-position: 0% 0%, 100% 10%, 50% 100%, 0% 0%;
+  }
+  50% {
+    background-position: 50% 70%, 50% 90%, 20% 30%, 100% 100%;
+  }
+  100% {
+    background-position: 80% 20%, 10% 40%, 80% 50%, 0% 0%;
+  }
+}
+.card{background:rgba(8, 25, 36, 0.78);border:1px solid rgba(255, 255, 255, 0.14);
+  border-top:1px solid rgba(255, 255, 255, 0.32);border-radius:22px;
+  backdrop-filter:blur(36px) saturate(190%);-webkit-backdrop-filter:blur(36px) saturate(190%);
+  box-shadow:0 24px 60px rgba(0,20,30,0.65), inset 0 1px 1px rgba(255,255,255,0.20);
+  padding:28px 30px;width:320px}
 .brand{display:flex;align-items:center;gap:8px;margin-bottom:18px}
 h1{font-size:18px;font-weight:700;margin:0;letter-spacing:-0.4px;
-  background:linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%);
+  background:linear-gradient(135deg, #ffffff 0%, #a7f3d0 60%, #67e8f9 100%);
   -webkit-background-clip:text;-webkit-text-fill-color:transparent}
 .badge{font-size:10px;font-weight:600;padding:2px 7px;border-radius:9999px;
-  background:linear-gradient(135deg, rgba(10,132,255,0.2), rgba(191,90,242,0.2));
-  color:#70b8ff;border:1px solid rgba(10,132,255,0.4)}
+  background:linear-gradient(135deg, rgba(6,182,212,0.24), rgba(52,211,153,0.24));
+  color:#67e8f9;border:1px solid rgba(6,182,212,0.45);box-shadow:0 0 12px rgba(6,182,212,0.2)}
 label{display:block;color:var(--dim);font-size:11px;margin-bottom:7px}
-input{width:100%;box-sizing:border-box;background:rgba(10, 14, 22, 0.65);
-  border:1px solid rgba(255, 255, 255, 0.12);color:var(--text);border-radius:10px;
+input{width:100%;box-sizing:border-box;background:rgba(5, 16, 24, 0.7);
+  border:1px solid rgba(255, 255, 255, 0.14);color:var(--text);border-radius:12px;
   padding:9px 12px;font:inherit;backdrop-filter:blur(10px);transition:border-color .15s}
-input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(10,132,255,0.25)}
-button{width:100%;margin-top:16px;background:linear-gradient(135deg, #0a84ff 0%, #0066cc 100%);
+input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(6,182,212,0.3)}
+button{width:100%;margin-top:16px;background:linear-gradient(135deg, #06b6d4 0%, #059669 100%);
   border:0;color:#fff;font:inherit;font-weight:600;border-radius:9999px;padding:9px;
-  cursor:pointer;box-shadow:0 4px 16px rgba(10,132,255,0.4), inset 0 1px 0 rgba(255,255,255,0.3);
+  cursor:pointer;box-shadow:0 4px 18px rgba(6,182,212,0.42), inset 0 1px 0 rgba(255,255,255,0.35);
   transition:all .18s ease}
-button:hover{background:linear-gradient(135deg, #2693ff 0%, #0077ee 100%);transform:translateY(-1px)}
-.err{color:#ff453a;font-size:11px;margin-top:10px;min-height:14px;text-align:center}
+button:hover{background:linear-gradient(135deg, #22d3ee 0%, #10b981 100%);transform:translateY(-1px);
+  box-shadow:0 6px 24px rgba(6,182,212,0.6)}
+.err{color:#f43f5e;font-size:11px;margin-top:10px;min-height:14px;text-align:center}
 .credits{font-size:11px;color:var(--dim);display:flex;align-items:center;gap:6px}
 .credits a{color:var(--text);text-decoration:none;font-weight:600}
 .credits a:hover{color:var(--accent)}
