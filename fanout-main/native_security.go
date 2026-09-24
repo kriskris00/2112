@@ -2,11 +2,9 @@ package main
 
 import (
 	"context"
-	"crypto/ecdh"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
-	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"net"
@@ -14,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -36,35 +35,38 @@ func checkRealityDest(dest, serverName string) error {
 	return nil
 }
 
-// realityKeys 优先用 xray 生成 X25519 密钥，失败或找不到时自动降级到纯 Go 内置生成，毫秒级就绪且永不阻塞。
+// realityKeys 用 xray 生成 X25519 密钥（兼容 Go 1.18+，无外部依赖）。
 func realityKeys(bin string) (priv, pub string, err error) {
-	if bin != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		out, err := exec.CommandContext(ctx, bin, "x25519").Output()
-		if err == nil {
-			text := string(out)
-			rePriv := regexp.MustCompile(`(?i)private\s*key:\s*(\S+)`)
-			rePub := regexp.MustCompile(`(?i)(?:password\s*\(publickey\)|public\s*key):\s*(\S+)`)
-			mp := rePriv.FindStringSubmatch(text)
-			mb := rePub.FindStringSubmatch(text)
-			if mp != nil && mb != nil {
-				return mp[1], mb[1], nil
+	if bin == "" {
+		bin = "xray"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, bin, "x25519").Output()
+	if err != nil {
+		for _, alt := range []string{"/usr/local/bin/xray", "/usr/bin/xray", "/usr/local/x-ui/bin/xray-linux-amd64"} {
+			if o, e := exec.CommandContext(ctx, alt, "x25519").Output(); e == nil {
+				out = o
+				err = nil
+				break
 			}
 		}
 	}
-	return generateX25519()
-}
-
-// generateX25519 用 Go 标准库 crypto/ecdh 生成 Curve25519 密钥对（Base64 RawURL 格式，完全兼容 Xray REALITY）。
-func generateX25519() (string, string, error) {
-	priv, err := ecdh.X25519().GenerateKey(rand.Reader)
 	if err != nil {
-		return "", "", fmt.Errorf("生成 X25519 密钥失败: %w", err)
+		return "", "", fmt.Errorf("生成 REALITY 密钥失败: %w", err)
 	}
-	privStr := base64.RawURLEncoding.EncodeToString(priv.Bytes())
-	pubStr := base64.RawURLEncoding.EncodeToString(priv.PublicKey().Bytes())
-	return privStr, pubStr, nil
+	text := string(out)
+
+	rePriv := regexp.MustCompile(`(?i)private\s*key:\s*(\S+)`)
+	rePub := regexp.MustCompile(`(?i)(?:password\s*\(publickey\)|public\s*key):\s*(\S+)`)
+
+	mp := rePriv.FindStringSubmatch(text)
+	mb := rePub.FindStringSubmatch(text)
+	if mp == nil || mb == nil {
+		return "", "", fmt.Errorf("无法解析 xray x25519 输出: %s", strings.TrimSpace(text))
+	}
+	return mp[1], mb[1], nil
 }
 
 // randomShortID 生成 REALITY 的 shortId。

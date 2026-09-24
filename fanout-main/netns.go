@@ -7,10 +7,19 @@ import (
 	"os"
 	"runtime"
 	"sync"
+	"syscall"
 	"time"
-
-	"golang.org/x/sys/unix"
 )
+
+const cloneNewNet = 0x40000000
+
+func setns(fd int) error {
+	_, _, errno := syscall.Syscall(syscall.SYS_SETNS, uintptr(fd), uintptr(cloneNewNet), 0)
+	if errno != 0 {
+		return errno
+	}
+	return nil
+}
 
 // netnsResolver 使用公共 DNS，防止在 netns 内读取母机 127.0.0.53 导致解析超时。
 var netnsResolver = &net.Resolver{
@@ -91,7 +100,7 @@ func dialerInNetns(nsName string) func(network, addr string) (net.Conn, error) {
 		go func() {
 			runtime.LockOSThread()
 
-			tid := unix.Gettid()
+			tid := syscall.Gettid()
 			origin, _ := os.Open(fmt.Sprintf("/proc/self/task/%d/ns/net", tid))
 			if origin == nil {
 				origin, _ = os.Open("/proc/thread-self/ns/net")
@@ -111,7 +120,7 @@ func dialerInNetns(nsName string) func(network, addr string) (net.Conn, error) {
 			}
 			defer target.Close()
 
-			if err := unix.Setns(int(target.Fd()), unix.CLONE_NEWNET); err != nil {
+			if err := setns(int(target.Fd())); err != nil {
 				if origin != nil {
 					origin.Close()
 				}
@@ -128,12 +137,12 @@ func dialerInNetns(nsName string) func(network, addr string) (net.Conn, error) {
 			restored := false
 			// 优先切回绝对权威的 PID 1 母机根网络命名空间
 			if rootF := getRootNetns(); rootF != nil {
-				if err := unix.Setns(int(rootF.Fd()), unix.CLONE_NEWNET); err == nil {
+				if err := setns(int(rootF.Fd())); err == nil {
 					restored = true
 				}
 			}
 			if !restored && origin != nil {
-				if err := unix.Setns(int(origin.Fd()), unix.CLONE_NEWNET); err == nil {
+				if err := setns(int(origin.Fd())); err == nil {
 					restored = true
 				}
 			}
