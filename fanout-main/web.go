@@ -294,10 +294,10 @@ textarea:focus{outline:none;border-color:var(--accent)}
           <span style="font-size:12px;color:var(--dim)">自由选择单独源或全部聚合</span>
         </div>
         <select id="wzSource" style="padding:8px 10px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--text);font-size:13px;width:100%">
-          <option value="all">🌐 全部聚合源 (全网数万节点 · 智能优选)</option>
-          <option value="vpngate">🇯🇵 日本筑波大学 (VPN Gate 官方与镜像源)</option>
-          <option value="edu">🎓 海外高校学术科研网 (日本筑波/韩国/台湾/欧美名校 · 不含国内)</option>
-          <option value="proxy">🌍 全网公网开源代理池 (数十万全球开源代理)</option>
+          <option value="all">🌐 官方与镜像优质节点 (全量家宽/高校原生 · 自动优选)</option>
+          <option value="vpngate">🇯🇵 日本筑波大学 (官方与高防镜像源)</option>
+          <option value="edu">🎓 海外高校学术科研网 (日本筑波/韩国/台湾/欧美名校)</option>
+          <option value="residential">🏡 住宅家宽原生节点 (纯净高分 · 极速防封)</option>
           <option value="custom">📁 本地导入与自定义节点 (.ovpn / 自建)</option>
         </select>
       </label>
@@ -598,18 +598,18 @@ textarea:focus{outline:none;border-color:var(--accent)}
       </div>
 
       <div style="margin-bottom:16px">
-        <h3 style="margin-bottom:8px;font-size:14px">全网多源节点池（全网数十万节点 + 日本筑波大学 + 海外高校学术网）</h3>
+        <h3 style="margin-bottom:8px;font-size:14px">优质节点池（日本筑波大学官方/镜像 + 海外高校学术科研网 + 住宅家宽原生）</h3>
         <div style="font-size:12px;color:var(--dim);line-height:1.6;background:var(--card-bg);padding:10px;border-radius:6px;border:1px solid var(--border);margin-bottom:8px">
-          <div>• <b>日本筑波大学官方及全量容灾镜像池</b>：150.40.105.19 / 119.195.163.98 等 15+ 镜像并发聚合</div>
-          <div>• <b>全网开源公开代理库 (200,000+ 节点)</b>：30+ 全球高质量开源代理源与 API 极速聚合</div>
-          <div>• <b>海外高校学术科研网专项</b>：日本 (SINET/筑波) / 韩国 (KOREN) / 台湾 (TANet) / 欧美等名校学术专网（不含国内）</div>
+          <div>• <b>日本筑波大学官方及全量高防镜像池</b>：150.40.105.19 / 119.195.163.98 等多镜像并发聚合</div>
+          <div>• <b>海外高校学术科研网专项</b>：日本 (SINET/筑波) / 韩国 (KOREN) / 台湾 (TANet) / 欧美名校学术专网（不含国内）</div>
+          <div>• <b>住宅家宽原生优质 IP</b>：纯净家庭宽带与移动网络原生节点，低风控、极速防封</div>
           <div>• <b>全自动容灾与并发测速</b>：自动并发拉取、剔除不可用死节点、按纯净度与网络速度降序排序</div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="primary" id="refreshMirrors" data-src="all">🔄 刷新全部源 (全网海量节点)</button>
+          <button class="primary" id="refreshMirrors" data-src="all">🔄 刷新全部优质源</button>
           <button id="refreshVpnGate" data-src="vpngate">🇯🇵 仅拉取筑波大学源</button>
           <button id="refreshEdu" data-src="edu">🎓 仅拉取海外学术网</button>
-          <button id="refreshProxy" data-src="proxy">🌍 仅拉取全网代理池</button>
+          <button id="refreshResidential" data-src="residential">🏡 仅拉取住宅家宽源</button>
         </div>
       </div>
 
@@ -722,10 +722,10 @@ textarea:focus{outline:none;border-color:var(--accent)}
         <div style="display:flex;flex-direction:column;gap:4px">
           <span style="font-size:11px;color:var(--dim)">扫描来源</span>
           <select id="lsSource" style="padding:6px 8px;font-size:12px;min-width:140px;background:#0e1116;border:1px solid var(--line);color:var(--text);border-radius:4px">
-            <option value="all">🌐 全部候选源 (全网并发实测)</option>
-            <option value="edu" selected>🎓 海外高校学术网 (日本筑波/韩国/台湾/欧美 · 不含国内)</option>
+            <option value="all">🌐 全部优质源 (全量并发实测)</option>
+            <option value="edu" selected>🎓 海外高校学术网 (日本筑波/韩国/台湾/欧美)</option>
             <option value="vpngate">🇯🇵 日本筑波大学 (VPN Gate)</option>
-            <option value="proxy">🌍 全网公网代理池 (数十万源)</option>
+            <option value="residential">🏡 住宅家宽原生节点</option>
             <option value="custom">📁 本地自定义节点</option>
           </select>
         </div>
@@ -935,15 +935,32 @@ function getFlagEmoji(countryCode) {
 }
 
 const COUNTRY_ZH = {
-  EDU: '海外高校学术网络', GLOBAL: '全球公网',
-  JP: '日本', KR: '韩国', US: '美国', RU: '俄罗斯', VN: '越南',
-  IN: '印度', MV: '马尔代夫', TH: '泰国', HK: '中国香港', TW: '中国台湾',
-  SG: '新加坡', GB: '英国', DE: '德国', FR: '法国', CA: '加拿大',
-  AU: '澳大利亚', NL: '荷兰', MY: '马来西亚', PH: '菲律宾', ID: '印尼',
-  UA: '乌克兰', BR: '巴西', TR: '土耳其', PL: '波兰', SE: '瑞典',
-  NO: '挪威', FI: '芬兰', ES: '西班牙', IT: '意大利', CH: '瑞士',
-  RO: '罗马尼亚', BG: '保加利亚', CZ: '捷克', HU: '匈牙利', AT: '奥地利',
-  CUSTOM: '自定义'
+  EDU: '海外高校学术网络', GLOBAL: '全球公网', CUSTOM: '自定义',
+  // 亚太地区
+  JP: '日本', KR: '韩国', HK: '中国香港', TW: '中国台湾', SG: '新加坡',
+  MY: '马来西亚', TH: '泰国', VN: '越南', PH: '菲律宾', ID: '印尼',
+  IN: '印度', AU: '澳大利亚', NZ: '新西兰', MO: '中国澳门', KH: '柬埔寨',
+  LA: '老挝', MM: '缅甸', BD: '孟加拉', PK: '巴基斯坦', LK: '斯里兰卡',
+  NP: '尼泊尔', MV: '马尔代夫', MN: '蒙古',
+  // 美洲地区
+  US: '美国', CA: '加拿大', BR: '巴西', MX: '墨西哥', AR: '阿根廷',
+  CL: '智利', CO: '哥伦比亚', PE: '秘鲁', CR: '哥斯达黎加', PA: '巴拿马',
+  UY: '乌拉圭', EC: '厄瓜多尔', VE: '委内瑞拉', BO: '玻利维亚', PY: '巴拉圭',
+  DO: '多米尼加', JM: '牙买加', TT: '特立尼达和多巴哥', BS: '巴哈马',
+  // 欧洲地区
+  GB: '英国', DE: '德国', FR: '法国', NL: '荷兰', IT: '意大利',
+  ES: '西班牙', CH: '瑞士', SE: '瑞典', NO: '挪威', FI: '芬兰',
+  DK: '丹麦', IE: '爱尔兰', BE: '比利时', AT: '奥地利', PL: '波兰',
+  CZ: '捷克', HU: '匈牙利', PT: '葡萄牙', GR: '希腊', RO: '罗马尼亚',
+  BG: '保加利亚', UA: '乌克兰', RU: '俄罗斯', TR: '土耳其', IS: '冰岛',
+  LU: '卢森堡', EE: '爱沙尼亚', LV: '拉脱维亚', LT: '立陶宛', HR: '克罗地亚',
+  RS: '塞尔维亚', SI: '斯洛文尼亚', SK: '斯洛伐克', CY: '塞浦路斯', MT: '马耳他',
+  MD: '摩尔多瓦', BY: '白俄罗斯', GE: '格鲁吉亚', AM: '亚美尼亚', AZ: '阿塞拜疆',
+  // 中东与中亚
+  AE: '阿联酋', SA: '沙特阿拉伯', IL: '以色列', KZ: '哈萨克斯坦', UZ: '乌兹别克斯坦',
+  // 非洲地区
+  ZA: '南非', EG: '埃及', MA: '摩洛哥', DZ: '阿尔及利亚', TN: '突尼斯',
+  NG: '尼日利亚', KE: '肯尼亚', GH: '加纳'
 };
 
 function formatCountry(code, name) {
@@ -1154,13 +1171,20 @@ document.querySelectorAll('.modal').forEach(m => {
 });
 
 const DEFAULT_CORE_REGIONS = [
-  {code: 'GLOBAL', name: '全球推荐 (自动优选)', available: 50, avg_purity: 88},
-  {code: 'JP', name: '日本 (筑波大学官方/镜像)', available: 15, avg_purity: 95},
-  {code: 'EDU', name: '海外高校学术科研网 (不含国内)', available: 10, avg_purity: 99},
-  {code: 'HK', name: '中国香港', available: 10, avg_purity: 90},
-  {code: 'TW', name: '中国台湾', available: 8, avg_purity: 88},
-  {code: 'SG', name: '新加坡', available: 8, avg_purity: 90},
-  {code: 'US', name: '美国', available: 20, avg_purity: 88}
+  {code: 'GLOBAL', name: '全球推荐 (自动优选)', available: 50, avg_purity: 92},
+  {code: 'JP', name: '日本 (筑波大学官方/镜像)', available: 20, avg_purity: 95},
+  {code: 'US', name: '美国 (家宽/科研)', available: 25, avg_purity: 90},
+  {code: 'HK', name: '中国香港', available: 15, avg_purity: 92},
+  {code: 'TW', name: '中国台湾', available: 12, avg_purity: 90},
+  {code: 'SG', name: '新加坡', available: 12, avg_purity: 92},
+  {code: 'KR', name: '韩国 (高校/家宽)', available: 10, avg_purity: 95},
+  {code: 'GB', name: '英国', available: 10, avg_purity: 90},
+  {code: 'DE', name: '德国', available: 10, avg_purity: 92},
+  {code: 'CA', name: '加拿大', available: 8, avg_purity: 90},
+  {code: 'FR', name: '法国', available: 8, avg_purity: 90},
+  {code: 'AU', name: '澳大利亚', available: 8, avg_purity: 90},
+  {code: 'NL', name: '荷兰', available: 8, avg_purity: 92},
+  {code: 'EDU', name: '海外高校学术科研网 (不含国内)', available: 15, avg_purity: 99}
 ];
 
 function clampCount(val) {
@@ -2146,10 +2170,10 @@ async function loadSources(){
 async function refreshSources(btn, src = 'all'){
   if(btn) btn.disabled = true;
   const nameMap = {
-    all: '全网所有源（筑波大学+海外高校学术+全球公网）',
-    vpngate: '日本筑波大学官方与镜像源',
-    edu: '海外高校学术科研源（日本筑波/韩国/欧美名校 · 不含国内）',
-    proxy: '全网公网开源代理池'
+    all: '官方与高防镜像优质源（筑波大学+海外高校学术+住宅家宽原生）',
+    vpngate: '日本筑波大学官方与高防镜像源',
+    edu: '海外高校学术科研源（日本筑波/韩国/欧美名校）',
+    residential: '住宅家宽原生优质节点源'
   };
   toast('正在拉取 ' + (nameMap[src] || src) + '，请稍候...');
   try{
@@ -2240,8 +2264,8 @@ document.addEventListener('click', async e => {
     loadSources();
     return;
   }
-  if(e.target.closest('#wzRefreshBtn') || e.target.closest('#refreshMirrors') || e.target.closest('#refreshVpnGate') || e.target.closest('#refreshEdu') || e.target.closest('#refreshProxy')){
-    const btn = e.target.closest('#wzRefreshBtn') || e.target.closest('#refreshMirrors') || e.target.closest('#refreshVpnGate') || e.target.closest('#refreshEdu') || e.target.closest('#refreshProxy');
+  if(e.target.closest('#wzRefreshBtn') || e.target.closest('#refreshMirrors') || e.target.closest('#refreshVpnGate') || e.target.closest('#refreshEdu') || e.target.closest('#refreshResidential') || e.target.closest('#refreshProxy')){
+    const btn = e.target.closest('#wzRefreshBtn') || e.target.closest('#refreshMirrors') || e.target.closest('#refreshVpnGate') || e.target.closest('#refreshEdu') || e.target.closest('#refreshResidential') || e.target.closest('#refreshProxy');
     const src = btn.dataset.src || ($('#wzSource') ? $('#wzSource').value : 'all');
     await refreshSources(btn, src);
     return;

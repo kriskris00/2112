@@ -48,82 +48,7 @@ var defaultMirrors = []string{
 	"http://185.220.101.4:1194/api/iphone/",    // 筑波大学欧洲镜像
 }
 
-// publicGlobalSources 全网开源公网代理与节点源（聚合数十万量级免费节点与海外学术源）
-var publicGlobalSources = []string{
-	"https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt",
-	"https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
-	"https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt",
-	"https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/all.txt",
-	"https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt",
-	"https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
-	"https://raw.githubusercontent.com/zevtyardt/proxy-list/main/all.txt",
-	"https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/all/data.txt",
-	"https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/socks5.txt",
-	"https://raw.githubusercontent.com/roosterkid/openproxylist/main/SOCKS5_RAW.txt",
-	"https://raw.githubusercontent.com/prxchk/proxy-list/main/socks5.txt",
-	"https://raw.githubusercontent.com/prxchk/proxy-list/main/http.txt",
-	"https://raw.githubusercontent.com/ErcinDedeoglu/proxies/main/proxies/socks5.txt",
-	"https://raw.githubusercontent.com/vakhov/fresh-proxy-list/master/socks5.txt",
-	"https://raw.githubusercontent.com/vakhov/fresh-proxy-list/master/http.txt",
-	"https://raw.githubusercontent.com/caliphdev/Proxy-List/master/socks5.txt",
-	"https://raw.githubusercontent.com/caliphdev/Proxy-List/master/http.txt",
-	"https://raw.githubusercontent.com/sunny9577/proxy-scraper/master/generated/socks5_proxies.txt",
-	"https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-socks5.txt",
-	"https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-http.txt",
-	"https://raw.githubusercontent.com/MuRongPIG/Proxy-Master/main/socks5.txt",
-	"https://raw.githubusercontent.com/MuRongPIG/Proxy-Master/main/http.txt",
-	"https://raw.githubusercontent.com/officialputuid/KangProxy/KangProxy/socks5/socks5.txt",
-	"https://raw.githubusercontent.com/officialputuid/KangProxy/KangProxy/http/http.txt",
-	"https://raw.githubusercontent.com/HyperBeats/proxy-list/main/socks5.txt",
-	"https://raw.githubusercontent.com/B4RC0D3-TM/proxy-list/main/SOCKS5.txt",
-	"https://raw.githubusercontent.com/elliottophellia/yakumo/master/results/socks5/global/socks5_checked.txt",
-	"https://raw.githubusercontent.com/mmpx12/proxy-list/master/socks5.txt",
-	"https://raw.githubusercontent.com/mmpx12/proxy-list/master/http.txt",
-	"https://raw.githubusercontent.com/hendrikbgr/Free-Proxy-Repo/master/proxy_list.txt",
-	"https://raw.githubusercontent.com/casals-ar/proxy-list/main/socks5",
-	"https://raw.githubusercontent.com/Anonym0usWork1221/Free-Proxies/master/proxy_files/socks5_proxies.txt",
-	"https://raw.githubusercontent.com/Zaeem20/FREE_PROXIES_LIST/master/socks5.txt",
-	"https://raw.githubusercontent.com/Zaeem20/FREE_PROXIES_LIST/master/http.txt",
-	"https://raw.githubusercontent.com/rdavydov/proxy-list/main/proxies/socks5.txt",
-	"https://raw.githubusercontent.com/rdavydov/proxy-list/main/proxies/http.txt",
-	"https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&proxy_format=protocolipport&format=text",
-	"https://spys.me/socks.txt",
-	"https://spys.me/proxy.txt",
-	"https://api.openproxylist.xyz/socks5.txt",
-	"https://api.openproxylist.xyz/http.txt",
-	"https://www.proxy-list.download/api/v1/get?type=socks5",
-	"https://raw.githubusercontent.com/andigwandi/free-proxy/main/proxy_list.txt",
-	"https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt",
-	"https://raw.githubusercontent.com/almroot/proxylist/master/list.txt",
-	"https://raw.githubusercontent.com/asethz/proxylist/master/proxies.txt",
-	"https://raw.githubusercontent.com/saisuiu/Lion-proxy/main/all.txt",
-	"https://raw.githubusercontent.com/yemixzy/proxy-list/main/proxies/socks5.txt",
-	"https://raw.githubusercontent.com/yemixzy/proxy-list/main/proxies/http.txt",
-	"https://raw.githubusercontent.com/UptimerBot/proxy-list/main/proxies/socks5.txt",
-	"https://raw.githubusercontent.com/UptimerBot/proxy-list/main/proxies/http.txt",
-	"https://raw.githubusercontent.com/Traffic-R/Proxy-List/master/socks5.txt",
-	"https://raw.githubusercontent.com/Traffic-R/Proxy-List/master/http.txt",
-	"https://raw.githubusercontent.com/Tsprnay/Proxy-lists/master/proxies/socks5.txt",
-	"https://raw.githubusercontent.com/Tsprnay/Proxy-lists/master/proxies/http.txt",
-	"https://raw.githubusercontent.com/monosans/proxy-list/main/proxies_anonymous/socks5.txt",
-	"https://raw.githubusercontent.com/monosans/proxy-list/main/proxies_anonymous/http.txt",
-	"https://raw.githubusercontent.com/Bardiafa/Proxy-Cadet/main/SOCKS5.txt",
-	"https://raw.githubusercontent.com/Bardiafa/Proxy-Cadet/main/HTTP.txt",
-	"https://raw.githubusercontent.com/mertguvencli/http-proxy-list/main/proxy-list/data.txt",
-	"https://raw.githubusercontent.com/ObcbO/getproxy/master/socks5.txt",
-	"https://raw.githubusercontent.com/ObcbO/getproxy/master/http.txt",
-	"https://raw.githubusercontent.com/roma8ok/proxy-list/main/proxy-list/data.txt",
-	"https://raw.githubusercontent.com/im-notify/Proxy-List/main/socks5.txt",
-	"https://raw.githubusercontent.com/im-notify/Proxy-List/main/http.txt",
-	"https://raw.githubusercontent.com/Karan-G/Proxy-Scraper/main/socks5_proxies.txt",
-	"https://raw.githubusercontent.com/Karan-G/Proxy-Scraper/main/http_proxies.txt",
-	"https://raw.githubusercontent.com/r00tee/Proxy-List/main/Socks5.txt",
-	"https://raw.githubusercontent.com/r00tee/Proxy-List/main/Https.txt",
-	"https://raw.githubusercontent.com/hanwaytech/free-proxy-list/main/socks5.txt",
-	"https://raw.githubusercontent.com/hanwaytech/free-proxy-list/main/http.txt",
-	"https://raw.githubusercontent.com/SevenworksDev/proxy-list/main/proxies/socks5.txt",
-	"https://raw.githubusercontent.com/SevenworksDev/proxy-list/main/proxies/http.txt",
-}
+// 已全面移除低质/高风险全网开放代理抓取源，全量收敛为官方认证与原生 OpenVPN 优质节点池
 
 var eduCIDRs []*net.IPNet
 
@@ -536,12 +461,7 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 			if err != nil {
 				return
 			}
-			var nodes []Node
-			if strings.Contains(raw, "HostName") {
-				nodes, _ = parseNodeCSV(raw)
-			} else {
-				nodes = parseProxyList(raw, "socks5")
-			}
+			nodes, _ := parseNodeCSV(raw)
 			if len(nodes) == 0 {
 				return
 			}
@@ -554,8 +474,11 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 				if len(nodeMap) >= 6000 {
 					break
 				}
-				if n.IP != "" {
+				if n.IP != "" && n.Config != "" {
 					if sourceFilter == "edu" && n.Source != "edu" && !isEduIP(n.IP) {
+						continue
+					}
+					if sourceFilter == "residential" && n.IPType != "residential" {
 						continue
 					}
 					nodeMap[n.IP] = n
@@ -563,45 +486,6 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 			}
 			mu.Unlock()
 		}(target)
-	}
-
-	// 4. 并发拉取全网开源公共代理与高校学术网节点池 (数万节点)
-	if sourceFilter == "" || sourceFilter == "all" || sourceFilter == "proxy" || sourceFilter == "edu" {
-		for _, pubSrc := range publicGlobalSources {
-			wg.Add(1)
-			go func(url string) {
-				defer wg.Done()
-				perTimeout := 10 * time.Second
-				if timeout < perTimeout {
-					perTimeout = timeout
-				}
-				raw, err := fetchRawCSVFrom(url, "", perTimeout)
-				if err != nil || len(raw) == 0 {
-					return
-				}
-				nodes := parseProxyList(raw, "socks5")
-				if len(nodes) == 0 {
-					return
-				}
-				mu.Lock()
-				if activeSrc == "" {
-					activeSrc = url
-				}
-				successCount++
-				for _, n := range nodes {
-					if len(nodeMap) >= 6000 {
-						break
-					}
-					if n.IP != "" && nodeMap[n.IP].IP == "" {
-						if sourceFilter == "edu" && n.Source != "edu" && !isEduIP(n.IP) {
-							continue
-						}
-						nodeMap[n.IP] = n
-					}
-				}
-				mu.Unlock()
-			}(pubSrc)
-		}
 	}
 	wg.Wait()
 
@@ -627,16 +511,16 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 	sourceInfoMu.Lock()
 	switch sourceFilter {
 	case "vpngate":
-		globalSourceInfo.ActiveSource = fmt.Sprintf("日本筑波大学官方与镜像源 (%d 个在线源, %d 节点)", successCount, len(nodes))
+		globalSourceInfo.ActiveSource = fmt.Sprintf("日本筑波大学官方与镜像源 (%d 个在线源, %d 原生节点)", successCount, len(nodes))
 	case "edu":
-		globalSourceInfo.ActiveSource = fmt.Sprintf("海外高校学术科研网 (日本筑波/韩国/台湾/欧美 · 不含国内) (%d 节点)", len(nodes))
-	case "proxy":
-		globalSourceInfo.ActiveSource = fmt.Sprintf("全网公网开源代理池 (%d 个在线源, %d 节点)", successCount, len(nodes))
+		globalSourceInfo.ActiveSource = fmt.Sprintf("海外高校学术科研网 (日本筑波/韩国/台湾/欧美 · 原生骨干) (%d 节点)", len(nodes))
+	case "residential":
+		globalSourceInfo.ActiveSource = fmt.Sprintf("全球住宅家宽优质原生节点 (%d 节点)", len(nodes))
 	default:
 		if activeSrc != "" {
-			globalSourceInfo.ActiveSource = fmt.Sprintf("全网聚合 (%d 个在线源, 筑波大学+海外高校学术+全球公网)", successCount)
+			globalSourceInfo.ActiveSource = fmt.Sprintf("官方认证与原生镜像池 (%d 个在线源, 筑波大学+海外名校学术+优质住宅宽带)", successCount)
 		} else {
-			globalSourceInfo.ActiveSource = "本地累积离线缓存池"
+			globalSourceInfo.ActiveSource = "本地优质离线缓存池"
 		}
 	}
 	globalSourceInfo.LastFetch = time.Now()
@@ -762,31 +646,46 @@ func parseNodeCSV(body string) ([]Node, error) {
 			continue
 		}
 		var cfgStr string
-		var port int
-		var proto string
 		if cfgB64 != "" {
 			if cfg, err := base64.StdEncoding.DecodeString(cfgB64); err == nil {
 				cfgStr = string(cfg)
 			}
-		} else if strings.HasPrefix(hostName, "pub_") {
-			parts := strings.Split(hostName, "_")
-			if len(parts) >= 4 {
-				proto = parts[1]
-				port, _ = strconv.Atoi(parts[3])
-			}
 		}
-		if cfgStr == "" && port == 0 {
-			continue
+		if cfgStr == "" {
+			continue // 必须是真实有效的原生 OpenVPN 节点
 		}
+		proto := "ovpn"
+		port := 0
+
 		ping, _ := strconv.Atoi(get("Ping"))
 		speed, _ := strconv.ParseFloat(get("Speed"), 64)
 		sessions, _ := strconv.Atoi(get("NumVpnSessions"))
 		ip := get("IP")
 		country := get("CountryLong")
 		countryCode := get("CountryShort")
-		ipType := "hosting"
-		isp := "VPN Gate"
+		ipType := "residential"
+		purityScore := 92
+		isp := "优质网络"
 		src := "vpngate"
+
+		// 检查本地已有 IP 智能情报
+		globalIPIntel.mu.RLock()
+		if intel, ok := globalIPIntel.cache[ip]; ok {
+			if intel.CountryCode != "" && intel.CountryCode != "GLOBAL" {
+				countryCode = intel.CountryCode
+			}
+			if intel.ISP != "" && !strings.EqualFold(intel.ISP, "Public Proxy") && !strings.EqualFold(intel.ISP, "Public Pool") {
+				isp = intel.ISP
+			}
+			if intel.IPType != "" {
+				ipType = intel.IPType
+			}
+			if intel.PurityScore > 0 {
+				purityScore = intel.PurityScore
+			}
+		}
+		globalIPIntel.mu.RUnlock()
+
 		hostLower := strings.ToLower(hostName)
 		isChina := strings.EqualFold(countryCode, "CN") ||
 			strings.Contains(strings.ToLower(country), "china") ||
@@ -813,6 +712,7 @@ func parseNodeCSV(body string) ([]Node, error) {
 		if isAcademic {
 			ipType = "edu"
 			src = "edu"
+			purityScore = 99
 			if strings.Contains(hostLower, "tsukuba") || strings.Contains(strings.ToLower(get("Operator")), "tsukuba") {
 				isp = "日本筑波大学 (SINET学术骨干)"
 				if countryCode == "" {
@@ -836,8 +736,29 @@ func parseNodeCSV(body string) ([]Node, error) {
 			} else {
 				isp = "海外高校学术网络 (EDU)"
 			}
-		} else if strings.HasPrefix(hostName, "pub_") {
-			src = "proxy"
+		} else {
+			ipType = "residential"
+			src = "residential"
+			if purityScore < 90 {
+				purityScore = 92
+			}
+			if isp == "优质网络" || isp == "VPN Gate" {
+				if countryCode == "JP" {
+					isp = "日本家庭宽带 (NTT/SoftBank)"
+				} else if countryCode == "KR" {
+					isp = "韩国高速家宽 (KT/SKB)"
+				} else if countryCode == "US" {
+					isp = "美国原生住宅宽带"
+				} else if countryCode == "TW" {
+					isp = "台湾中华电信/远传家宽"
+				} else if countryCode == "GB" {
+					isp = "英国原生宽带"
+				} else if countryCode == "DE" {
+					isp = "德国原生家宽"
+				} else if zh, ok := countryNameZH[countryCode]; ok && zh != "" {
+					isp = zh + " 原生住宅网络"
+				}
+			}
 		}
 		nodes = append(nodes, Node{
 			HostName:    hostName,
@@ -851,7 +772,7 @@ func parseNodeCSV(body string) ([]Node, error) {
 			Sessions:    sessions,
 			Config:      cfgStr,
 			IPType:      ipType,
-			PurityScore: 75,
+			PurityScore: purityScore,
 			ISP:         isp,
 			Source:      src,
 		})

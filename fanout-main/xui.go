@@ -749,28 +749,62 @@ func (x *XUI) Bind(inboundTag string, hostname string, tunnels []*Tunnel) error 
 	return x.saveXray(setting, testURL)
 }
 
-// syncOutbounds 让 fanout- 出站与当前已连通的隧道保持一致。
+// syncOutbounds 让 fanout- 出站与当前已连通的隧道保持一致，并严格保证所有出站 tag 全局唯一。
 func (x *XUI) syncOutbounds(setting map[string]any, tunnels []*Tunnel) {
 	outbounds, _ := setting["outbounds"].([]any)
 	kept := make([]any, 0, len(outbounds))
+	seenTags := make(map[string]bool)
+
+	// 1. 保留所有非 fanout 用户出站（如 direct, block, 其它自定义），彻底排重
 	for _, ob := range outbounds {
 		m, ok := ob.(map[string]any)
 		if !ok {
 			kept = append(kept, ob)
 			continue
 		}
-		tag, _ := m["tag"].(string)
-		if !strings.HasPrefix(tag, xuiTagPrefix) {
-			forceIPv4(m)
-			kept = append(kept, ob)
+		rawTag, _ := m["tag"].(string)
+		tag := strings.TrimSpace(rawTag)
+		// 无论大小写，只要是以 fanout- 开头的出站一律清理，杜绝历史脏数据残留
+		if strings.HasPrefix(strings.ToLower(tag), strings.ToLower(xuiTagPrefix)) {
+			continue
 		}
+		if tag != "" {
+			if seenTags[tag] {
+				continue // 移除已存在的重复非 fanout tag，确保 Xray 不崩
+			}
+			seenTags[tag] = true
+		}
+		forceIPv4(m)
+		kept = append(kept, ob)
 	}
+
+	// 2. 为当前已连通的隧道添加出站，保证 tag 绝对全局唯一！
 	for _, t := range tunnels {
 		if t.Status != "up" {
 			continue
 		}
+		baseTag := tunnelTag(t)
+		tag := baseTag
+		if seenTags[tag] {
+			// 同一主机名多个隧道时补充槽位号区分，保证 tag 绝对唯一
+			tag = fmt.Sprintf("%s-slot%d", baseTag, t.Slot)
+		}
+		if seenTags[tag] {
+			for i := 1; i <= 100; i++ {
+				cand := fmt.Sprintf("%s-%d", tag, i)
+				if !seenTags[cand] {
+					tag = cand
+					break
+				}
+			}
+		}
+		if seenTags[tag] {
+			continue // 极端防重
+		}
+		seenTags[tag] = true
+
 		kept = append(kept, map[string]any{
-			"tag":      tunnelTag(t),
+			"tag":      tag,
 			"protocol": "socks",
 			"settings": map[string]any{
 				"servers": []any{socksServerJSON(t)},

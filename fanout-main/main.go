@@ -205,6 +205,10 @@ func apiNodes(m *Manager) http.HandlerFunc {
 
 		var filtered []Node
 		for _, n := range allNodes {
+			// 仅展示具备有效 OpenVPN 配置的高质量真实节点，过滤失效及不可用代理
+			if strings.TrimSpace(n.Config) == "" {
+				continue
+			}
 			if region != "" && region != "ALL" {
 				if strings.ToUpper(n.CountryCode) != region && !strings.Contains(strings.ToUpper(n.Country), region) {
 					continue
@@ -212,7 +216,11 @@ func apiNodes(m *Manager) http.HandlerFunc {
 			}
 			if source != "" && source != "all" {
 				if source == "edu" {
-					if n.Source != "edu" && !isEduIP(n.IP) {
+					if n.Source != "edu" && !isEduIP(n.IP) && !strings.EqualFold(n.IPType, "edu") {
+						continue
+					}
+				} else if source == "residential" {
+					if !strings.EqualFold(n.IPType, "residential") {
 						continue
 					}
 				} else if !strings.EqualFold(n.Source, source) {
@@ -228,8 +236,27 @@ func apiNodes(m *Manager) http.HandlerFunc {
 			filtered = append(filtered, n)
 		}
 
-		// 排序优选推荐：网络最好的排在最前面 (Ping 低优先，Speed 高优先)
+		// 排序优选推荐：学术/家宽纯净度优先，低延迟高带宽优先
 		sort.Slice(filtered, func(i, j int) bool {
+			typeRank := func(t string) int {
+				switch strings.ToLower(t) {
+				case "edu":
+					return 3
+				case "residential":
+					return 2
+				case "mobile":
+					return 1
+				default:
+					return 0
+				}
+			}
+			r1, r2 := typeRank(filtered[i].IPType), typeRank(filtered[j].IPType)
+			if r1 != r2 {
+				return r1 > r2
+			}
+			if filtered[i].PurityScore != filtered[j].PurityScore {
+				return filtered[i].PurityScore > filtered[j].PurityScore
+			}
 			pi := filtered[i].Ping
 			pj := filtered[j].Ping
 			if pi <= 0 {

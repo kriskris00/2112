@@ -253,6 +253,15 @@ func (m *Manager) freeSlot() (int, error) {
 // Start 为指定节点开一条隧道，返回分配到的本地端口。
 func (m *Manager) Start(node Node) (*Tunnel, error) {
 	m.mu.Lock()
+	// 检查是否已有相同 HostName 或 IP 的隧道在运行，避免重复开同一节点导致 Xray 出站冲突与资源浪费
+	for _, other := range m.tunnels {
+		if other.Status != "stopped" && other.Status != "failed" {
+			if other.Node.HostName == node.HostName || (node.IP != "" && other.Node.IP == node.IP) {
+				m.mu.Unlock()
+				return nil, fmt.Errorf("节点 %s (IP: %s) 已在运行中，请勿重复添加", node.HostName, node.IP)
+			}
+		}
+	}
 	slot, err := m.freeSlot()
 	if err != nil {
 		m.mu.Unlock()
@@ -273,13 +282,15 @@ func (m *Manager) Start(node Node) (*Tunnel, error) {
 		m.mu.Unlock()
 		return nil, err
 	}
+	targetRegion := strings.ToUpper(strings.TrimSpace(node.CountryCode))
 	t := &Tunnel{
-		Slot:   slot,
-		Port:   port,
-		Node:   node,
-		Status: "starting",
-		Since:  time.Now(),
-		Cred:   cred,
+		Slot:         slot,
+		Port:         port,
+		Node:         node,
+		TargetRegion: targetRegion,
+		Status:       "starting",
+		Since:        time.Now(),
+		Cred:         cred,
 	}
 	m.tunnels[slot] = t
 	m.mu.Unlock()
@@ -346,9 +357,12 @@ func (m *Manager) bringUpPersist(t *Tunnel, notify bool, persist bool) {
 
 // tryCandidates 走一轮候选节点，成功返回 true。失败不改 Status（留给调用方决定）。
 func (m *Manager) tryCandidates(t *Tunnel, notify bool) bool {
-	// VPN Gate 是志愿者节点，列表里有相当比例已下线或满员（AUTH_FAILED），
-	// 连不上就顺着候选列表换下一个，不必让用户手动试。
+	// 连不上就顺着同国家最优候选列表换下一个，优先速度与纯净度
 	candidates := m.candidatesFor(t.Node)
+	// 如果这是一次故障恢复，且首个候选节点正好是刚才挂掉的旧节点，直接跳过它尝试下一个同国候选
+	if len(candidates) > 1 && t.Status == "starting" && t.Err != "" && candidates[0].HostName == t.Node.HostName {
+		candidates = candidates[1:]
+	}
 	for i, node := range candidates {
 		if !m.tunnelActive(t) {
 			return false
@@ -360,7 +374,7 @@ func (m *Manager) tryCandidates(t *Tunnel, notify bool) bool {
 		t.Node = node
 		t.Status = "starting"
 		if i > 0 {
-			t.Err = fmt.Sprintf("已换到第 %d 个候选节点", i+1)
+			t.Err = fmt.Sprintf("已自动换至同国第 %d 个优质候选节点 (%s)", i+1, node.IP)
 		}
 
 		err := m.tryNode(t)
@@ -442,43 +456,110 @@ func (m *Manager) tryNode(t *Tunnel) error {
 	return nil
 }
 
-// candidatesFor 以指定节点打头，后面跟上同地区的其他节点作为备选。
+// candidatesFor 寻找指定节点所属同一国家的其他优质候选节点。
+// 严格按【纯净度(学术/家宽原生优先) ➔ 延迟(最低Ping优先) ➔ 带宽速度】智能排序。
 func (m *Manager) candidatesFor(first Node) []Node {
-	const maxTries = 6
+	const maxTries = 8
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	used := map[string]bool{first.HostName: true}
+	usedHosts := map[string]bool{first.HostName: true}
+	usedIPs := map[string]bool{}
+	if first.IP != "" {
+		usedIPs[first.IP] = true
+	}
 	for _, t := range m.tunnels {
-		used[t.Node.HostName] = true
+		usedHosts[t.Node.HostName] = true
+		if t.Node.IP != "" {
+			usedIPs[t.Node.IP] = true
+		}
 	}
 
-	// 地区决定了备选范围，缺失时先从当前列表补一次，
-	// 否则会退化成"任意地区都算同区"。
-	region := first.CountryCode
+	// 确定目标国家代码
+	region := strings.ToUpper(strings.TrimSpace(first.CountryCode))
 	if region == "" {
 		for _, n := range m.nodes {
 			if n.HostName == first.HostName {
-				region = n.CountryCode
+				region = strings.ToUpper(strings.TrimSpace(n.CountryCode))
 				break
 			}
 		}
 	}
 
-	out := []Node{first}
+	// 收集同一国家的所有可用空闲节点
+	var pool []Node
 	for _, n := range m.nodes {
-		if len(out) >= maxTries {
-			break
-		}
-		if used[n.HostName] {
+		if usedHosts[n.HostName] || (n.IP != "" && usedIPs[n.IP]) {
 			continue
 		}
-		// 地区实在拿不到时不做限制，总比连不上强
+		// 必须具有合法的 OpenVPN 配置（杜绝无法出网的低质全网代理）
+		if n.Config == "" {
+			continue
+		}
+		// 必须严格属于同一个国家
 		if region != "" && !strings.EqualFold(n.CountryCode, region) && !strings.EqualFold(n.Country, region) {
 			continue
 		}
+		pool = append(pool, n)
+	}
+
+	// 智能质量优选排序：纯净度优先、速度/低延迟优先
+	sort.Slice(pool, func(i, j int) bool {
+		// 1. 纯净度等级 (edu/住宅家宽 > 移动 > 其它)
+		typeRank := func(t string) int {
+			switch strings.ToLower(t) {
+			case "edu":
+				return 3
+			case "residential":
+				return 2
+			case "mobile":
+				return 1
+			default:
+				return 0
+			}
+		}
+		r1, r2 := typeRank(pool[i].IPType), typeRank(pool[j].IPType)
+		if r1 != r2 {
+			return r1 > r2
+		}
+		// 2. 纯净度得分
+		if pool[i].PurityScore != pool[j].PurityScore {
+			return pool[i].PurityScore > pool[j].PurityScore
+		}
+		// 3. Ping 延迟优先 (越低越好)
+		p1, p2 := pool[i].Ping, pool[j].Ping
+		if p1 <= 0 {
+			p1 = 999
+		}
+		if p2 <= 0 {
+			p2 = 999
+		}
+		if p1 != p2 {
+			return p1 < p2
+		}
+		// 4. 速度优先
+		return pool[i].SpeedMbps > pool[j].SpeedMbps
+	})
+
+	var out []Node
+	// 如果 first 本身配置非空，保留在首位
+	if first.Config != "" {
+		out = append(out, first)
+	}
+	for _, n := range pool {
+		if len(out) >= maxTries {
+			break
+		}
 		out = append(out, n)
 	}
+
+	// 若当前国家可用节点较少，触发异步后台刷新补充
+	if len(pool) < 2 {
+		go func() {
+			_, _ = m.RefreshNodes()
+		}()
+	}
+
 	return out
 }
 
