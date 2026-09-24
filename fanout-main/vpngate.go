@@ -46,7 +46,21 @@ var defaultMirrors = []string{
 	"https://p.xy.kg/vpngate",                   // Cloudflare 全球容灾反代
 }
 
-// 已全面移除低质/高风险全网开放代理抓取源，全量收敛为官方认证与原生 OpenVPN 优质节点池
+// defaultProxySources 全网多源公开节点与代理源，保证节点池持续扩充至数千级别
+var defaultProxySources = []struct {
+	Name     string
+	URL      string
+	Protocol string
+}{
+	{"TheSpeedX-socks5", "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt", "socks5"},
+	{"TheSpeedX-http", "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt", "http"},
+	{"hookzof-socks5", "https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt", "socks5"},
+	{"monosans-all", "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/all.txt", "http"},
+	{"clarketm-raw", "https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt", "http"},
+	{"proxyscrape-socks5", "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=socks5&timeout=10000&country=all", "socks5"},
+	{"proxyscrape-http", "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all", "http"},
+	{"aimili-vpngate", "https://baoweise-bot.github.io/aimili-vpngate/vpngate.csv", "ovpn"},
+}
 
 var eduCIDRs []*net.IPNet
 
@@ -619,6 +633,40 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 			}
 			mu.Unlock()
 		}(target)
+	}
+
+	// 4. 并发拉取全网多源公开节点与代理源，保证节点池达数千量级
+	if sourceFilter == "" || sourceFilter == "all" || sourceFilter == "proxy" {
+		for _, ps := range defaultProxySources {
+			wg.Add(1)
+			go func(srcName, srcURL, proto string) {
+				defer wg.Done()
+				raw, err := fetchRawCSVFrom(srcURL, "", 6*time.Second)
+				if err != nil || len(raw) == 0 {
+					return
+				}
+				var parsed []Node
+				if proto == "ovpn" {
+					parsed, _ = parseNodeCSV(raw)
+				} else {
+					parsed = parseProxyList(raw, proto)
+				}
+				if len(parsed) == 0 {
+					return
+				}
+				mu.Lock()
+				successCount++
+				for _, n := range parsed {
+					if len(nodeMap) >= 8000 {
+						break
+					}
+					if n.IP != "" {
+						nodeMap[n.IP] = n
+					}
+				}
+				mu.Unlock()
+			}(ps.Name, ps.URL, ps.Protocol)
+		}
 	}
 	wg.Wait()
 

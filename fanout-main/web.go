@@ -19,46 +19,80 @@ const indexHTML = `<!DOCTYPE html>
 <title>fanout</title>
 <style>
 :root{
-  --bg:#07151e;
-  --panel:rgba(10, 28, 38, 0.62);
+  --bg:#071018;
+  --panel:rgba(12, 20, 32, 0.68);
   --line:rgba(255, 255, 255, 0.12);
-  --text:#f0fdf4;
-  --dim:#8ecae6;
-  --accent:#06b6d4;
-  --accent-glow:0 0 20px rgba(6, 182, 212, 0.45);
+  --text:#f8fafc;
+  --dim:#94a3b8;
+  --accent:#38bdf8;
+  --accent-glow:0 0 20px rgba(56, 189, 248, 0.45);
   --ok:#10b981;
   --warn:#f59e0b;
   --bad:#f43f5e;
-  --cyan:#06b6d4;
-  --mint:#34d399;
-  --azure:#38bdf8;
-  --lavender:#a78bfa;
-  --glass-shadow:0 12px 36px -4px rgba(0, 20, 30, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.10);
-  --glass-blur:blur(28px) saturate(190%);
+  --glass-shadow:0 14px 40px -4px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.12);
+  --glass-blur:blur(32px) saturate(200%);
   --apple-font:-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   --mono-font:ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 *{box-sizing:border-box}
 body{
   margin:0;color:var(--text);font:13px/1.55 var(--apple-font);-webkit-font-smoothing:antialiased;min-height:100vh;
-  background: radial-gradient(circle at 18% 22%, rgba(6, 182, 212, 0.18), transparent 45%),
-              radial-gradient(circle at 82% 18%, rgba(52, 211, 153, 0.17), transparent 45%),
-              radial-gradient(circle at 50% 82%, rgba(56, 189, 248, 0.16), transparent 50%),
-              radial-gradient(circle at 20% 75%, rgba(167, 139, 250, 0.14), transparent 48%),
-              linear-gradient(135deg, #05141c 0%, #08212c 50%, #061822 100%);
-  background-size: 180% 180%;
-  animation: freshAuroraFlow 24s ease-in-out infinite alternate;
-  background-attachment: fixed;
+  background-attachment:fixed;
+  animation:energy6Flow 36s cubic-bezier(0.4, 0, 0.2, 1) infinite alternate;
 }
-@keyframes freshAuroraFlow {
-  0% {
-    background-position: 0% 0%, 100% 10%, 50% 100%, 0% 50%, 0% 0%;
+.noise-overlay{
+  position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:99;opacity:0.048;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.88' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+  background-repeat:repeat;
+}
+@keyframes energy6Flow {
+  /* 1. INFINITE: 空灵珍珠白、冰青水绿、细碎微粉与金斑 */
+  0%, 100% {
+    background: radial-gradient(circle at 20% 20%, rgba(128, 222, 234, 0.25), transparent 45%),
+                radial-gradient(circle at 80% 25%, rgba(248, 187, 208, 0.22), transparent 50%),
+                radial-gradient(circle at 50% 75%, rgba(254, 240, 138, 0.18), transparent 45%),
+                radial-gradient(circle at 15% 85%, rgba(165, 243, 252, 0.20), transparent 50%),
+                linear-gradient(135deg, #061118 0%, #0d1e28 50%, #07131b 100%);
   }
-  50% {
-    background-position: 50% 70%, 50% 90%, 20% 30%, 60% 80%, 100% 100%;
+  /* 2. WARMTH: 炽烈红宝石、珊瑚绯红、暖红霞光与炽金火苗 */
+  16.66% {
+    background: radial-gradient(circle at 25% 25%, rgba(220, 38, 38, 0.28), transparent 48%),
+                radial-gradient(circle at 75% 20%, rgba(251, 113, 133, 0.24), transparent 45%),
+                radial-gradient(circle at 50% 80%, rgba(249, 115, 22, 0.20), transparent 50%),
+                radial-gradient(circle at 10% 70%, rgba(153, 27, 27, 0.25), transparent 45%),
+                linear-gradient(135deg, #180507 0%, #29080c 50%, #150305 100%);
   }
-  100% {
-    background-position: 80% 20%, 10% 40%, 80% 50%, 100% 20%, 0% 0%;
+  /* 3. UPLIFTING: 电光洋红、高亮荧光玫粉、明艳兰花紫霞 */
+  33.33% {
+    background: radial-gradient(circle at 20% 20%, rgba(236, 72, 153, 0.30), transparent 48%),
+                radial-gradient(circle at 80% 30%, rgba(168, 85, 247, 0.26), transparent 50%),
+                radial-gradient(circle at 50% 85%, rgba(244, 114, 182, 0.22), transparent 45%),
+                radial-gradient(circle at 15% 80%, rgba(192, 38, 211, 0.25), transparent 50%),
+                linear-gradient(135deg, #17041a 0%, #28072e 50%, #130316 100%);
+  }
+  /* 4. UNIVERSAL: 幽深星云蓝、皇家深蓝宝石、黑莓紫星团核心 */
+  50.00% {
+    background: radial-gradient(circle at 20% 25%, rgba(37, 99, 235, 0.28), transparent 50%),
+                radial-gradient(circle at 85% 20%, rgba(147, 51, 234, 0.26), transparent 48%),
+                radial-gradient(circle at 50% 75%, rgba(56, 189, 248, 0.22), transparent 45%),
+                radial-gradient(circle at 15% 85%, rgba(107, 33, 168, 0.28), transparent 50%),
+                linear-gradient(135deg, #04091a 0%, #08142d 50%, #040817 100%);
+  }
+  /* 5. RECIPROCATED: 晨露薄荷翡翠青、青柠绿晕染、双生柔粉珊瑚心 */
+  66.66% {
+    background: radial-gradient(circle at 25% 20%, rgba(16, 185, 129, 0.26), transparent 48%),
+                radial-gradient(circle at 75% 25%, rgba(244, 63, 94, 0.24), transparent 46%),
+                radial-gradient(circle at 50% 80%, rgba(52, 211, 153, 0.22), transparent 45%),
+                radial-gradient(circle at 20% 75%, rgba(251, 113, 133, 0.20), transparent 50%),
+                linear-gradient(135deg, #051611 0%, #07261d 50%, #041410 100%);
+  }
+  /* 6. VITAL: 幻彩欧珀流光、七彩虹光光晕、粉杏与淡紫珠光 */
+  83.33% {
+    background: radial-gradient(circle at 20% 20%, rgba(244, 114, 182, 0.25), transparent 46%),
+                radial-gradient(circle at 80% 25%, rgba(192, 132, 252, 0.25), transparent 48%),
+                radial-gradient(circle at 50% 75%, rgba(103, 232, 249, 0.22), transparent 45%),
+                radial-gradient(circle at 15% 80%, rgba(253, 224, 71, 0.18), transparent 50%),
+                linear-gradient(135deg, #13071d 0%, #200d2f 50%, #100618 100%);
   }
 }
 header{display:flex;align-items:center;gap:14px;padding:12px 20px;
@@ -305,6 +339,7 @@ textarea:focus{outline:none;border-color:var(--accent)}
 </style>
 </head>
 <body>
+<div class="noise-overlay" aria-hidden="true"></div>
 <header>
   <div class="brand-wrap">
     <h1>fanout</h1>
