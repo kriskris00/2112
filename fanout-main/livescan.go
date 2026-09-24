@@ -8,10 +8,12 @@ import (
 	"net"
 	"net/http"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -351,22 +353,65 @@ func (ls *LiveScanner) runScan(source, region string, maxCandidates int) {
 		return
 	}
 
-	// 3. 并发测试工作池（100 个高并发工作协程，极速扫满数千节点）
-	const concurrency = 100
-	workCh := make(chan Node, len(candidates))
-	for _, c := range candidates {
-		workCh <- c
+	// 3. 并发测试工作池（自适应并发：针对 1C1G 等低配母机动态限制在 6~24 并发，彻底杜绝 CPU 爆满与 conntrack 耗尽导致 VPS 失联）
+	concurrency := runtime.NumCPU() * 8
+	if concurrency < 6 {
+		concurrency = 6
+	} else if concurrency > 24 {
+		concurrency = 24
 	}
-	close(workCh)
+
+	var curIdx uint64
+	totalCandidates := uint64(len(candidates))
 
 	var wg sync.WaitGroup
 	var outMu sync.Mutex
-	verifiedList := make([]Node, 0, len(candidates))
+	initCap := len(candidates)
+	if initCap > 1000 {
+		initCap = 1000
+	}
+	verifiedList := make([]Node, 0, initCap)
+
+	var lastUpdate time.Time
+	updateVerifiedView := func(force bool) {
+		outMu.Lock()
+		defer outMu.Unlock()
+		now := time.Now()
+		if !force && now.Sub(lastUpdate) < 600*time.Millisecond {
+			return
+		}
+		lastUpdate = now
+		curList := append([]Node(nil), verifiedList...)
+		sort.Slice(curList, func(i, j int) bool {
+			pi := curList[i].Ping
+			pj := curList[j].Ping
+			if pi <= 0 {
+				pi = 9999
+			}
+			if pj <= 0 {
+				pj = 9999
+			}
+			if pi != pj {
+				return pi < pj
+			}
+			return curList[i].SpeedMbps > curList[j].SpeedMbps
+		})
+		ls.mu.Lock()
+		ls.verifiedCount = len(verifiedList)
+		ls.verified = curList
+		ls.mu.Unlock()
+	}
 
 	worker := func() {
 		defer wg.Done()
-		for node := range workCh {
-			alive, rtt, exitIP, _ := probeNodeLive(node, 1800*time.Millisecond)
+		for {
+			idx := atomic.AddUint64(&curIdx, 1) - 1
+			if idx >= totalCandidates {
+				break
+			}
+			node := candidates[idx]
+
+			alive, rtt, exitIP, _ := probeNodeLive(node, 1500*time.Millisecond)
 
 			ls.mu.Lock()
 			ls.progress++
@@ -391,31 +436,14 @@ func (ls *LiveScanner) runScan(source, region string, maxCandidates int) {
 
 				outMu.Lock()
 				verifiedList = append(verifiedList, node)
-				// 实时更新已验证列表副本并按最佳网络排序（延迟越低越前，带宽越大越前）
-				curList := append([]Node(nil), verifiedList...)
-				sort.Slice(curList, func(i, j int) bool {
-					pi := curList[i].Ping
-					pj := curList[j].Ping
-					if pi <= 0 {
-						pi = 9999
-					}
-					if pj <= 0 {
-						pj = 9999
-					}
-					if pi != pj {
-						return pi < pj
-					}
-					return curList[i].SpeedMbps > curList[j].SpeedMbps
-				})
-
-				ls.mu.Lock()
-				ls.verifiedCount = len(verifiedList)
-				ls.verified = curList
-				ls.mu.Unlock()
 				outMu.Unlock()
 
+				updateVerifiedView(false)
 				ls.mgr.AddVerifiedNode(node)
 			}
+
+			// 给 Linux 内核 conntrack 连接跟踪表与单核 CPU 留出调度余量，防止母机网络失联
+			time.Sleep(3 * time.Millisecond)
 		}
 	}
 
@@ -425,26 +453,7 @@ func (ls *LiveScanner) runScan(source, region string, maxCandidates int) {
 	}
 	wg.Wait()
 
-	// 4. 排序：网络最好的排在最前面（实测延迟越低越前，带宽越大越前）
-	sort.Slice(verifiedList, func(i, j int) bool {
-		pi := verifiedList[i].Ping
-		pj := verifiedList[j].Ping
-		if pi <= 0 {
-			pi = 9999
-		}
-		if pj <= 0 {
-			pj = 9999
-		}
-		if pi != pj {
-			return pi < pj
-		}
-		return verifiedList[i].SpeedMbps > verifiedList[j].SpeedMbps
-	})
-
-	ls.mu.Lock()
-	ls.verified = verifiedList
-	ls.verifiedCount = len(verifiedList)
-	ls.mu.Unlock()
+	updateVerifiedView(true)
 }
 
 // GetVerifiedNodes 获取满足条件的已实测通畅节点

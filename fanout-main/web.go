@@ -660,6 +660,17 @@ textarea:focus{outline:none;border-color:var(--accent)}
         </div>
       </label>
 
+      <label class="f" style="margin-top:14px">
+        <span style="font-weight:600;display:flex;align-items:center;gap:6px">
+          🔴 Quantumult X 节点订阅
+          <em style="color:var(--dim);font-weight:normal;font-style:normal">Quantumult X 官方专有格式 (原生解析 SOCKS5 / Trojan / VMess / SS)</em>
+        </span>
+        <div style="display:flex;gap:6px;margin-top:4px">
+          <input type="text" id="subUrlQuanX" readonly style="flex:1;background:#12151a;color:#d87070;font-family:monospace;font-size:11px">
+          <button class="primary" id="copySubQuanX" style="flex:none">📋 复制</button>
+        </div>
+      </label>
+
       <div style="margin-top:14px;padding:10px;background:rgba(74,158,218,.1);border:1px solid rgba(74,158,218,.3);border-radius:4px;font-size:11px;line-height:1.6">
         💡 <b>智能出口路由特性</b>：<br>
         1. 订阅链接自动聚合当前所有 3x-ui 入站及正在运行的 VPN Gate 出口隧道。<br>
@@ -1809,7 +1820,7 @@ $('#settingsBtn').onclick = async () => {
     $('#updCheck').textContent = '检查更新';
   }).catch(err => {
     $('#setPathHint').textContent = '界面挂在当前路径下。' + (err.message ? '提示: ' + err.message : '');
-    $('#updCur').textContent = 'v0.3.1-enhanced';
+    $('#updCur').textContent = 'v0.3.2-enhanced';
     $('#updCheck').disabled = false;
   });
 
@@ -2013,11 +2024,14 @@ async function openSubModal(){
   const tokenQueryClash = token ? '&token=' + encodeURIComponent(token) : '';
   const base64Url = origin + '/sub' + tokenQuery;
   const clashUrl = origin + '/sub?format=clash' + tokenQueryClash;
+  const quanxUrl = origin + '/sub?format=quanx' + tokenQueryClash;
 
   const bEl = $('#subUrlBase64');
   if(bEl) bEl.value = base64Url;
   const cEl = $('#subUrlClash');
   if(cEl) cEl.value = clashUrl;
+  const qEl = $('#subUrlQuanX');
+  if(qEl) qEl.value = quanxUrl;
 }
 
 document.addEventListener('click', async e => {
@@ -2032,6 +2046,11 @@ document.addEventListener('click', async e => {
   }
   if(e.target.closest('#copySubClash')){
     const val = ($('#subUrlClash').value || '').trim();
+    if(val) copy(val);
+    return;
+  }
+  if(e.target.closest('#copySubQuanX')){
+    const val = ($('#subUrlQuanX').value || '').trim();
     if(val) copy(val);
     return;
   }

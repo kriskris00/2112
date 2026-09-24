@@ -1,11 +1,10 @@
-package main
-
 import (
 	"context"
 	"fmt"
 	"net"
 	"os"
 	"runtime"
+	"sync"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -56,6 +55,25 @@ func resolveTargetAddress(addr string) string {
 	return addr
 }
 
+var (
+	rootNetnsFile *os.File
+	rootNetnsOnce sync.Once
+)
+
+func getRootNetns() *os.File {
+	rootNetnsOnce.Do(func() {
+		// Linux 下 PID 1 始终属于母机根网络命名空间
+		f, err := os.Open("/proc/1/ns/net")
+		if err != nil {
+			f, err = os.Open("/proc/self/ns/net")
+		}
+		if err == nil {
+			rootNetnsFile = f
+		}
+	})
+	return rootNetnsFile
+}
+
 // dialerInNetns 返回一个在指定 netns 内建立出站连接的 dial 函数。
 // 每次拨号在独立锁定的 OS 线程中切换 netns，拨号成功后安全恢复或交由 runtime 销毁。
 func dialerInNetns(nsName string) func(network, addr string) (net.Conn, error) {
@@ -72,12 +90,12 @@ func dialerInNetns(nsName string) func(network, addr string) (net.Conn, error) {
 			runtime.LockOSThread()
 
 			tid := unix.Gettid()
-			origin, err := os.Open(fmt.Sprintf("/proc/self/task/%d/ns/net", tid))
-			if err != nil {
-				origin, err = os.Open("/proc/thread-self/ns/net")
+			origin, _ := os.Open(fmt.Sprintf("/proc/self/task/%d/ns/net", tid))
+			if origin == nil {
+				origin, _ = os.Open("/proc/thread-self/ns/net")
 			}
-			if err != nil {
-				origin, err = os.Open("/proc/self/ns/net")
+			if origin == nil {
+				origin, _ = os.Open("/proc/self/ns/net")
 			}
 
 			target, err := os.Open("/var/run/netns/" + nsName)
@@ -106,17 +124,25 @@ func dialerInNetns(nsName string) func(network, addr string) (net.Conn, error) {
 			conn, dialErr := d.Dial(forceIPv4Network(network), resolvedAddr)
 
 			restored := false
-			if origin != nil {
+			// 优先切回绝对权威的 PID 1 母机根网络命名空间
+			if rootF := getRootNetns(); rootF != nil {
+				if err := unix.Setns(int(rootF.Fd()), unix.CLONE_NEWNET); err == nil {
+					restored = true
+				}
+			}
+			if !restored && origin != nil {
 				if err := unix.Setns(int(origin.Fd()), unix.CLONE_NEWNET); err == nil {
 					restored = true
 				}
+			}
+			if origin != nil {
 				origin.Close()
 			}
 
 			if restored {
 				runtime.UnlockOSThread()
 			}
-			// 若恢复失败，不调用 UnlockOSThread，当前 OS 线程随着 goroutine 结束由 Go runtime 彻底销毁，绝不污染线程池。
+			// 若恢复失败，绝对不调用 UnlockOSThread！当前 goroutine 结束后，Go runtime 绝不会把一个处于 child netns 的脏线程放回线程池去调度系统网络操作。
 
 			ch <- result{conn, dialErr}
 		}()

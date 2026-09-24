@@ -73,6 +73,9 @@ func apiSubscription(m *Manager, a *Auth) http.HandlerFunc {
 			strings.Contains(ua, "clash") ||
 			strings.Contains(ua, "mihomo") ||
 			strings.Contains(ua, "meta")
+		isQuanX := format == "quanx" ||
+			strings.Contains(ua, "quantumult") ||
+			strings.Contains(ua, "quanx")
 
 		// 建立已连接出站绑定的映射：支持 HostName, sanitizeTag, IP, slot 等全方位匹配
 		tunnels := m.Tunnels()
@@ -164,6 +167,19 @@ func apiSubscription(m *Manager, a *Auth) http.HandlerFunc {
 			w.Header().Set("Content-Disposition", "attachment; filename=\"fanout-clash.yaml\"")
 			yamlContent := generateClashConfig(details, upTunnels, host)
 			_, _ = w.Write([]byte(yamlContent))
+			return
+		}
+
+		if isQuanX {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.Header().Set("Content-Disposition", "attachment; filename=\"fanout-quanx.txt\"")
+			qxContent := generateQuanXConfig(details, upTunnels, host)
+			if r.URL.Query().Get("raw") == "1" {
+				_, _ = w.Write([]byte(qxContent))
+				return
+			}
+			b64 := base64.StdEncoding.EncodeToString([]byte(qxContent))
+			_, _ = w.Write([]byte(b64))
 			return
 		}
 
@@ -346,6 +362,145 @@ func generateClashConfig(details []*InboundDetail, tunnels []*Tunnel, host strin
 	sb.WriteString("\r\n")
 
 	sb.WriteString("rules:\r\n  - MATCH,⚡ 节点选择\r\n")
+	return sb.String()
+}
+
+// generateQuanXConfig 生成标准的 Quantumult X 节点订阅配置 (原生 server_remote 规范)
+func generateQuanXConfig(details []*InboundDetail, tunnels []*Tunnel, host string) string {
+	var sb strings.Builder
+	sb.WriteString("# Quantumult X 节点订阅 - 聚合出海出口\r\n")
+	sb.WriteString(fmt.Sprintf("# 生成时间: %s\r\n", time.Now().Format("2006-01-02 15:04:05")))
+	sb.WriteString("# 格式说明: Quantumult X 原生支持 SOCKS5 / Trojan / VMess / Shadowsocks；由于 QuanX 内核不支持 VLESS，VLESS 节点已自动标注\r\n\r\n")
+
+	boundTunnel := make(map[string]*Tunnel)
+	for _, t := range tunnels {
+		boundTunnel[t.Node.HostName] = t
+		boundTunnel[sanitizeTag(t.Node.HostName)] = t
+		if t.Node.IP != "" {
+			boundTunnel[t.Node.IP] = t
+		}
+		boundTunnel[fmt.Sprintf("exit-%d", t.Slot)] = t
+		boundTunnel[fmt.Sprintf("%d", t.Slot)] = t
+	}
+	findTunnel := func(boundTo string) *Tunnel {
+		if boundTo == "" {
+			if len(tunnels) == 1 {
+				return tunnels[0]
+			}
+			return nil
+		}
+		if t, ok := boundTunnel[boundTo]; ok && t != nil {
+			return t
+		}
+		clean := sanitizeTag(boundTo)
+		if t, ok := boundTunnel[clean]; ok && t != nil {
+			return t
+		}
+		for _, t := range tunnels {
+			s := sanitizeTag(t.Node.HostName)
+			if strings.Contains(boundTo, s) || strings.Contains(s, boundTo) {
+				return t
+			}
+			if t.Node.IP != "" && strings.Contains(boundTo, t.Node.IP) {
+				return t
+			}
+		}
+		if len(tunnels) == 1 {
+			return tunnels[0]
+		}
+		return nil
+	}
+
+	seenNames := make(map[string]int)
+	makeUniqueName := func(raw string) string {
+		count := seenNames[raw]
+		seenNames[raw] = count + 1
+		if count > 0 {
+			return fmt.Sprintf("%s (%d)", raw, count+1)
+		}
+		return raw
+	}
+
+	// 1. 处理 3x-ui 入站
+	for _, d := range details {
+		proto := strings.ToLower(d.Protocol)
+		t := findTunnel(d.BoundTo)
+
+		for idx, c := range d.Clients {
+			clientEmail := c.Email
+			if clientEmail == "" {
+				clientEmail = fmt.Sprintf("client-%d", idx+1)
+			}
+			var pName string
+			if t != nil {
+				suffix := fmt.Sprintf("%s :%d", strings.ToUpper(proto), d.Port)
+				if len(d.Clients) > 1 {
+					suffix += fmt.Sprintf(" - %s", clientEmail)
+				}
+				pName = formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP, suffix)
+			} else {
+				pName = fmt.Sprintf("🚀 入站 · %s :%d (%s)", strings.ToUpper(proto), d.Port, clientEmail)
+			}
+			pName = makeUniqueName(pName)
+
+			switch proto {
+			case "trojan":
+				sb.WriteString(fmt.Sprintf("trojan = %s:%d, password=%s, over-tls=true, tls-verification=false, fast-open=false, udp-relay=true, tag=%s\r\n",
+					host, d.Port, c.ID, pName))
+
+			case "vmess":
+				netType := strings.ToLower(d.Network)
+				tlsOpt := ""
+				if d.TLS == "tls" {
+					tlsOpt = ", over-tls=true, tls-verification=false"
+				}
+				obfsOpt := ""
+				if netType == "ws" {
+					obfsOpt = ", obfs=ws, obfs-uri=/"
+				}
+				sb.WriteString(fmt.Sprintf("vmess = %s:%d, method=chacha20-ietf-poly1305, password=%s%s%s, fast-open=false, udp-relay=true, tag=%s\r\n",
+					host, d.Port, c.ID, obfsOpt, tlsOpt, pName))
+
+			case "shadowsocks":
+				parts := strings.SplitN(c.ID, ":", 2)
+				method := "aes-256-gcm"
+				pwd := c.ID
+				if len(parts) == 2 {
+					method = strings.TrimSpace(parts[0])
+					pwd = strings.TrimSpace(parts[1])
+				}
+				sb.WriteString(fmt.Sprintf("shadowsocks = %s:%d, method=%s, password=%s, fast-open=false, udp-relay=true, tag=%s\r\n",
+					host, d.Port, method, pwd, pName))
+
+			case "socks":
+				if c.Email != "" && c.ID != "" {
+					sb.WriteString(fmt.Sprintf("socks5 = %s:%d, username=%s, password=%s, fast-open=false, udp-relay=true, tag=%s\r\n",
+						host, d.Port, c.Email, c.ID, pName))
+				} else {
+					sb.WriteString(fmt.Sprintf("socks5 = %s:%d, fast-open=false, udp-relay=true, tag=%s\r\n",
+						host, d.Port, pName))
+				}
+
+			case "vless":
+				sb.WriteString(fmt.Sprintf("; [QuanX 不支持 VLESS] %s (端口:%d) 采用 VLESS 协议。由于 Quantumult X 官方内核不支持 VLESS，建议在 3x-ui 面板中改用 Trojan 或 VMess。\r\n",
+					pName, d.Port))
+			}
+		}
+	}
+
+	// 2. 处理运行中的出口隧道 (SOCKS5 出口，国家表情 + 企业名称)
+	for _, t := range tunnels {
+		cred := t.credential()
+		pName := makeUniqueName(formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP, fmt.Sprintf("出口-%d", t.Slot)))
+		if cred.User != "" && cred.Pass != "" {
+			sb.WriteString(fmt.Sprintf("socks5 = %s:%d, username=%s, password=%s, fast-open=false, udp-relay=true, tag=%s\r\n",
+				host, t.Port, cred.User, cred.Pass, pName))
+		} else {
+			sb.WriteString(fmt.Sprintf("socks5 = %s:%d, fast-open=false, udp-relay=true, tag=%s\r\n",
+				host, t.Port, pName))
+		}
+	}
+
 	return sb.String()
 }
 

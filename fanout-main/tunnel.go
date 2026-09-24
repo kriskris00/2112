@@ -102,14 +102,22 @@ func (t *Tunnel) setupNetns() error {
 		return fmt.Errorf("写 resolv.conf 失败: %w", err)
 	}
 
-	cidr := sub + ".0/30"
-	ensureRule("nat", "POSTROUTING", "-s", cidr, "-j", "MASQUERADE")
-	ensureRuleInsert("filter", "FORWARD", "-s", cidr, "-j", "ACCEPT")
-	ensureRuleInsert("filter", "FORWARD", "-d", cidr, "-j", "ACCEPT")
-	ensureRule("mangle", "FORWARD", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu")
+	ensureGlobalSubnetRules()
 	runQuiet("ip", "netns", "exec", ns, "iptables", "-t", "mangle", "-A", "OUTPUT", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu")
 	runQuiet("ip", "netns", "exec", ns, "iptables", "-t", "mangle", "-A", "FORWARD", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu")
 	return nil
+}
+
+var iptablesOnce sync.Once
+
+// ensureGlobalSubnetRules 一次性对整个 10.99.0.0/16 网段配置 NAT 与转发，避免频繁加锁阻塞 iptables
+func ensureGlobalSubnetRules() {
+	iptablesOnce.Do(func() {
+		ensureRule("nat", "POSTROUTING", "-s", "10.99.0.0/16", "-j", "MASQUERADE")
+		ensureRuleInsert("filter", "FORWARD", "-s", "10.99.0.0/16", "-j", "ACCEPT")
+		ensureRuleInsert("filter", "FORWARD", "-d", "10.99.0.0/16", "-j", "ACCEPT")
+		ensureRule("mangle", "FORWARD", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu")
+	})
 }
 
 // ensureRule 幂等追加一条 iptables 规则。
@@ -134,13 +142,9 @@ func ensureRuleInsert(table, chain string, spec ...string) {
 }
 
 func (t *Tunnel) teardownNetns() {
-	ns, sub := t.nsName(), t.subnet()
-	cidr := sub + ".0/30"
+	ns := t.nsName()
 	runQuiet("ip", "netns", "del", ns)
 	runQuiet("ip", "link", "del", fmt.Sprintf("fov%d", t.Slot))
-	runQuiet("iptables", "-w", "5", "-t", "nat", "-D", "POSTROUTING", "-s", cidr, "-j", "MASQUERADE")
-	runQuiet("iptables", "-w", "5", "-D", "FORWARD", "-s", cidr, "-j", "ACCEPT")
-	runQuiet("iptables", "-w", "5", "-D", "FORWARD", "-d", cidr, "-j", "ACCEPT")
 }
 
 // startOpenVPN 在 netns 内拉起 openvpn，并等待 tun0 拿到地址。
