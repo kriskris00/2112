@@ -19,9 +19,9 @@ const indexHTML = `<!DOCTYPE html>
 <title>fanout</title>
 <style>
 :root{
-  --bg:#a9aeb7;
-  --panel:rgba(255, 255, 255, 0.52);
-  --line:rgba(255, 255, 255, 0.70);
+  --bg:#f1f5f9;
+  --panel:rgba(255, 255, 255, 0.58);
+  --line:rgba(255, 255, 255, 0.85);
   --text:#0f172a;
   --dim:#475569;
   --accent:#0284c7;
@@ -29,122 +29,122 @@ const indexHTML = `<!DOCTYPE html>
   --ok:#059669;
   --warn:#d97706;
   --bad:#dc2626;
-  --glass-shadow:0 16px 40px rgba(0, 0, 0, 0.07), 0 1px 3px rgba(0, 0, 0, 0.04), inset 0 1px 2px rgba(255, 255, 255, 0.95), inset 0 -1px 2px rgba(255, 255, 255, 0.35);
-  --glass-blur:blur(42px) saturate(210%) brightness(110%);
+  --glass-shadow:0 16px 40px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.03), inset 0 1px 2px rgba(255, 255, 255, 0.98), inset 0 -1px 2px rgba(255, 255, 255, 0.45);
+  --glass-blur:blur(36px) saturate(220%) brightness(108%);
   --apple-font:-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   --mono-font:ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 *{box-sizing:border-box}
 body{
   margin:0;color:var(--text);font:13px/1.55 var(--apple-font);-webkit-font-smoothing:antialiased;min-height:100vh;
-  background:#a9aeb7;position:relative;overflow-x:hidden;
+  background:radial-gradient(circle at 50% 50%, #f8fafc 0%, #e2e8f0 100%);position:relative;overflow-x:hidden;
 }
 
-/* 2026 Apple Liquid Aura: 5 个高饱和能量流体球在画面中自主多轨运动，同色系内的多种色彩互相流动交融 */
+/* 2026 Apple Liquid Aura: 5 个高动态流体能量球，色彩鲜艳互不干涉，高速流动交融 */
 .fluid-aura-container{
   position:fixed;inset:0;width:100vw;height:100vh;overflow:hidden;pointer-events:none;z-index:0;
-  background:#a9aeb7;filter:blur(75px);-webkit-filter:blur(75px);transform:translateZ(0);
+  background:radial-gradient(circle at 50% 50%, #f8fafc 0%, #e2e8f0 100%);filter:blur(48px);-webkit-filter:blur(48px);transform:translateZ(0);
 }
 .aura-blob{
   position:absolute;border-radius:45% 55% 65% 35% / 40% 50% 60% 50%;
-  opacity:0.92;will-change:transform, background;
+  opacity:0.96;will-change:transform, background;
 }
 .blob-1{
-  width:75vw;height:75vw;top:-15%;left:-10%;
-  animation:fluidOrbit1 22s ease-in-out infinite alternate, colorCycleBlob1 48s ease-in-out infinite;
+  width:70vw;height:70vw;top:-12%;left:-8%;
+  animation:fluidOrbit1 11s ease-in-out infinite alternate, colorCycleBlob1 22s ease-in-out infinite;
 }
 .blob-2{
-  width:70vw;height:70vw;bottom:-15%;right:-10%;
-  animation:fluidOrbit2 26s ease-in-out infinite alternate, colorCycleBlob2 48s ease-in-out infinite;
+  width:68vw;height:68vw;bottom:-12%;right:-8%;
+  animation:fluidOrbit2 13s ease-in-out infinite alternate, colorCycleBlob2 22s ease-in-out infinite;
 }
 .blob-3{
-  width:65vw;height:65vw;top:20%;left:20%;
-  animation:fluidOrbit3 18s ease-in-out infinite alternate, colorCycleBlob3 48s ease-in-out infinite;
+  width:62vw;height:62vw;top:18%;left:22%;
+  animation:fluidOrbit3 9s ease-in-out infinite alternate, colorCycleBlob3 22s ease-in-out infinite;
 }
 .blob-4{
-  width:60vw;height:60vw;bottom:10%;left:-5%;
-  animation:fluidOrbit4 24s ease-in-out infinite alternate, colorCycleBlob4 48s ease-in-out infinite;
+  width:58vw;height:58vw;bottom:8%;left:-4%;
+  animation:fluidOrbit4 12s ease-in-out infinite alternate, colorCycleBlob4 22s ease-in-out infinite;
 }
 .blob-5{
-  width:55vw;height:55vw;top:10%;right:-5%;
-  animation:fluidOrbit5 20s ease-in-out infinite alternate, colorCycleBlob5 48s ease-in-out infinite;
+  width:54vw;height:54vw;top:8%;right:-4%;
+  animation:fluidOrbit5 10s ease-in-out infinite alternate, colorCycleBlob5 22s ease-in-out infinite;
 }
 
 @keyframes fluidOrbit1{
-  0%{transform:translate(-5%, -10%) rotate(0deg) scale(1);}
-  33%{transform:translate(30%, 15%) rotate(120deg) scale(1.15);}
-  66%{transform:translate(15%, 35%) rotate(240deg) scale(0.92);}
-  100%{transform:translate(-15%, 20%) rotate(360deg) scale(1.08);}
+  0%{transform:translate(-8%, -12%) rotate(0deg) scale(1);}
+  33%{transform:translate(32%, 18%) rotate(120deg) scale(1.18);}
+  66%{transform:translate(18%, 38%) rotate(240deg) scale(0.90);}
+  100%{transform:translate(-18%, 22%) rotate(360deg) scale(1.10);}
 }
 @keyframes fluidOrbit2{
-  0%{transform:translate(10%, 15%) rotate(0deg) scale(1.1);}
-  33%{transform:translate(-25%, -10%) rotate(-120deg) scale(0.95);}
-  66%{transform:translate(-10%, -30%) rotate(-240deg) scale(1.18);}
-  100%{transform:translate(25%, -15%) rotate(-360deg) scale(1);}
+  0%{transform:translate(12%, 18%) rotate(0deg) scale(1.12);}
+  33%{transform:translate(-28%, -12%) rotate(-120deg) scale(0.92);}
+  66%{transform:translate(-12%, -32%) rotate(-240deg) scale(1.20);}
+  100%{transform:translate(28%, -18%) rotate(-360deg) scale(1);}
 }
 @keyframes fluidOrbit3{
-  0%{transform:translate(0%, 0%) scale(0.95) rotate(0deg);}
-  50%{transform:translate(-20%, 25%) scale(1.22) rotate(180deg);}
-  100%{transform:translate(25%, -15%) scale(1.05) rotate(360deg);}
+  0%{transform:translate(0%, 0%) scale(0.92) rotate(0deg);}
+  50%{transform:translate(-24%, 28%) scale(1.25) rotate(180deg);}
+  100%{transform:translate(28%, -18%) scale(1.08) rotate(360deg);}
 }
 @keyframes fluidOrbit4{
-  0%{transform:translate(15%, -15%) scale(1.05) rotate(0deg);}
-  50%{transform:translate(-20%, 20%) scale(1.2) rotate(180deg);}
-  100%{transform:translate(20%, 5%) scale(0.92) rotate(360deg);}
+  0%{transform:translate(18%, -18%) scale(1.08) rotate(0deg);}
+  50%{transform:translate(-22%, 24%) scale(1.22) rotate(180deg);}
+  100%{transform:translate(22%, 8%) scale(0.90) rotate(360deg);}
 }
 @keyframes fluidOrbit5{
-  0%{transform:translate(-10%, 10%) scale(1);}
-  50%{transform:translate(15%, -20%) scale(1.25);}
-  100%{transform:translate(-5%, 15%) scale(1.05);}
+  0%{transform:translate(-12%, 12%) scale(1);}
+  50%{transform:translate(18%, -24%) scale(1.28);}
+  100%{transform:translate(-8%, 18%) scale(1.08);}
 }
 
-/* 6 大色系按顺序推进，球体运动带动内部各颜色真实流动交融 */
+/* 6 大色系高速互流，无任何黑灰色，全部为明朗高亮纯净色与纯白晶莹高光 */
 @keyframes colorCycleBlob1{
-  0%, 100%{background:#67e8f9;}
-  16.66%{background:#7dd3fc;}
-  33.33%{background:#bef264;}
+  0%, 100%{background:#38bdf8;}
+  16.66%{background:#0284c7;}
+  33.33%{background:#a3e635;}
   50.00%{background:#0ea5e9;}
-  66.66%{background:#6ee7b7;}
-  83.33%{background:#a5f3fc;}
+  66.66%{background:#34d399;}
+  83.33%{background:#67e8f9;}
 }
 @keyframes colorCycleBlob2{
   0%, 100%{background:#f472b6;}
-  16.66%{background:#ec2159;}
-  33.33%{background:#ed1d73;}
-  50.00%{background:#833b60;}
-  66.66%{background:#ec2c68;}
-  83.33%{background:#fb7185;}
+  16.66%{background:#fb7185;}
+  33.33%{background:#f43f5e;}
+  50.00%{background:#ec4899;}
+  66.66%{background:#fb923c;}
+  83.33%{background:#fda4af;}
 }
 @keyframes colorCycleBlob3{
   0%, 100%{background:#ffffff;}
-  16.66%{background:#5c081e;}
+  16.66%{background:#f0fdf4;}
   33.33%{background:#ffffff;}
-  50.00%{background:#4a044e;}
+  50.00%{background:#e0f2fe;}
   66.66%{background:#ffffff;}
-  83.33%{background:#90949d;}
+  83.33%{background:#fdf4ff;}
 }
 @keyframes colorCycleBlob4{
   0%, 100%{background:#fde047;}
-  16.66%{background:#f97316;}
-  33.33%{background:#701a75;}
+  16.66%{background:#fb923c;}
+  33.33%{background:#f43f5e;}
   50.00%{background:#fbbf24;}
   66.66%{background:#fef08a;}
   83.33%{background:#fed7aa;}
 }
 @keyframes colorCycleBlob5{
   0%, 100%{background:#e879f9;}
-  16.66%{background:#fff7ed;}
-  33.33%{background:#f43f5e;}
+  16.66%{background:#ffffff;}
+  33.33%{background:#38bdf8;}
   50.00%{background:#ffffff;}
-  66.66%{background:#34d399;}
-  83.33%{background:#c4b5fd;}
+  66.66%{background:#4ade80;}
+  83.33%{background:#c084fc;}
 }
 
-/* 磨砂噪点质感 */
+/* 细腻磨砂颗粒触感 */
 .noise-overlay{
-  position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:2;opacity:0.085;
-  mix-blend-mode:overlay;
-  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+  position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:2;opacity:0.18;
+  mix-blend-mode:hard-light;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 0.85 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
   background-repeat:repeat;
 }
 
@@ -1196,8 +1196,9 @@ function renderExits(){
     else if(purity >= 50) pColor = '#c9903a';
     const purityTag = '<span class="tag-purity" style="color:' + pColor + '" title="IP 纯净度评分">' + purity + '%</span>';
 
-    const chips = (e.inbounds || []).length
-      ? e.inbounds.map(i =>
+    const activeInbounds = (e.inbounds || []).slice(0, 1);
+    const chips = activeInbounds.length
+      ? activeInbounds.map(i =>
           '<span class="chip-item">'
           + '<button class="chip" data-detail="' + i.id + '" title="'
           +   esc((i.remark || i.protocol) + ' · ' + i.protocol + ' :' + i.port + ' (点击配置客户端/查看详情)') + '">'

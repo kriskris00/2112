@@ -836,8 +836,28 @@ func (x *XUI) CloneToTunnels(templateID int, hosts []string, tunnels []*Tunnel) 
 
 	emails, _ := clientEmails(raw)
 
+	// 严格执行 1 出口 = 1 节点：检查当前已有入站绑定，已绑定的出口绝不重复克隆
+	boundMap, _ := x.boundInbounds()
+	existingInbounds, _ := x.Inbounds(nil)
+	boundHosts := make(map[string]bool)
+	for k, v := range boundMap {
+		boundHosts[k] = true
+		boundHosts[v] = true
+		boundHosts[sanitizeTag(v)] = true
+	}
+	for _, ib := range existingInbounds {
+		b := strings.TrimSpace(ib.BoundTo)
+		if b != "" && !strings.EqualFold(b, "direct") && !strings.EqualFold(b, "none") {
+			boundHosts[b] = true
+			boundHosts[sanitizeTag(b)] = true
+		}
+	}
+
 	created := []int{}
 	for _, host := range hosts {
+		if boundHosts[host] || boundHosts[sanitizeTag(host)] {
+			continue // 该出口已具备对应入站，跳过以严格维持 1 出口 = 1 节点
+		}
 		t := byHost[host]
 		if t == nil || t.Status != "up" {
 			continue
