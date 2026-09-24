@@ -643,14 +643,26 @@ func (m *Manager) AutoOrchestrate() {
 	}
 }
 
-// WatchAutoOrchestrate 守护线程：定期巡检全网国家出口配额与自愈
+// WatchAutoOrchestrate 守护线程：定期巡检全网国家出口配额与自愈，并每 30 分钟定时拉取全网最新节点源
 func (m *Manager) WatchAutoOrchestrate() {
 	time.Sleep(10 * time.Second)
 	m.AutoOrchestrate()
 
-	ticker := time.NewTicker(2 * time.Minute)
-	defer ticker.Stop()
-	for range ticker.C {
-		m.AutoOrchestrate()
+	// 1. 每 2 分钟做一次出口配额快速巡检与健康自愈维护（稳定运行的出口绝不触动）
+	orchestrateTicker := time.NewTicker(2 * time.Minute)
+	// 2. 每 30 分钟定时拉取一次全网最新节点源（自动发现新国家直接添加，离线恢复的国家自动补齐）
+	sourceTicker := time.NewTicker(30 * time.Minute)
+
+	defer orchestrateTicker.Stop()
+	defer sourceTicker.Stop()
+
+	for {
+		select {
+		case <-orchestrateTicker.C:
+			m.AutoOrchestrate()
+		case <-sourceTicker.C:
+			log.Printf("[自动拉源] 定时拉取全网最新节点源 (30 分钟周期)...")
+			_, _ = m.RefreshNodesSource("all")
+		}
 	}
 }
