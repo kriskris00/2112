@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
 	"net/http"
@@ -154,6 +155,23 @@ func apiSubscription(m *Manager, a *Auth) http.HandlerFunc {
 				}
 			}
 			return nil
+		}
+
+		// 订阅始终以当前运行态为准：禁止 CDN/浏览器缓存旧节点，且用 ETag 做条件刷新。
+		var etagSeed strings.Builder
+		for _, t := range m.Tunnels() {
+			if t.Status == "up" {
+				etagSeed.WriteString(fmt.Sprintf("%d|%s|%s|%s;", t.Slot, t.Node.HostName, t.Node.IP, t.ExitIP))
+			}
+		}
+		etag := fmt.Sprintf(`"%x"`, sha256.Sum256([]byte(etagSeed.String())))
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
+		w.Header().Set("ETag", etag)
+		if strings.TrimSpace(r.Header.Get("If-None-Match")) == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
 		}
 
 		// 收集运行中的出口节点与绑定的 3x-ui 入站（并发极速查询，严格 1:1 实时同步，绝不重复生成，永不超时）

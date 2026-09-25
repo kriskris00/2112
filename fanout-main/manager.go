@@ -14,15 +14,18 @@ import (
 
 // Manager 维护所有隧道，负责分配槽位与端口。
 type Manager struct {
-	mu       sync.RWMutex
-	tunnels  map[int]*Tunnel
-	nodes    []Node
-	fetched  time.Time
-	workDir     string
-	maxSlots    int
-	jobs        JobStore
-	refreshing  bool
+	mu            sync.RWMutex
+	tunnels       map[int]*Tunnel
+	nodes         []Node
+	fetched       time.Time
+	workDir       string
+	maxSlots      int
+	jobs          JobStore
+	refreshing    bool
 	orchestrateMu sync.Mutex
+	stateMu       sync.Mutex
+	cooldownMu    sync.RWMutex
+	cooldowns     map[string]time.Time
 }
 
 func NewManager(maxSlots int, workDir string) *Manager {
@@ -31,12 +34,49 @@ func NewManager(maxSlots int, workDir string) *Manager {
 	}
 	initial := loadInitialNodes(workDir)
 	return &Manager{
-		tunnels:  map[int]*Tunnel{},
-		nodes:    initial,
-		fetched:  time.Now(),
-		workDir:  workDir,
-		maxSlots: maxSlots,
+		tunnels:   map[int]*Tunnel{},
+		nodes:     initial,
+		fetched:   time.Now(),
+		workDir:   workDir,
+		maxSlots:  maxSlots,
+		cooldowns: map[string]time.Time{},
 	}
+}
+
+const failedNodeCooldown = 10 * time.Minute
+
+func nodeKey(n Node) string {
+	if n.IP != "" {
+		return strings.ToLower(strings.TrimSpace(n.IP)) + ":" + fmt.Sprint(n.Port)
+	}
+	return strings.ToLower(strings.TrimSpace(n.HostName)) + ":" + fmt.Sprint(n.Port)
+}
+
+func (m *Manager) markNodeFailed(n Node) {
+	key := nodeKey(n)
+	if key == ":0" || key == "" {
+		return
+	}
+	m.cooldownMu.Lock()
+	m.cooldowns[key] = time.Now().Add(failedNodeCooldown)
+	m.cooldownMu.Unlock()
+}
+
+func (m *Manager) nodeCooling(n Node) bool {
+	key := nodeKey(n)
+	m.cooldownMu.RLock()
+	until, ok := m.cooldowns[key]
+	m.cooldownMu.RUnlock()
+	if !ok {
+		return false
+	}
+	if time.Now().Before(until) {
+		return true
+	}
+	m.cooldownMu.Lock()
+	delete(m.cooldowns, key)
+	m.cooldownMu.Unlock()
+	return false
 }
 
 // RefreshNodes 重新拉取所有节点源。
@@ -196,7 +236,6 @@ func (m *Manager) PruneFailed() int {
 	}
 	return len(slots)
 }
-
 
 func (m *Manager) Nodes() ([]Node, time.Time) {
 	m.mu.RLock()
@@ -389,6 +428,7 @@ func (m *Manager) tryCandidates(t *Tunnel, notify bool) bool {
 			return true
 		}
 		t.stop()
+		m.markNodeFailed(node)
 	}
 	return false
 }
@@ -489,6 +529,9 @@ func (m *Manager) candidatesFor(first Node) []Node {
 	var pool []Node
 	for _, n := range m.nodes {
 		if usedHosts[n.HostName] || (n.IP != "" && usedIPs[n.IP]) {
+			continue
+		}
+		if m.nodeCooling(n) {
 			continue
 		}
 		// 必须具有合法的 OpenVPN 配置或原生代理协议（杜绝无法出网的坏节点）

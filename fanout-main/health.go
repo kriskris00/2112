@@ -11,11 +11,11 @@ import (
 
 const (
 	healthInterval = 3 * time.Second
-	healthFailures = 1 // 连续失败 1 次（3s），立即触发同国换节点重连
+	healthFailures = 2 // 连续失败 2 次（约 6s），再触发同国换节点，降低瞬时抖动误判
 	healthTimeout  = 3 * time.Second
 )
 
-// WatchHealth 周期检查每条隧道是否还能出网，失效时间超过 10 秒自动同国换节点重连，候选耗尽彻底删除。
+// WatchHealth 周期检查每条隧道是否还能出网，连续健康检查失败自动同国换节点重连，候选耗尽彻底删除。
 func (m *Manager) WatchHealth() {
 	fails := map[int]int{}
 
@@ -34,7 +34,8 @@ func (m *Manager) WatchHealth() {
 				continue
 			}
 
-			log.Printf("隧道 %d (%s, 国家: %s) 失效超过 10 秒，立即自动同国轮换", t.Slot, t.Node.HostName, t.Node.CountryCode)
+			m.markNodeFailed(t.Node)
+			log.Printf("隧道 %d (%s, 国家: %s) 连续健康检查失败，立即自动同国轮换", t.Slot, t.Node.HostName, t.Node.CountryCode)
 			fails[t.Slot] = 0
 			m.reconnect(t, t.Node.HostName)
 		}

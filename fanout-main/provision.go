@@ -11,8 +11,8 @@ import (
 
 // ProvisionRequest 是"给我 N 个某地区的出口"这个意图。
 type ProvisionRequest struct {
-	Region     string   // 国家码，空表示不限
-	Source     string   // 节点源："all", "vpngate", "edu", "proxy", "custom"
+	Region     string // 国家码，空表示不限
+	Source     string // 节点源："all", "vpngate", "edu", "proxy", "custom"
 	Count      int
 	TemplateID int      // 3x-ui 入站模板；0 表示只开隧道不建入站
 	Hosts      []string // 指定要启动的主机名列表；非空时直接选用
@@ -622,9 +622,6 @@ func (m *Manager) AutoOrchestrate() {
 	for cc := range countryCandidates {
 		allCountries[cc] = true
 	}
-	for hc := range hotCountries {
-		allCountries[hc] = true
-	}
 
 	var sortedCountries []string
 	for cc := range allCountries {
@@ -645,8 +642,9 @@ func (m *Manager) AutoOrchestrate() {
 		return len(countryCandidates[sortedCountries[i]]) > len(countryCandidates[sortedCountries[j]])
 	})
 
-	// 5. 为每个国家补齐所需出口配额（热门各 3 个，冷门各 1 个，稳定运行绝不触动）
+	// 5. 为节点池中实际存在的国家补齐配额：热门最多 3 个，其他最多 1 个；没有节点的国家绝不强制创建
 	var newStarted []*Tunnel
+	const maxNewStartsPerRun = 8
 	for _, cc := range sortedCountries {
 		target := 1
 		if hotCountries[cc] {
@@ -659,6 +657,16 @@ func (m *Manager) AutoOrchestrate() {
 		}
 
 		cands := countryCandidates[cc]
+		if len(cands) == 0 {
+			continue
+		}
+		filtered := cands[:0]
+		for _, c := range cands {
+			if !m.nodeCooling(c) {
+				filtered = append(filtered, c)
+			}
+		}
+		cands = filtered
 		if len(cands) == 0 {
 			continue
 		}
@@ -699,7 +707,7 @@ func (m *Manager) AutoOrchestrate() {
 			return cands[i].SpeedMbps > cands[j].SpeedMbps
 		})
 
-		for i := 0; i < needed && i < len(cands); i++ {
+		for i := 0; i < needed && i < len(cands) && len(newStarted) < maxNewStartsPerRun; i++ {
 			pick := cands[i]
 			t, err := m.Start(pick)
 			if err != nil {
@@ -768,8 +776,8 @@ func (m *Manager) WatchAutoOrchestrate() {
 
 	// 1. 每 2 分钟做一次出口配额快速巡检与健康自愈维护（稳定运行的出口绝不触动）
 	orchestrateTicker := time.NewTicker(2 * time.Minute)
-	// 2. 每 30 分钟定时拉取一次全网最新节点源（自动发现新国家直接添加，离线恢复的国家自动补齐）
-	sourceTicker := time.NewTicker(30 * time.Minute)
+	// 2. 每 15 分钟定时拉取一次全网最新节点源（自动发现新国家直接添加，离线恢复的国家自动补齐）
+	sourceTicker := time.NewTicker(15 * time.Minute)
 
 	defer orchestrateTicker.Stop()
 	defer sourceTicker.Stop()
@@ -779,7 +787,7 @@ func (m *Manager) WatchAutoOrchestrate() {
 		case <-orchestrateTicker.C:
 			m.AutoOrchestrate()
 		case <-sourceTicker.C:
-			log.Printf("[自动拉源] 定时拉取全网最新节点源 (30 分钟周期)...")
+			log.Printf("[自动拉源] 定时拉取全网最新节点源 (15 分钟周期)...")
 			_, _ = m.RefreshNodesSource("all")
 			m.AutoOrchestrate()
 		}

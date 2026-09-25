@@ -61,11 +61,11 @@ func main() {
 
 	mgr := NewManager(*maxSlots, *workDir)
 	initNodes, _ := mgr.Nodes()
-	log.Printf("节点底池已就绪: %d 个节点 (含海外高校学术网、日本筑波大学及全球节点)", len(initNodes))
+	log.Printf("节点底池已就绪: %d 个节点 (动态多源节点池，含 VPN Gate/筑波大学及其他公开 OpenVPN 源)", len(initNodes))
 
-	// 后台并发拉取全网最新节点与筑波大学镜像，不阻塞服务极速启动
+	// 后台并发拉取全网最新节点与多源 OpenVPN/代理源，不阻塞服务极速启动
 	go func() {
-		log.Printf("后台开始并发拉取全网最新节点与筑波大学镜像...")
+		log.Printf("后台开始并发拉取全网最新节点与多源 OpenVPN/代理源...")
 		if n, err := mgr.RefreshNodes(); err != nil {
 			log.Printf("后台拉取提示（底池正常运作）: %v", err)
 		} else {
@@ -704,7 +704,6 @@ func apiSourcesImport(m *Manager) http.HandlerFunc {
 		})
 	}
 }
-
 
 // apiXUIStatus 报告当前的节点链接后端：接管的 3x-ui，或 fanout 自己跑的 Xray。
 func apiXUIStatus(w http.ResponseWriter, r *http.Request) {

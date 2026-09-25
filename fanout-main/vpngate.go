@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/csv"
 	"fmt"
+	"html"
 	"io"
 	"net"
 	"net/http"
@@ -49,9 +50,13 @@ var defaultMirrors = []string{
 
 // proxyListSources 全网高质量公网住宅与电信代理聚合池（涵盖美日韩港台新英德法加等数千节点）
 var proxyListSources = []struct {
+	// ===== ProxyScrape live API / GitHub mirror（公开聚合源；只作为候选，仍需本机实测） =====
 	URL   string
 	Proto string // "socks5", "http"
 }{
+	{URL: "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=protocolipport&format=text&protocol=socks5", Proto: "socks5"},
+	{URL: "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=protocolipport&format=text&protocol=http", Proto: "http"},
+
 	// ===== proxifly (全球两万多节点，且自带精准国家代码和协议) =====
 	{URL: "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/all/data.csv", Proto: "socks5"},
 	{URL: "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/socks5/data.txt", Proto: "socks5"},
@@ -90,34 +95,34 @@ var proxyListSources = []struct {
 
 var englishCountryToCode = map[string]string{
 	"united states": "US", "usa": "US",
-	"japan": "JP",
-	"hong kong": "HK",
-	"taiwan": "TW",
-	"singapore": "SG",
+	"japan":       "JP",
+	"hong kong":   "HK",
+	"taiwan":      "TW",
+	"singapore":   "SG",
 	"south korea": "KR", "korea": "KR",
 	"united kingdom": "GB", "great britain": "GB", "england": "GB", "uk": "GB",
 	"germany": "DE", "deutschland": "DE",
-	"canada": "CA",
-	"france": "FR",
-	"australia": "AU",
+	"canada":      "CA",
+	"france":      "FR",
+	"australia":   "AU",
 	"netherlands": "NL", "holland": "NL",
 	"russia": "RU", "russian federation": "RU",
-	"brazil": "BR",
-	"india": "IN",
-	"indonesia": "ID",
-	"vietnam": "VN",
-	"thailand": "TH",
-	"malaysia": "MY",
+	"brazil":      "BR",
+	"india":       "IN",
+	"indonesia":   "ID",
+	"vietnam":     "VN",
+	"thailand":    "TH",
+	"malaysia":    "MY",
 	"philippines": "PH",
-	"turkey": "TR", "turkiye": "TR",
-	"italy": "IT",
-	"spain": "ES",
-	"sweden": "SE",
+	"turkey":      "TR", "turkiye": "TR",
+	"italy":       "IT",
+	"spain":       "ES",
+	"sweden":      "SE",
 	"switzerland": "CH",
-	"norway": "NO",
-	"finland": "FI",
-	"poland": "PL",
-	"czechia": "CZ", "czech republic": "CZ",
+	"norway":      "NO",
+	"finland":     "FI",
+	"poland":      "PL",
+	"czechia":     "CZ", "czech republic": "CZ",
 	"austria": "AT",
 }
 
@@ -325,7 +330,7 @@ type Node struct {
 	Ping        int     `json:"ping"`
 	SpeedMbps   float64 `json:"speed_mbps"`
 	Sessions    int     `json:"sessions"`
-	Config      string  `json:"-"` // 解码后的 .ovpn 内容
+	Config      string  `json:"-"`                      // 解码后的 .ovpn 内容
 	IPType      string  `json:"ip_type,omitempty"`      // residential / hosting / mobile / edu
 	PurityScore int     `json:"purity_score,omitempty"` // 0-100
 	ISP         string  `json:"isp,omitempty"`
@@ -650,67 +655,7 @@ verb 2
 }
 
 // builtinSeedNodes 提供内建高可用种子节点池，确保服务初次启动或弱网离线时所有热门国家出口与节点池绝不为空
-var builtinSeedNodes = []Node{
-	// 1. 日本 (JP)
-	{HostName: "vg_tsukuba_academic_jp1", IP: "130.158.75.33", Port: 14631, Proto: "udp", Country: "日本筑波大学 (学术网络)", CountryCode: "JP", SpeedMbps: 95.0, Ping: 42, IPType: "edu", PurityScore: 98, ISP: "筑波大学本部 VPN Gate", Source: "edu"},
-	{HostName: "vg_tsukuba_mirror_jp2", IP: "150.40.105.19", Port: 35399, Proto: "udp", Country: "日本筑波大学 (学术网络)", CountryCode: "JP", SpeedMbps: 88.0, Ping: 45, IPType: "edu", PurityScore: 98, ISP: "筑波大学学术镜像", Source: "edu"},
-	{HostName: "vg_jp_gov_prefecture_gw", IP: "210.140.10.12", Port: 443, Proto: "tcp", Country: "日本政府公共网络", CountryCode: "JP", SpeedMbps: 85.0, Ping: 46, IPType: "gov", PurityScore: 99, ISP: "日本自治体政府网络", Source: "gov"},
-
-	// 2. 美国 (US)
-	{HostName: "vg_us_fed_gov_transit", IP: "161.202.144.236", Port: 56364, Proto: "udp", Country: "美国联邦政府专网", CountryCode: "US", SpeedMbps: 92.0, Ping: 130, IPType: "gov", PurityScore: 99, ISP: "美国联邦公共政务网", Source: "gov"},
-	{HostName: "vg_us_academic_transit", IP: "198.18.0.1", Port: 443, Proto: "tcp", Country: "美国高校学术网络", CountryCode: "US", SpeedMbps: 90.0, Ping: 135, IPType: "edu", PurityScore: 96, ISP: "US Higher Education Transit", Source: "edu"},
-	{HostName: "vg_us_comcast_res", IP: "73.189.12.8", Port: 1194, Proto: "udp", Country: "美国原生家庭宽带", CountryCode: "US", SpeedMbps: 85.0, Ping: 140, IPType: "residential", PurityScore: 94, ISP: "Comcast Cable Communications", Source: "residential"},
-
-	// 3. 中国香港 (HK)
-	{HostName: "vg_hk_broadband_transit", IP: "203.186.14.22", Port: 1194, Proto: "udp", Country: "中国香港原生网络", CountryCode: "HK", SpeedMbps: 88.0, Ping: 32, IPType: "residential", PurityScore: 93, ISP: "HK Broadband Network", Source: "residential"},
-	{HostName: "vg_hk_gov_public_gw", IP: "218.188.10.1", Port: 443, Proto: "tcp", Country: "中国香港政府公共网", CountryCode: "HK", SpeedMbps: 86.0, Ping: 30, IPType: "gov", PurityScore: 99, ISP: "香港政府公共专网", Source: "gov"},
-	{HostName: "vg_hk_academic_transit", IP: "144.214.1.1", Port: 1194, Proto: "udp", Country: "中国香港名校学术网", CountryCode: "HK", SpeedMbps: 87.0, Ping: 33, IPType: "edu", PurityScore: 97, ISP: "HARNET 香港学术网", Source: "edu"},
-
-	// 4. 中国台湾 (TW)
-	{HostName: "vg_tw_tanet_academic", IP: "140.112.2.1", Port: 1194, Proto: "udp", Country: "中国台湾学术网络", CountryCode: "TW", SpeedMbps: 85.0, Ping: 38, IPType: "edu", PurityScore: 96, ISP: "台湾学术网络 (TANet)", Source: "edu"},
-	{HostName: "vg_tw_gov_public_gw", IP: "210.69.13.1", Port: 443, Proto: "tcp", Country: "中国台湾政务公网", CountryCode: "TW", SpeedMbps: 82.0, Ping: 40, IPType: "gov", PurityScore: 99, ISP: "台湾公部门政务专网", Source: "gov"},
-	{HostName: "vg_tw_cht_residential", IP: "114.32.10.5", Port: 1194, Proto: "udp", Country: "中国台湾中华电信家宽", CountryCode: "TW", SpeedMbps: 88.0, Ping: 36, IPType: "residential", PurityScore: 94, ISP: "Chunghwa Telecom", Source: "residential"},
-
-	// 5. 新加坡 (SG)
-	{HostName: "vg_sg_singaren_academic", IP: "155.69.10.5", Port: 1194, Proto: "udp", Country: "新加坡学术科研网", CountryCode: "SG", SpeedMbps: 86.0, Ping: 62, IPType: "edu", PurityScore: 95, ISP: "新加坡学术科研网络 (SingAREN)", Source: "edu"},
-	{HostName: "vg_sg_gov_public_gw", IP: "160.96.10.1", Port: 443, Proto: "tcp", Country: "新加坡政府公共专网", CountryCode: "SG", SpeedMbps: 84.0, Ping: 65, IPType: "gov", PurityScore: 99, ISP: "GovTech Singapore", Source: "gov"},
-	{HostName: "vg_sg_starhub_res", IP: "118.200.5.8", Port: 1194, Proto: "udp", Country: "新加坡星和家宽", CountryCode: "SG", SpeedMbps: 89.0, Ping: 60, IPType: "residential", PurityScore: 93, ISP: "StarHub Residential", Source: "residential"},
-
-	// 6. 韩国 (KR)
-	{HostName: "vg_korea_university_gw", IP: "119.195.163.98", Port: 23340, Proto: "udp", Country: "韩国高校学术网", CountryCode: "KR", SpeedMbps: 85.0, Ping: 52, IPType: "edu", PurityScore: 96, ISP: "韩国首尔高校网关 (KOREN)", Source: "edu"},
-	{HostName: "vg_kr_gov_public_gw", IP: "211.234.12.50", Port: 443, Proto: "tcp", Country: "韩国政府公共网络", CountryCode: "KR", SpeedMbps: 82.0, Ping: 54, IPType: "gov", PurityScore: 99, ISP: "韩国政府公共网络", Source: "gov"},
-	{HostName: "vg_kr_kt_residential", IP: "222.106.12.4", Port: 1194, Proto: "udp", Country: "韩国KT原生家庭宽带", CountryCode: "KR", SpeedMbps: 90.0, Ping: 50, IPType: "residential", PurityScore: 95, ISP: "Korea Telecom Residential", Source: "residential"},
-
-	// 7. 英国 (GB)
-	{HostName: "vg_uk_gov_service_gw", IP: "217.138.212.46", Port: 34663, Proto: "udp", Country: "英国政府公共专网", CountryCode: "GB", SpeedMbps: 80.0, Ping: 155, IPType: "gov", PurityScore: 99, ISP: "英国政府公共事务网", Source: "gov"},
-	{HostName: "vg_uk_janet_academic", IP: "193.60.10.5", Port: 1194, Proto: "udp", Country: "英国高校学术科研网", CountryCode: "GB", SpeedMbps: 84.0, Ping: 150, IPType: "edu", PurityScore: 97, ISP: "JANET Academic UK", Source: "edu"},
-	{HostName: "vg_uk_bt_residential", IP: "86.150.12.9", Port: 1194, Proto: "udp", Country: "英国BT原生宽带", CountryCode: "GB", SpeedMbps: 82.0, Ping: 158, IPType: "residential", PurityScore: 92, ISP: "British Telecom", Source: "residential"},
-
-	// 8. 德国 (DE)
-	{HostName: "vg_de_frankfurt_transit", IP: "194.156.89.134", Port: 47774, Proto: "udp", Country: "德国高速法兰克福专网", CountryCode: "DE", SpeedMbps: 85.0, Ping: 160, IPType: "residential", PurityScore: 92, ISP: "德国高速网络", Source: "residential"},
-	{HostName: "vg_de_dfn_academic", IP: "194.95.10.8", Port: 1194, Proto: "udp", Country: "德国高校学术科研网", CountryCode: "DE", SpeedMbps: 86.0, Ping: 158, IPType: "edu", PurityScore: 98, ISP: "DFN German Academic Network", Source: "edu"},
-	{HostName: "vg_de_gov_public_gw", IP: "193.175.10.2", Port: 443, Proto: "tcp", Country: "德国政府公共机构专网", CountryCode: "DE", SpeedMbps: 83.0, Ping: 162, IPType: "gov", PurityScore: 99, ISP: "德国联邦政府公网", Source: "gov"},
-
-	// 9. 加拿大 (CA)
-	{HostName: "vg_ca_canarie_academic", IP: "198.16.10.5", Port: 1194, Proto: "udp", Country: "加拿大国家学术科研网", CountryCode: "CA", SpeedMbps: 85.0, Ping: 145, IPType: "edu", PurityScore: 97, ISP: "CANARIE Canada Academic", Source: "edu"},
-	{HostName: "vg_ca_gov_public_gw", IP: "205.193.10.1", Port: 443, Proto: "tcp", Country: "加拿大联邦公共政务网", CountryCode: "CA", SpeedMbps: 83.0, Ping: 148, IPType: "gov", PurityScore: 99, ISP: "Government of Canada", Source: "gov"},
-	{HostName: "vg_ca_bell_residential", IP: "142.166.12.3", Port: 1194, Proto: "udp", Country: "加拿大贝尔原生宽带", CountryCode: "CA", SpeedMbps: 86.0, Ping: 142, IPType: "residential", PurityScore: 93, ISP: "Bell Canada Residential", Source: "residential"},
-
-	// 10. 法国 (FR)
-	{HostName: "vg_fr_renater_academic", IP: "193.51.10.6", Port: 1194, Proto: "udp", Country: "法国高等学术科研网", CountryCode: "FR", SpeedMbps: 84.0, Ping: 165, IPType: "edu", PurityScore: 97, ISP: "RENATER Academic France", Source: "edu"},
-	{HostName: "vg_fr_gov_public_gw", IP: "194.214.10.2", Port: 443, Proto: "tcp", Country: "法国政府公共事务专网", CountryCode: "FR", SpeedMbps: 82.0, Ping: 168, IPType: "gov", PurityScore: 99, ISP: "French Government Transit", Source: "gov"},
-	{HostName: "vg_fr_orange_res", IP: "90.40.12.8", Port: 1194, Proto: "udp", Country: "法国Orange原生宽带", CountryCode: "FR", SpeedMbps: 85.0, Ping: 162, IPType: "residential", PurityScore: 93, ISP: "Orange France Residential", Source: "residential"},
-
-	// 11. 澳大利亚 (AU)
-	{HostName: "vg_au_aarnet_academic", IP: "139.130.10.5", Port: 1194, Proto: "udp", Country: "澳大利亚国家学术科研网", CountryCode: "AU", SpeedMbps: 82.0, Ping: 120, IPType: "edu", PurityScore: 97, ISP: "AARNet Academic Australia", Source: "edu"},
-	{HostName: "vg_au_gov_public_gw", IP: "152.147.10.1", Port: 443, Proto: "tcp", Country: "澳大利亚联邦政府专网", CountryCode: "AU", SpeedMbps: 80.0, Ping: 125, IPType: "gov", PurityScore: 99, ISP: "Australian Gov Gateway", Source: "gov"},
-	{HostName: "vg_au_telstra_res", IP: "120.144.10.7", Port: 1194, Proto: "udp", Country: "澳大利亚澳洲电信家宽", CountryCode: "AU", SpeedMbps: 83.0, Ping: 118, IPType: "residential", PurityScore: 94, ISP: "Telstra Residential", Source: "residential"},
-
-	// 12. 荷兰 (NL)
-	{HostName: "vg_nl_surfnet_academic", IP: "145.100.10.4", Port: 1194, Proto: "udp", Country: "荷兰国家学术高校网", CountryCode: "NL", SpeedMbps: 86.0, Ping: 155, IPType: "edu", PurityScore: 98, ISP: "SURFnet Netherlands", Source: "edu"},
-	{HostName: "vg_nl_gov_public_gw", IP: "195.169.10.2", Port: 443, Proto: "tcp", Country: "荷兰政府公共服务网", CountryCode: "NL", SpeedMbps: 84.0, Ping: 158, IPType: "gov", PurityScore: 99, ISP: "Government of the Netherlands", Source: "gov"},
-	{HostName: "vg_nl_kpn_residential", IP: "84.80.12.5", Port: 1194, Proto: "udp", Country: "荷兰KPN原生家庭宽带", CountryCode: "NL", SpeedMbps: 88.0, Ping: 152, IPType: "residential", PurityScore: 94, ISP: "KPN Residential", Source: "residential"},
-}
+var builtinSeedNodes = []Node{}
 
 // loadInitialNodes 快速启动读取底池（合并内建全量热门种子与本地持久化缓存，保障 12 大热门国家与发现国家秒级就绪）
 func loadInitialNodes(workDir string) []Node {
@@ -744,6 +689,106 @@ func loadInitialNodes(workDir string) []Node {
 	out := make([]Node, 0, len(nodeMap))
 	for _, n := range nodeMap {
 		out = append(out, n)
+	}
+	return out
+}
+
+// fetchIPSpeedNodes 拉取 IPSpeed 当前公开的 OpenVPN 列表并下载真实 .ovpn 配置。
+// 任何单个配置失败都会被跳过，不影响其他来源。
+func fetchIPSpeedNodes(timeout time.Duration) []Node {
+	client := &http.Client{Timeout: timeout}
+	req, err := http.NewRequest("GET", "https://ipspeed.info/free-openvpn.php", nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("User-Agent", "fanout-node-fetcher/1.0")
+	resp, err := client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		return nil
+	}
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return nil
+	}
+	rowRe := regexp.MustCompile(`(?is)<tr[^>]*>(.*?)</tr>`)
+	linkRe := regexp.MustCompile(`(?i)href=["']([^"']+\.ovpn(?:\?[^"']*)?)["']`)
+	var out []Node
+	seen := map[string]bool{}
+	for _, row := range rowRe.FindAllSubmatch(body, -1) {
+		text := string(row[1])
+		m := linkRe.FindStringSubmatch(text)
+		if len(m) < 2 {
+			continue
+		}
+		u := html.UnescapeString(strings.TrimSpace(m[1]))
+		if strings.HasPrefix(u, "//") {
+			u = "https:" + u
+		} else if strings.HasPrefix(u, "/") {
+			u = "https://ipspeed.info" + u
+		}
+		if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
+			continue
+		}
+		cfgReq, err := http.NewRequest("GET", u, nil)
+		if err != nil {
+			continue
+		}
+		cfgReq.Header.Set("User-Agent", "fanout-node-fetcher/1.0")
+		cfgResp, err := client.Do(cfgReq)
+		if err != nil || cfgResp.StatusCode != http.StatusOK {
+			if cfgResp != nil {
+				cfgResp.Body.Close()
+			}
+			continue
+		}
+		cfgBytes, err := io.ReadAll(cfgResp.Body)
+		cfgResp.Body.Close()
+		if err != nil || len(cfgBytes) < 100 {
+			continue
+		}
+		cfg := string(cfgBytes)
+		remoteRe := regexp.MustCompile(`(?mi)^\s*remote\s+([^\s]+)\s+(\d+)`)
+		rm := remoteRe.FindStringSubmatch(cfg)
+		if len(rm) < 3 {
+			continue
+		}
+		ip := rm[1]
+		port, _ := strconv.Atoi(rm[2])
+		if net.ParseIP(ip) == nil || port <= 0 || port > 65535 {
+			continue
+		}
+		key := ip + ":" + strconv.Itoa(port)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		cc, country := guessCountryByIP(ip)
+		low := strings.ToLower(text)
+		for name, code := range englishCountryToCode {
+			if strings.Contains(low, name) {
+				cc = code
+				if zh, ok := countryNameZH[code]; ok {
+					country = zh
+				} else {
+					country = code
+				}
+				break
+			}
+		}
+		ping := 0
+		pingRe := regexp.MustCompile(`(?i)(?:ping|\bms\b)\s*[:=]?\s*(\d+)`)
+		if pm := pingRe.FindStringSubmatch(text); len(pm) > 1 {
+			ping, _ = strconv.Atoi(pm[1])
+		}
+		out = append(out, Node{
+			HostName: "ipspeed-" + ip + "-" + strconv.Itoa(port), IP: ip, Port: port,
+			Proto: "ovpn", Country: country, CountryCode: cc, Ping: ping, Config: cfg,
+			IPType: "unknown", PurityScore: 70, ISP: "IPSpeed", Source: "ipspeed",
+		})
 	}
 	return out
 }
@@ -898,6 +943,32 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 				mu.Unlock()
 			}(pSrc.URL, pSrc.Proto)
 		}
+	}
+
+	// 3c. IPSpeed：独立的公开 OpenVPN 配置源。失败只影响这一源，不阻塞其他来源。
+	if sourceFilter == "" || sourceFilter == "all" || sourceFilter == "vpngate" || sourceFilter == "openvpn" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			perTimeout := 10 * time.Second
+			if timeout < perTimeout {
+				perTimeout = timeout
+			}
+			for _, n := range fetchIPSpeedNodes(perTimeout) {
+				if n.Config == "" {
+					continue
+				}
+				mu.Lock()
+				if len(nodeMap) < 25000 {
+					key := n.IP + ":" + strconv.Itoa(n.Port)
+					if _, exists := nodeMap[key]; !exists {
+						nodeMap[key] = n
+						successCount++
+					}
+				}
+				mu.Unlock()
+			}
+		}()
 	}
 	wg.Wait()
 
@@ -1185,8 +1256,7 @@ func parseNodeCSV(body string) ([]Node, error) {
 			strings.Contains(strings.ToLower(get("Operator")), "university") ||
 			strings.Contains(strings.ToLower(get("Message")), "university"))
 
-		isGov := !isChina && (
-			strings.Contains(hostLower, ".go.jp") ||
+		isGov := !isChina && (strings.Contains(hostLower, ".go.jp") ||
 			strings.Contains(hostLower, ".gov") ||
 			strings.Contains(hostLower, ".mil") ||
 			strings.Contains(hostLower, ".gov.uk") ||
@@ -1527,5 +1597,3 @@ verb 2
 	}
 	return nodes, nil
 }
-
-
