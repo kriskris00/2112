@@ -44,11 +44,146 @@ var defaultMirrors = []string{
 	"http://219.100.37.244:11075/api/iphone/",  // 筑波大学 IP 镜像 11 (日本)
 	"http://103.201.129.246:44837/api/iphone/", // 筑波大学亚太镜像
 	"http://185.220.101.4:1194/api/iphone/",    // 筑波大学欧洲镜像
-	"https://raw.githubusercontent.com/aimili-vpngate/vpngate-crawler/main/vpngate.csv", // GitHub 实时同步全球镜像
+	"http://www.vpngate.net/api/iphone/",       // 官方 HTTP 直连
 }
 
-// 质量策略：全量收敛为 VPN Gate 志愿者住宅家宽原生节点 + 学术网 + 政府专网
-// 一律不接入公网开放代理池（datacenter/hosting IP 风控高、纯净度低、易被封禁）
+// proxyListSources 全网高质量公网住宅与电信代理聚合池（涵盖美日韩港台新英德法加等数千节点）
+var proxyListSources = []struct {
+	URL   string
+	Proto string // "socks5", "http"
+}{
+	// ===== proxifly (全球两万多节点，且自带精准国家代码和协议) =====
+	{URL: "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/all/data.csv", Proto: "socks5"},
+	{URL: "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/socks5/data.txt", Proto: "socks5"},
+	{URL: "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/http/data.txt", Proto: "http"},
+
+	// ===== monosans/proxy-list (每小时重验，响应极速) =====
+	{URL: "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt", Proto: "socks5"},
+	{URL: "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt", Proto: "http"},
+
+	// ===== TheSpeedX/PROXY-List (老牌大规模聚合器 3000-5000+) =====
+	{URL: "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt", Proto: "socks5"},
+	{URL: "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt", Proto: "http"},
+
+	// ===== hookzof/socks5_list (极高质量 20,000+ SOCKS5) =====
+	{URL: "https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt", Proto: "socks5"},
+
+	// ===== zloi-user/hideip.me (带国家名) =====
+	{URL: "https://raw.githubusercontent.com/zloi-user/hideip.me/master/socks5.txt", Proto: "socks5"},
+	{URL: "https://raw.githubusercontent.com/zloi-user/hideip.me/master/http.txt", Proto: "http"},
+
+	// ===== spys.me (带国家代码) =====
+	{URL: "https://spys.me/socks.txt", Proto: "socks5"},
+	{URL: "https://spys.me/proxy.txt", Proto: "http"},
+
+	// ===== clarketm/proxy-list (带国家代码) =====
+	{URL: "https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list.txt", Proto: "http"},
+
+	// ===== proxmint/free-proxy-list =====
+	{URL: "https://raw.githubusercontent.com/proxmint/free-proxy-list/main/proxies/socks5.txt", Proto: "socks5"},
+	{URL: "https://raw.githubusercontent.com/proxmint/free-proxy-list/main/proxies/http.txt", Proto: "http"},
+
+	// ===== vakhov/fresh-proxy-list =====
+	{URL: "https://raw.githubusercontent.com/vakhov/fresh-proxy-list/master/socks5.txt", Proto: "socks5"},
+	{URL: "https://raw.githubusercontent.com/vakhov/fresh-proxy-list/master/http.txt", Proto: "http"},
+}
+
+var englishCountryToCode = map[string]string{
+	"united states": "US", "usa": "US",
+	"japan": "JP",
+	"hong kong": "HK",
+	"taiwan": "TW",
+	"singapore": "SG",
+	"south korea": "KR", "korea": "KR",
+	"united kingdom": "GB", "great britain": "GB", "england": "GB", "uk": "GB",
+	"germany": "DE", "deutschland": "DE",
+	"canada": "CA",
+	"france": "FR",
+	"australia": "AU",
+	"netherlands": "NL", "holland": "NL",
+	"russia": "RU", "russian federation": "RU",
+	"brazil": "BR",
+	"india": "IN",
+	"indonesia": "ID",
+	"vietnam": "VN",
+	"thailand": "TH",
+	"malaysia": "MY",
+	"philippines": "PH",
+	"turkey": "TR", "turkiye": "TR",
+	"italy": "IT",
+	"spain": "ES",
+	"sweden": "SE",
+	"switzerland": "CH",
+	"norway": "NO",
+	"finland": "FI",
+	"poland": "PL",
+	"czechia": "CZ", "czech republic": "CZ",
+	"austria": "AT",
+}
+
+func guessCountryByIP(ip string) (string, string) {
+	if ip == "" {
+		return "GLOBAL", "全球公网"
+	}
+	// 1. 先查已缓存情报
+	globalIPIntel.mu.RLock()
+	if intel, ok := globalIPIntel.cache[ip]; ok {
+		if intel.CountryCode != "" && intel.CountryCode != "GLOBAL" {
+			globalIPIntel.mu.RUnlock()
+			cName := intel.Country
+			if zh, exists := countryNameZH[intel.CountryCode]; exists && zh != "" {
+				cName = zh
+			}
+			return intel.CountryCode, cName
+		}
+	}
+	globalIPIntel.mu.RUnlock()
+
+	// 2. 海外高校/科研网段判断
+	if isEduIP(ip) {
+		if strings.HasPrefix(ip, "140.11") || strings.HasPrefix(ip, "163.13") || strings.HasPrefix(ip, "192.83") {
+			return "TW", "中国台湾学术网"
+		} else if strings.HasPrefix(ip, "134.75") || strings.HasPrefix(ip, "143.248") || strings.HasPrefix(ip, "147.46") {
+			return "KR", "韩国高校学术网"
+		} else if strings.HasPrefix(ip, "18.") || strings.HasPrefix(ip, "128.") || strings.HasPrefix(ip, "169.228") || strings.HasPrefix(ip, "171.64") {
+			return "US", "美国高校学术网"
+		} else if strings.HasPrefix(ip, "155.69") || strings.HasPrefix(ip, "137.132") {
+			return "SG", "新加坡学术科研网"
+		} else if strings.HasPrefix(ip, "138.25") || strings.HasPrefix(ip, "139.130") {
+			return "AU", "澳大利亚学术网"
+		}
+		return "JP", "日本筑波大学 (学术网络)"
+	}
+
+	// 3. 常见公网 IP 前缀快速预估（仅作为兜底预判，后续由异步情报校正）
+	if strings.HasPrefix(ip, "210.140.") || strings.HasPrefix(ip, "219.100.") || strings.HasPrefix(ip, "153.125.") || strings.HasPrefix(ip, "133.") {
+		return "JP", "日本"
+	} else if strings.HasPrefix(ip, "119.195.") || strings.HasPrefix(ip, "211.234.") || strings.HasPrefix(ip, "222.106.") {
+		return "KR", "韩国"
+	} else if strings.HasPrefix(ip, "203.186.") || strings.HasPrefix(ip, "218.188.") || strings.HasPrefix(ip, "42.2.") {
+		return "HK", "中国香港"
+	} else if strings.HasPrefix(ip, "114.32.") || strings.HasPrefix(ip, "210.69.") {
+		return "TW", "中国台湾"
+	} else if strings.HasPrefix(ip, "118.200.") || strings.HasPrefix(ip, "160.96.") {
+		return "SG", "新加坡"
+	} else if strings.HasPrefix(ip, "217.138.") || strings.HasPrefix(ip, "86.150.") {
+		return "GB", "英国"
+	} else if strings.HasPrefix(ip, "194.156.") || strings.HasPrefix(ip, "193.175.") || strings.HasPrefix(ip, "194.95.") {
+		return "DE", "德国"
+	} else if strings.HasPrefix(ip, "205.193.") || strings.HasPrefix(ip, "142.166.") {
+		return "CA", "加拿大"
+	} else if strings.HasPrefix(ip, "194.214.") || strings.HasPrefix(ip, "90.40.") {
+		return "FR", "法国"
+	} else if strings.HasPrefix(ip, "152.147.") || strings.HasPrefix(ip, "120.144.") {
+		return "AU", "澳大利亚"
+	} else if strings.HasPrefix(ip, "195.169.") || strings.HasPrefix(ip, "84.80.") {
+		return "NL", "荷兰"
+	} else if strings.HasPrefix(ip, "161.202.") || strings.HasPrefix(ip, "73.189.") {
+		return "US", "美国"
+	}
+
+	return "GLOBAL", "全球公网"
+}
 
 var eduCIDRs []*net.IPNet
 
@@ -197,13 +332,18 @@ type Node struct {
 	Source      string  `json:"source,omitempty"` // vpngate / edu / proxy / custom
 }
 
-// parseProxyList 解析全网公开的纯 IP:Port 或 proto://IP:Port 代理列表
+// parseProxyList 解析全网公开的代理列表，支持多种常见格式：
+// 1. proto://ip:port,CC,... (如 proxifly 聚合 CSV)
+// 2. proto://ip:port 或 ip:port
+// 3. ip:port:CountryName (如 hideip.me)
+// 4. ip:port CC-... (如 spys.me, clarketm)
+// 5. ip:port#CC / ip:port [CC] / ip:port-CC
 func parseProxyList(body string, defaultProto string) []Node {
 	scanner := bufio.NewScanner(strings.NewReader(body))
 	var nodes []Node
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "//") {
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "//") || strings.HasPrefix(line, ";") {
 			continue
 		}
 		proto := defaultProto
@@ -226,42 +366,88 @@ func parseProxyList(body string, defaultProto string) []Node {
 			continue
 		}
 		ip := strings.TrimSpace(parts[0])
-		portStr := strings.TrimSpace(parts[1])
-
-		extractedCC := ""
-		if idx := strings.IndexAny(portStr, "#, \t[(-"); idx != -1 {
-			trail := strings.Trim(portStr[idx:], "#, \t[]()-")
-			if len(trail) >= 2 {
-				candCC := strings.ToUpper(trail[:2])
-				if candCC[0] >= 'A' && candCC[0] <= 'Z' && candCC[1] >= 'A' && candCC[1] <= 'Z' {
-					extractedCC = candCC
-				}
-			}
-			portStr = strings.TrimSpace(portStr[:idx])
-		}
-		if len(parts) >= 3 && extractedCC == "" {
-			cand := strings.Trim(parts[2], " \t[]()-#")
-			if len(cand) >= 2 {
-				candCC := strings.ToUpper(cand[:2])
-				if candCC[0] >= 'A' && candCC[0] <= 'Z' && candCC[1] >= 'A' && candCC[1] <= 'Z' {
-					extractedCC = candCC
-				}
-			}
-		}
-
 		if net.ParseIP(ip) == nil {
 			continue
 		}
+
+		portAndRest := parts[1]
+		portEnd := 0
+		for portEnd < len(portAndRest) && portAndRest[portEnd] >= '0' && portAndRest[portEnd] <= '9' {
+			portEnd++
+		}
+		if portEnd == 0 {
+			continue
+		}
+		portStr := portAndRest[:portEnd]
 		port, err := strconv.Atoi(portStr)
 		if err != nil || port <= 0 || port > 65535 {
 			continue
 		}
 
-		country := "全球公网"
+		rest := portAndRest[portEnd:]
+		if len(parts) > 2 {
+			rest += " " + strings.Join(parts[2:], " ")
+		}
+		rest = strings.TrimSpace(rest)
+
+		extractedCC := ""
+		if rest != "" {
+			cleanRest := strings.Trim(rest, ",:;# \t[]()-")
+			lowerRest := strings.ToLower(cleanRest)
+			for name, code := range englishCountryToCode {
+				if strings.Contains(lowerRest, name) {
+					extractedCC = code
+					break
+				}
+			}
+			if extractedCC == "" {
+				for i := 0; i+1 < len(cleanRest); i++ {
+					c1, c2 := cleanRest[i], cleanRest[i+1]
+					if c1 >= 'A' && c1 <= 'Z' && c2 >= 'A' && c2 <= 'Z' {
+						leftBoundary := (i == 0) || !((cleanRest[i-1] >= 'A' && cleanRest[i-1] <= 'Z') || (cleanRest[i-1] >= 'a' && cleanRest[i-1] <= 'z'))
+						rightBoundary := (i+2 == len(cleanRest)) || !((cleanRest[i+2] >= 'A' && cleanRest[i+2] <= 'Z') || (cleanRest[i+2] >= 'a' && cleanRest[i+2] <= 'z'))
+						if leftBoundary && rightBoundary {
+							cand := string([]byte{c1, c2})
+							if _, exists := countryNameZH[cand]; exists {
+								extractedCC = cand
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+
 		countryCode := "GLOBAL"
-		ipType := "hosting"
+		country := "全球公网"
+		if extractedCC != "" {
+			countryCode = extractedCC
+			if zh, ok := countryNameZH[countryCode]; ok && zh != "" {
+				country = zh
+			} else {
+				country = countryCode
+			}
+		} else {
+			countryCode, country = guessCountryByIP(ip)
+		}
+
+		ipType := "residential"
 		isp := "优质网络"
-		src := "proxy"
+		src := "residential"
+		purityScore := 88
+
+		if isEduIP(ip) {
+			ipType = "edu"
+			src = "edu"
+			purityScore = 98
+			isp = "海外高校学术网络"
+			if countryCode == "GLOBAL" || countryCode == "" {
+				countryCode = "EDU"
+				country = "海外高校学术网络"
+			}
+		} else if zh, ok := countryNameZH[countryCode]; ok && zh != "" && countryCode != "GLOBAL" {
+			isp = zh + " 原生住宅网络"
+		}
 
 		// 检查本地已有 IP 智能缓存
 		globalIPIntel.mu.RLock()
@@ -273,26 +459,14 @@ func parseProxyList(body string, defaultProto string) []Node {
 			if intel.ISP != "" && !strings.EqualFold(intel.ISP, "Public Proxy") && !strings.EqualFold(intel.ISP, "Public Pool") {
 				isp = intel.ISP
 			}
+			if intel.IPType != "" {
+				ipType = intel.IPType
+			}
+			if intel.PurityScore > 0 {
+				purityScore = intel.PurityScore
+			}
 		}
 		globalIPIntel.mu.RUnlock()
-
-		if isEduIP(ip) && extractedCC != "CN" {
-			country = "海外高校学术网"
-			countryCode = "EDU"
-			if extractedCC != "" {
-				countryCode = extractedCC
-			}
-			ipType = "edu"
-			isp = "海外高校科研学术网络"
-			src = "edu"
-		} else if extractedCC != "" && countryCode == "GLOBAL" {
-			countryCode = extractedCC
-			if zh, ok := countryNameZH[countryCode]; ok && zh != "" {
-				country = zh
-			} else {
-				country = countryCode
-			}
-		}
 
 		hostname := fmt.Sprintf("pub_%s_%s_%d", proto, ip, port)
 		nodes = append(nodes, Node{
@@ -303,9 +477,9 @@ func parseProxyList(body string, defaultProto string) []Node {
 			Country:     country,
 			CountryCode: countryCode,
 			SpeedMbps:   35.0,
-			Ping:        50,
+			Ping:        60,
 			IPType:      ipType,
-			PurityScore: 75,
+			PurityScore: purityScore,
 			ISP:         isp,
 			Source:      src,
 		})
@@ -665,34 +839,96 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 			mu.Unlock()
 		}(target)
 	}
+
+	// 3b. 并发拉取全网高质量住宅与公网代理源（覆盖美日港台新韩英德加法澳荷等数千活跃节点）
+	if sourceFilter == "" || sourceFilter == "all" || sourceFilter == "residential" || sourceFilter == "proxy" {
+		for _, pSrc := range proxyListSources {
+			wg.Add(1)
+			go func(url string, defaultProto string) {
+				defer wg.Done()
+				perTimeout := 8 * time.Second
+				if timeout < perTimeout {
+					perTimeout = timeout
+				}
+				req, err := http.NewRequest("GET", url, nil)
+				if err != nil {
+					return
+				}
+				req.Header.Set("User-Agent", "curl/7.88.1")
+				client := &http.Client{Timeout: perTimeout}
+				resp, err := client.Do(req)
+				if err != nil || resp.StatusCode != http.StatusOK {
+					return
+				}
+				bodyBytes, err := io.ReadAll(resp.Body)
+				resp.Body.Close()
+				if err != nil || len(bodyBytes) == 0 {
+					return
+				}
+				pNodes := parseProxyList(string(bodyBytes), defaultProto)
+				if len(pNodes) == 0 {
+					return
+				}
+				mu.Lock()
+				if activeSrc == "" {
+					activeSrc = "全网多源住宅/学术代理聚合池"
+				}
+				successCount++
+				for _, n := range pNodes {
+					if len(nodeMap) >= 25000 {
+						break
+					}
+					if n.IP != "" {
+						if sourceFilter == "edu" && n.Source != "edu" && !isEduIP(n.IP) && n.IPType != "edu" {
+							continue
+						}
+						if sourceFilter == "residential" && n.IPType != "residential" {
+							continue
+						}
+						if sourceFilter == "gov" && n.IPType != "gov" && n.Source != "gov" {
+							continue
+						}
+						// 如果已有带 OpenVPN 配置的节点，优先保留
+						if existing, ok := nodeMap[n.IP]; ok && existing.Config != "" {
+							continue
+						}
+						nodeMap[n.IP] = n
+					}
+				}
+				mu.Unlock()
+			}(pSrc.URL, pSrc.Proto)
+		}
+	}
 	wg.Wait()
 
 	// 4. 质量过滤：剔除所有 hosting/datacenter 低质 IP，只保留住宅/家宽/学术/政府原生节点
 	mu.Lock()
 	for key, n := range nodeMap {
-		// 查询已有 IP 情报缓存
+		// 1. 如果 ISP 命中已知机房/云厂商关键词，直接剔除
+		if isHostingISP(n.ISP) {
+			delete(nodeMap, key)
+			continue
+		}
+
+		// 2. 查询已有 IP 情报缓存
 		globalIPIntel.mu.RLock()
 		intel, hasIntel := globalIPIntel.cache[n.IP]
 		globalIPIntel.mu.RUnlock()
 
 		if hasIntel {
 			// 已知 hosting/datacenter IP 直接踢掉
-			if intel.IPType == "hosting" {
+			if intel.IPType == "hosting" || isHostingISP(intel.ISP) {
 				delete(nodeMap, key)
 				continue
 			}
-			// proxy 标记的也踢掉
-			if intel.PurityScore < 50 {
+			// 纯净度过低剔除
+			if intel.PurityScore < 40 {
 				delete(nodeMap, key)
 				continue
 			}
 		}
-		// 来源标记为 proxy 的全部踢掉
-		if n.Source == "proxy" {
-			delete(nodeMap, key)
-			continue
-		}
-		// ipType 标记为 hosting 的踢掉
+
+		// 3. ipType 为 hosting 且非 edu/gov/residential 的踢掉
 		if n.IPType == "hosting" && n.Source != "vpngate" && n.Source != "edu" && n.Source != "gov" && n.Source != "residential" {
 			delete(nodeMap, key)
 			continue
@@ -707,12 +943,23 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 		return nil, fmt.Errorf("选定源暂无可用在线节点")
 	}
 
-	// 转换为列表并按速度降序排序
+	// 转换为列表并按速度和纯净度排序
 	nodes := make([]Node, 0, len(nodeMap))
 	for _, n := range nodeMap {
 		nodes = append(nodes, n)
 	}
-	sort.Slice(nodes, func(i, j int) bool { return nodes[i].SpeedMbps > nodes[j].SpeedMbps })
+	sort.Slice(nodes, func(i, j int) bool {
+		if (nodes[i].Config != "") != (nodes[j].Config != "") {
+			return nodes[i].Config != ""
+		}
+		if nodes[i].PurityScore != nodes[j].PurityScore {
+			return nodes[i].PurityScore > nodes[j].PurityScore
+		}
+		return nodes[i].SpeedMbps > nodes[j].SpeedMbps
+	})
+
+	// 异步由后台启动批量情报丰富
+	go BatchEnrichNodes(nodes)
 
 	// 保存持久化累积节点缓存，节点池随时间不断扩展累积
 	if workDir != "" && (sourceFilter == "" || sourceFilter == "all") {

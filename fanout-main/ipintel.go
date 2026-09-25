@@ -499,82 +499,94 @@ func BatchEnrichNodes(nodes []Node) {
 		return
 	}
 
-	// 限制最多批量拉取 100 个，避免启动时阻塞
-	if len(uncached) > 100 {
-		uncached = uncached[:100]
+	maxTotal := len(uncached)
+	if maxTotal > 500 {
+		maxTotal = 500
 	}
 
-	type batchReq struct {
-		Query  string `json:"query"`
-		Fields string `json:"fields"`
-	}
-	reqList := make([]batchReq, len(uncached))
-	for i, ip := range uncached {
-		reqList[i] = batchReq{Query: ip, Fields: "status,country,countryCode,isp,org,mobile,proxy,hosting,query"}
-	}
+	for start := 0; start < maxTotal; start += 100 {
+		end := start + 100
+		if end > maxTotal {
+			end = maxTotal
+		}
+		chunk := uncached[start:end]
 
-	reqBody, err := json.Marshal(reqList)
-	if err != nil {
-		return
-	}
+		type batchReq struct {
+			Query  string `json:"query"`
+			Fields string `json:"fields"`
+		}
+		reqList := make([]batchReq, len(chunk))
+		for i, ip := range chunk {
+			reqList[i] = batchReq{Query: ip, Fields: "status,country,countryCode,isp,org,mobile,proxy,hosting,query"}
+		}
 
-	client := &http.Client{Timeout: 6 * time.Second}
-	resp, err := client.Post("http://ip-api.com/batch", "application/json", bytes.NewReader(reqBody))
-	if err != nil || resp.StatusCode != http.StatusOK {
-		return
-	}
-	defer resp.Body.Close()
-
-	var resList []struct {
-		Status      string `json:"status"`
-		Query       string `json:"query"`
-		Country     string `json:"country"`
-		CountryCode string `json:"countryCode"`
-		ISP         string `json:"isp"`
-		Org         string `json:"org"`
-		Mobile      bool   `json:"mobile"`
-		Proxy       bool   `json:"proxy"`
-		Hosting     bool   `json:"hosting"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&resList); err != nil {
-		return
-	}
-
-	globalIPIntel.mu.Lock()
-	for _, item := range resList {
-		if item.Status != "success" {
+		reqBody, err := json.Marshal(reqList)
+		if err != nil {
 			continue
 		}
-		ipType, purity := computePurity(item.Hosting, item.Mobile, item.Proxy)
-		isp := item.ISP
-		if isp == "" {
-			isp = item.Org
+
+		client := &http.Client{Timeout: 6 * time.Second}
+		resp, err := client.Post("http://ip-api.com/batch", "application/json", bytes.NewReader(reqBody))
+		if err != nil || resp.StatusCode != http.StatusOK {
+			continue
 		}
-		country := item.Country
-		countryCode := item.CountryCode
-		if isGovISP(isp) && item.CountryCode != "CN" && !strings.Contains(strings.ToLower(item.Country), "china") {
-			ipType = "gov"
-			purity = 99
-		} else if (isEduISP(isp) || isEduIP(item.Query)) && item.CountryCode != "CN" && !strings.Contains(strings.ToLower(item.Country), "china") {
-			ipType = "edu"
-			purity = 98
-			if countryCode == "" || countryCode == "EDU" {
-				countryCode = "EDU"
-				country = "海外高校学术网络"
+
+		var resList []struct {
+			Status      string `json:"status"`
+			Query       string `json:"query"`
+			Country     string `json:"country"`
+			CountryCode string `json:"countryCode"`
+			ISP         string `json:"isp"`
+			Org         string `json:"org"`
+			Mobile      bool   `json:"mobile"`
+			Proxy       bool   `json:"proxy"`
+			Hosting     bool   `json:"hosting"`
+		}
+
+		decodeErr := json.NewDecoder(resp.Body).Decode(&resList)
+		resp.Body.Close()
+		if decodeErr != nil {
+			continue
+		}
+
+		globalIPIntel.mu.Lock()
+		for _, item := range resList {
+			if item.Status != "success" {
+				continue
+			}
+			ipType, purity := computePurity(item.Hosting, item.Mobile, item.Proxy)
+			isp := item.ISP
+			if isp == "" {
+				isp = item.Org
+			}
+			country := item.Country
+			countryCode := item.CountryCode
+			if isGovISP(isp) && item.CountryCode != "CN" && !strings.Contains(strings.ToLower(item.Country), "china") {
+				ipType = "gov"
+				purity = 99
+			} else if (isEduISP(isp) || isEduIP(item.Query)) && item.CountryCode != "CN" && !strings.Contains(strings.ToLower(item.Country), "china") {
+				ipType = "edu"
+				purity = 98
+				if countryCode == "" || countryCode == "EDU" {
+					countryCode = "EDU"
+					country = "海外高校学术网络"
+				}
+			}
+			globalIPIntel.cache[item.Query] = IPIntel{
+				IP:          item.Query,
+				IPType:      ipType,
+				PurityScore: purity,
+				ISP:         isp,
+				Country:     country,
+				CountryCode: countryCode,
+				UpdatedAt:   time.Now().Unix(),
 			}
 		}
-		globalIPIntel.cache[item.Query] = IPIntel{
-			IP:          item.Query,
-			IPType:      ipType,
-			PurityScore: purity,
-			ISP:         isp,
-			Country:     country,
-			CountryCode: countryCode,
-			UpdatedAt:   time.Now().Unix(),
+		globalIPIntel.mu.Unlock()
+
+		markIPIntelDirty()
+		if end < maxTotal {
+			time.Sleep(300 * time.Millisecond)
 		}
 	}
-	globalIPIntel.mu.Unlock()
-
-	markIPIntelDirty()
 }

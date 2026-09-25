@@ -491,8 +491,8 @@ func (m *Manager) candidatesFor(first Node) []Node {
 		if usedHosts[n.HostName] || (n.IP != "" && usedIPs[n.IP]) {
 			continue
 		}
-		// 必须具有合法的 OpenVPN 配置（杜绝无法出网的低质全网代理）
-		if n.Config == "" {
+		// 必须具有合法的 OpenVPN 配置或原生代理协议（杜绝无法出网的坏节点）
+		if n.Config == "" && n.Proto != "socks5" && n.Proto != "http" {
 			continue
 		}
 		// 必须严格属于同一个国家
@@ -543,8 +543,8 @@ func (m *Manager) candidatesFor(first Node) []Node {
 	})
 
 	var out []Node
-	// 如果 first 本身配置非空，保留在首位
-	if first.Config != "" {
+	// 如果 first 本身配置非空或具有合法代理协议，保留在首位
+	if first.Config != "" || (first.IP != "" && first.Port > 0) {
 		out = append(out, first)
 	}
 	for _, n := range pool {

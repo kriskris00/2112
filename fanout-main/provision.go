@@ -202,8 +202,8 @@ func (m *Manager) pickNodesSource(region string, source string, count int) ([]No
 		if usedHosts[n.HostName] || (n.IP != "" && usedIPs[n.IP]) {
 			continue
 		}
-		// 必须具有原生 OpenVPN 隧道配置（杜绝低质全网代理）
-		if n.Config == "" {
+		// 必须具有原生 OpenVPN 隧道配置或 SOCKS5/HTTP 代理能力
+		if n.Config == "" && n.Proto != "socks5" && n.Proto != "http" {
 			continue
 		}
 		if source != "" && source != "all" {
@@ -349,8 +349,8 @@ func (m *Manager) Regions(source ...string) []RegionStat {
 		if used[n.HostName] {
 			continue
 		}
-		// 仅统计具有原生 OpenVPN 隧道配置的高质量可用节点
-		if n.Config == "" {
+		// 仅统计具有原生 OpenVPN 隧道配置或代理协议的高质量可用节点
+		if n.Config == "" && n.Proto != "socks5" && n.Proto != "http" {
 			continue
 		}
 		if src != "" && src != "all" {
@@ -604,7 +604,7 @@ func (m *Manager) AutoOrchestrate() {
 
 	countryCandidates := make(map[string][]Node)
 	for _, n := range allNodes {
-		if strings.TrimSpace(n.Config) == "" {
+		if strings.TrimSpace(n.Config) == "" && n.Proto != "socks5" && n.Proto != "http" {
 			continue
 		}
 		cc := strings.ToUpper(strings.TrimSpace(n.CountryCode))

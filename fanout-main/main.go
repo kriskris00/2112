@@ -209,8 +209,8 @@ func apiNodes(m *Manager) http.HandlerFunc {
 
 		var filtered []Node
 		for _, n := range allNodes {
-			// 仅展示具备有效 OpenVPN 配置的高质量真实节点，过滤失效及不可用代理
-			if strings.TrimSpace(n.Config) == "" {
+			// 仅展示具备有效 OpenVPN 配置或原生代理协议的高质量真实节点，过滤失效及不可用代理
+			if strings.TrimSpace(n.Config) == "" && n.Proto != "socks5" && n.Proto != "http" {
 				continue
 			}
 			if region != "" && region != "ALL" {
