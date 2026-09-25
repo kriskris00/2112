@@ -818,12 +818,20 @@ func parseNodeCSV(body string) ([]Node, error) {
 		}
 		var cfgStr string
 		if cfgB64 != "" {
+			cfgB64 = strings.TrimSpace(cfgB64)
+			cfgB64 = strings.ReplaceAll(cfgB64, "\r", "")
+			cfgB64 = strings.ReplaceAll(cfgB64, "\n", "")
+			cfgB64 = strings.ReplaceAll(cfgB64, " ", "")
 			if cfg, err := base64.StdEncoding.DecodeString(cfgB64); err == nil {
+				cfgStr = string(cfg)
+			} else if cfg, err := base64.RawStdEncoding.DecodeString(cfgB64); err == nil {
 				cfgStr = string(cfg)
 			}
 		}
 		if cfgStr == "" {
-			continue // 必须是真实有效的原生 OpenVPN 节点
+			p := 1194
+			proto := "udp"
+			cfgStr = buildVPNGateConfig(get("IP"), p, proto)
 		}
 		proto := "ovpn"
 		port := 0

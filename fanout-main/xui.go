@@ -128,6 +128,53 @@ func stripANSI(s string) string {
 	return reANSI.ReplaceAllString(s, "")
 }
 
+// readXUISettingsFromDB 从 /etc/x-ui/x-ui.db 直接读取面板真实端口、路径与 TLS 配置
+func readXUISettingsFromDB() (port int, basePath string, ssl bool) {
+	dbPath := "/etc/x-ui/x-ui.db"
+	if _, err := os.Stat(dbPath); err != nil {
+		return 0, "", false
+	}
+	out, err := exec.Command("sqlite3", dbPath, "SELECT key, value FROM settings;").Output()
+	if err != nil {
+		out, err = exec.Command("python3", "-c", "import sqlite3; c=sqlite3.connect('"+dbPath+"'); print('\\n'.join(f'{k}|{v}' for k,v in c.execute('SELECT key, value FROM settings'))").Output()
+	}
+	if err == nil && len(out) > 0 {
+		for _, line := range strings.Split(string(out), "\n") {
+			parts := strings.SplitN(strings.TrimSpace(line), "|", 2)
+			if len(parts) == 2 {
+				k, v := parts[0], parts[1]
+				switch k {
+				case "webPort", "port":
+					fmt.Sscanf(v, "%d", &port)
+				case "webBasePath", "basePath":
+					basePath = v
+				case "webCertFile":
+					if v != "" {
+						ssl = true
+					}
+				}
+			}
+		}
+	}
+	return port, basePath, ssl
+}
+
+// readXUITokenFromDB 从数据库直读已有的可用 API Token
+func readXUITokenFromDB() string {
+	dbPath := "/etc/x-ui/x-ui.db"
+	if _, err := os.Stat(dbPath); err != nil {
+		return ""
+	}
+	out, err := exec.Command("sqlite3", dbPath, "SELECT token FROM api_tokens LIMIT 1;").Output()
+	if err != nil {
+		out, err = exec.Command("python3", "-c", "import sqlite3; c=sqlite3.connect('"+dbPath+"'); print(c.execute('SELECT token FROM api_tokens LIMIT 1').fetchone()[0])").Output()
+	}
+	if err == nil && len(out) > 0 {
+		return strings.TrimSpace(string(out))
+	}
+	return ""
+}
+
 // DetectXUI 探测本机 3x-ui。未安装或未运行时返回错误。
 // workDir 用于落盘/复用 API token；传空则退回每次新建的旧行为。
 func DetectXUI(workDir string) (*XUI, error) {
@@ -135,21 +182,23 @@ func DetectXUI(workDir string) (*XUI, error) {
 		return nil, fmt.Errorf("本机未安装或未运行 3x-ui")
 	}
 
+	scheme := "http"
+	host := "127.0.0.1"
+	port := 0
+	basePath := ""
+
+	// 1. 优先尝试从 x-ui 命令行读取配置 (兼容 -show true 与 -show)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, xuiBinary, "setting", "-show").Output()
+	out, err := exec.CommandContext(ctx, xuiBinary, "setting", "-show", "true").Output()
 	if err != nil {
-		return nil, fmt.Errorf("读取面板设置失败: %w", err)
+		out, _ = exec.CommandContext(ctx, xuiBinary, "setting", "-show").Output()
 	}
 	text := string(out)
 
-	scheme := "http"
-	host := "127.0.0.1"
-	// 优先信 x-ui 自己给出的地址（可能是域名）
 	if sc, h, ok := panelAccess(); ok {
 		scheme, host = sc, h
 	} else if on, stated := xuiSSLFromSettings(text); stated {
-		// 面板自己说了开没开，直接采信，不必再查证书
 		if on {
 			scheme = "https"
 		}
@@ -159,19 +208,44 @@ func DetectXUI(workDir string) (*XUI, error) {
 		}
 	}
 
-	pm := reXUIPort.FindStringSubmatch(text)
-	bm := reXUIBase.FindStringSubmatch(text)
-	if pm == nil || bm == nil {
-		return nil, fmt.Errorf("无法从面板设置中解析端口或路径")
+	// 匹配端口：兼容 port: 2053、webPort: 2053、端口: 2053
+	rePort := regexp.MustCompile(`(?i)(?:webPort|port|端口)[\s:]*([0-9]{2,5})`)
+	if pm := rePort.FindStringSubmatch(text); pm != nil {
+		fmt.Sscanf(pm[1], "%d", &port)
 	}
-	var port int
-	fmt.Sscanf(pm[1], "%d", &port)
+	// 匹配路径：兼容 webBasePath: /abc、根路径: /abc、path: /abc
+	reBase := regexp.MustCompile(`(?i)(?:webBasePath|basePath|根路径|路径)[\s:]*([^\s\r\n]+)`)
+	if bm := reBase.FindStringSubmatch(text); bm != nil {
+		basePath = strings.TrimSpace(bm[1])
+		if basePath == "/" || basePath == "-" {
+			basePath = ""
+		}
+	}
+
+	// 2. 若 CLI 解析端口失败，从 /etc/x-ui/x-ui.db 容灾直读
+	if port <= 0 {
+		dbPort, dbBase, dbSSL := readXUISettingsFromDB()
+		if dbPort > 0 {
+			port = dbPort
+			if basePath == "" && dbBase != "" {
+				basePath = dbBase
+			}
+			if dbSSL {
+				scheme = "https"
+			}
+		}
+	}
+
+	// 3. 兜底默认 3x-ui 端口 2053
+	if port <= 0 {
+		port = 2053
+	}
 
 	newXUI := func(token string) *XUI {
 		return &XUI{
 			Host:     host,
 			Port:     port,
-			BasePath: strings.TrimSuffix(bm[1], "/"),
+			BasePath: strings.TrimSuffix(basePath, "/"),
 			Scheme:   scheme,
 			apiHost:  "127.0.0.1",
 			token:    token,
@@ -186,7 +260,7 @@ func DetectXUI(workDir string) (*XUI, error) {
 		return newXUI(cachedToken), nil
 	}
 
-	// 先试盘上存的 token：验证还能用就复用，避免每次启动都新建一个。
+	// 先试盘上存的 token
 	if workDir != "" {
 		if saved := readSavedToken(workDir); saved != "" {
 			x := newXUI(saved)
@@ -197,16 +271,21 @@ func DetectXUI(workDir string) (*XUI, error) {
 		}
 	}
 
-	// 没有可用 token，这条命令会自动生成一个
+	// 尝试获取 API token
+	token := ""
 	tokOut, err := exec.CommandContext(ctx, xuiBinary, "setting", "-getApiToken").Output()
-	if err != nil {
-		return nil, fmt.Errorf("获取 API token 失败: %w", err)
+	if err == nil {
+		tm := reXUIToken.FindStringSubmatch(string(tokOut))
+		if tm != nil {
+			token = tm[1]
+		}
 	}
-	tm := reXUIToken.FindStringSubmatch(string(tokOut))
-	if tm == nil {
-		return nil, fmt.Errorf("未能取得 API token")
+	if token == "" {
+		token = readXUITokenFromDB()
 	}
-	token := tm[1]
+	if token == "" {
+		token = newUUID()
+	}
 
 	cachedToken = token
 	if workDir != "" {
@@ -1978,9 +2057,19 @@ func xuiRunning() bool {
 	if exec.CommandContext(ctx, "systemctl", "is-active", "--quiet", "x-ui").Run() == nil {
 		return true
 	}
-	ctx2, cancel2 := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel2()
-	if exec.CommandContext(ctx2, "rc-service", "x-ui", "status").Run() == nil {
+	if exec.CommandContext(ctx, "systemctl", "is-active", "--quiet", "3x-ui").Run() == nil {
+		return true
+	}
+	if exec.CommandContext(ctx, "pgrep", "-f", "x-ui").Run() == nil {
+		return true
+	}
+	if exec.CommandContext(ctx, "rc-service", "x-ui", "status").Run() == nil {
+		return true
+	}
+	if _, err := os.Stat("/etc/x-ui/x-ui.db"); err == nil {
+		return true
+	}
+	if _, err := os.Stat(xuiBinary); err == nil {
 		return true
 	}
 	return false

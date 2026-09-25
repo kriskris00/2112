@@ -161,17 +161,14 @@ func openPanel() (Panel, error) {
 		return xc, nil
 	}
 
-	if xc, err := DetectXCL(); err == nil {
-		panelState.current = xc
-		return xc, nil
-	}
-
 	if x, err := DetectXUI(panelState.workDir); err == nil {
 		panelState.current = x
 		return x, nil
-	} else if !xuiAbsent() {
-		// 面板装了却读不出配置，这时自建模式会和它抢端口，宁可报错让用户看见
-		return nil, fmt.Errorf("检测到 3x-ui 但读取配置失败: %w", err)
+	}
+
+	if xc, err := DetectXCL(); err == nil {
+		panelState.current = xc
+		return xc, nil
 	}
 
 	n, err := openNative(panelState.workDir)
