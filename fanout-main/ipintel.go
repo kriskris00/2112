@@ -333,8 +333,9 @@ func ResolveIPIntel(ip string) IPIntel {
 	client := &http.Client{Timeout: 1800 * time.Millisecond}
 
 	var cc, country, ispName string
+	var hosting, mobile, proxy bool
 	// 尝试 ip-api.com
-	url1 := fmt.Sprintf("http://ip-api.com/json/%s?fields=status,country,countryCode,isp,org", ip)
+	url1 := fmt.Sprintf("http://ip-api.com/json/%s?fields=status,country,countryCode,isp,org,mobile,proxy,hosting", ip)
 	resp1, err1 := client.Get(url1)
 	if err1 == nil && resp1.StatusCode == http.StatusOK {
 		var d1 struct {
@@ -343,6 +344,9 @@ func ResolveIPIntel(ip string) IPIntel {
 			CountryCode string `json:"countryCode"`
 			ISP         string `json:"isp"`
 			Org         string `json:"org"`
+			Mobile      bool   `json:"mobile"`
+			Proxy       bool   `json:"proxy"`
+			Hosting     bool   `json:"hosting"`
 		}
 		if json.NewDecoder(resp1.Body).Decode(&d1) == nil && d1.Status == "success" {
 			cc = strings.ToUpper(strings.TrimSpace(d1.CountryCode))
@@ -351,6 +355,9 @@ func ResolveIPIntel(ip string) IPIntel {
 				ispName = strings.TrimSpace(d1.Org)
 			}
 			country = strings.TrimSpace(d1.Country)
+			hosting = d1.Hosting
+			mobile = d1.Mobile
+			proxy = d1.Proxy
 		}
 		resp1.Body.Close()
 	}
@@ -368,6 +375,12 @@ func ResolveIPIntel(ip string) IPIntel {
 					ISP string `json:"isp"`
 					Org string `json:"org"`
 				} `json:"connection"`
+				Security struct {
+					VPN     bool `json:"vpn"`
+					Proxy   bool `json:"proxy"`
+					Tor     bool `json:"tor"`
+					Hosting bool `json:"hosting"`
+				} `json:"security"`
 			}
 			if json.NewDecoder(resp2.Body).Decode(&d2) == nil && d2.Success {
 				if cc == "" {
@@ -382,6 +395,8 @@ func ResolveIPIntel(ip string) IPIntel {
 						ispName = strings.TrimSpace(d2.Connection.Org)
 					}
 				}
+				hosting = d2.Security.Hosting
+				proxy = d2.Security.Proxy || d2.Security.VPN || d2.Security.Tor
 			}
 			resp2.Body.Close()
 		}
@@ -402,10 +417,19 @@ func ResolveIPIntel(ip string) IPIntel {
 		ispName = "优质网络"
 	}
 
+	ipType, purity := computePurity(hosting, mobile, proxy)
+	if isGovISP(ispName) && cc != "CN" {
+		ipType = "gov"
+		purity = 99
+	} else if (isEduISP(ispName) || isEduIP(ip)) && cc != "CN" {
+		ipType = "edu"
+		purity = 98
+	}
+
 	res := IPIntel{
 		IP:          ip,
-		IPType:      "hosting",
-		PurityScore: 80,
+		IPType:      ipType,
+		PurityScore: purity,
 		ISP:         ispName,
 		Country:     country,
 		CountryCode: cc,

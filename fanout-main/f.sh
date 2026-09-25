@@ -112,6 +112,15 @@ show_info() {
   echo
   echo -e "  ${B}管理地址  http://${ip}:${port}/${bp}/${N}"
   echo -e "  ${B}访问口令  ${pw}${N}"
+  local xui_status="${D}未安装${N}"
+  if command -v /usr/local/x-ui/x-ui >/dev/null 2>&1 || [[ -x /usr/bin/x-ui ]] || [[ -f /etc/x-ui/x-ui.db ]]; then
+    if systemctl is-active --quiet x-ui 2>/dev/null || systemctl is-active --quiet 3x-ui 2>/dev/null || pgrep -f x-ui >/dev/null 2>&1; then
+      xui_status="${G}已联动并运行${N}"
+    else
+      xui_status="${Y}已安装但未运行${N}"
+    fi
+  fi
+  echo -e "  3x-ui联动 ${xui_status}"
   echo
 
   local n

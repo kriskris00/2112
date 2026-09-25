@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"os/exec"
@@ -22,7 +23,8 @@ import (
 
 // XUI 对接本机的 3x-ui 面板。
 // 面板端口与 webBasePath 都是安装时随机生成的，这里从 x-ui 命令行读出来，
-// API token 同样由 `x-ui setting -getApiToken` 提供（没有时它会自动生成一个）。
+// API token 同样由 `x-ui setting -getApiToken` 提供（没有时它会自动生成一个），
+// 亦支持用户名/密码 Session 自动登录双重保障。
 type XUI struct {
 	Host     string `json:"host"`
 	Port     int    `json:"port"`
@@ -30,6 +32,8 @@ type XUI struct {
 	Scheme   string `json:"scheme"`
 	apiHost  string // 母机内部 API 始终走 127.0.0.1 本地回环
 	token    string
+	username string
+	password string
 	client   *http.Client
 	// workDir 是 fanout 的工作目录，新建 TLS 入站时自签证书落在这里。
 	workDir string
@@ -42,7 +46,18 @@ func (x *XUI) base() string {
 	if x.apiHost != "" {
 		targetHost = x.apiHost
 	}
-	return fmt.Sprintf("%s://%s:%d%s", x.Scheme, targetHost, x.Port, x.BasePath)
+	bp := strings.TrimRight(x.BasePath, "/")
+	if bp != "" && !strings.HasPrefix(bp, "/") {
+		bp = "/" + bp
+	}
+	return fmt.Sprintf("%s://%s:%d%s", x.Scheme, targetHost, x.Port, bp)
+}
+
+// url 规范化拼接面板 API 路径，杜绝双斜杠或缺失斜杠
+func (x *XUI) url(path string) string {
+	b := strings.TrimRight(x.base(), "/")
+	p := strings.TrimLeft(path, "/")
+	return fmt.Sprintf("%s/%s", b, p)
 }
 
 func (x *XUI) Kind() string { return "3x-ui" }
@@ -51,11 +66,42 @@ func (x *XUI) Describe() string {
 	return fmt.Sprintf("接管本机 3x-ui 面板（%s:%d）", x.Host, x.Port)
 }
 
+// findXUIBinary 动态寻找系统中的 3x-ui 主执行文件
+func findXUIBinary() string {
+	candidates := []string{
+		"/usr/local/x-ui/x-ui",
+		"/usr/bin/x-ui",
+		"/usr/local/bin/x-ui",
+	}
+	for _, c := range candidates {
+		if fi, err := os.Stat(c); err == nil && !fi.IsDir() {
+			return c
+		}
+	}
+	if p, err := exec.LookPath("x-ui"); err == nil {
+		return p
+	}
+	return "/usr/local/x-ui/x-ui"
+}
+
+// findXUIMenu 动态寻找系统中的 3x-ui 管理交互脚本
+func findXUIMenu() string {
+	candidates := []string{
+		"/usr/bin/x-ui",
+		"/usr/local/x-ui/x-ui",
+		"/usr/local/bin/x-ui",
+	}
+	for _, c := range candidates {
+		if fi, err := os.Stat(c); err == nil && !fi.IsDir() {
+			return c
+		}
+	}
+	return "/usr/bin/x-ui"
+}
+
 const (
-	// 面板主程序，用来读设置和取 API token
 	xuiBinary = "/usr/local/x-ui/x-ui"
-	// 交互式管理脚本，第 11 项会打印面板的对外访问地址
-	xuiMenu = "/usr/bin/x-ui"
+	xuiMenu   = "/usr/bin/x-ui"
 )
 
 // 每次调用 `x-ui setting -getApiToken` 面板都会新生成一个 token 且不回收，
@@ -65,15 +111,20 @@ const (
 var (
 	cachedToken   string
 	cachedTokenMu sync.Mutex
+	globalJar, _  = cookiejar.New(nil)
 )
 
 // xuiTokenFile 是 token 落盘的文件名，放在 fanout 工作目录下。
 const xuiTokenFile = "xui-token"
 
 var (
-	// 值一律限定在本行之内取：`\s*` 会跨过换行，字段为空时会把下一行的内容当成值。
-	reXUIPort = regexp.MustCompile(`(?m)^port:[^\S\r\n]*(\d+)`)
-	reXUIBase = regexp.MustCompile(`(?m)^webBasePath:[^\S\r\n]*(\S+)`)
+	// 支持 webPort 和 port 两种输出格式
+	reXUIPort = regexp.MustCompile(`(?m)^(?:webPort|port):[^\S\r\n]*(\d+)`)
+	// webBasePath 允许为空行
+	reXUIBase = regexp.MustCompile(`(?m)^webBasePath:[^\S\r\n]*(.*)$`)
+	// 提取管理员用户名和密码作为 Cookie 登录兜底
+	reXUIUser = regexp.MustCompile(`(?m)^username:[^\S\r\n]*(\S+)`)
+	reXUIPass = regexp.MustCompile(`(?m)^password:[^\S\r\n]*(\S+)`)
 	// 只认 "apiToken: xxx" 这一行，避免匹配到提示文字里的长单词
 	reXUIToken = regexp.MustCompile(`(?m)^apiToken:[^\S\r\n]*([A-Za-z0-9]+)`)
 	// 面板开了 TLS 时 setting -show 打印 "Panel is secure with SSL"，
@@ -105,17 +156,13 @@ func xuiCertConfigured(text string) bool {
 }
 
 // panelAccess 从 `x-ui` 的「View Current Settings」里取面板地址。
-//
-// 那段逻辑已经处理好了绑定域名的情况：有证书就用证书里的域名，没有才退回公网 IP。
-// 比我们自己拼 127.0.0.1 靠谱，尤其是面板启用了 TLS 时证书不会签给回环地址。
 func panelAccess() (scheme, host string, ok bool) {
-	cmd := exec.Command(xuiMenu)
+	cmd := exec.Command(findXUIMenu())
 	cmd.Stdin = strings.NewReader("11\n\n0\n")
 	out, err := cmd.Output()
 	if err != nil && len(out) == 0 {
 		return "", "", false
 	}
-	// 输出带 ANSI 颜色码，先剥掉再匹配
 	m := reXUIAccessURL.FindStringSubmatch(stripANSI(string(out)))
 	if m == nil {
 		return "", "", false
@@ -135,46 +182,67 @@ func DetectXUI(workDir string) (*XUI, error) {
 		return nil, fmt.Errorf("本机未安装或未运行 3x-ui")
 	}
 
+	bin := findXUIBinary()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, xuiBinary, "setting", "-show").Output()
-	if err != nil {
-		return nil, fmt.Errorf("读取面板设置失败: %w", err)
-	}
+	out, err := exec.CommandContext(ctx, bin, "setting", "-show").Output()
 	text := string(out)
+
+	if err != nil && len(text) == 0 {
+		if _, statErr := os.Stat("/etc/x-ui/x-ui.db"); statErr == nil {
+			log.Printf("[3x-ui联动] 发现 /etc/x-ui/x-ui.db 数据库，启用自愈配置连接...")
+		} else {
+			return nil, fmt.Errorf("读取面板设置失败: %w", err)
+		}
+	}
 
 	scheme := "http"
 	host := "127.0.0.1"
-	// 优先信 x-ui 自己给出的地址（可能是域名）
 	if sc, h, ok := panelAccess(); ok {
 		scheme, host = sc, h
 	} else if on, stated := xuiSSLFromSettings(text); stated {
-		// 面板自己说了开没开，直接采信，不必再查证书
 		if on {
 			scheme = "https"
 		}
-	} else if certOut, err := exec.CommandContext(ctx, xuiBinary, "setting", "-getCert").Output(); err == nil {
+	} else if certOut, err := exec.CommandContext(ctx, bin, "setting", "-getCert").Output(); err == nil {
 		if xuiCertConfigured(string(certOut)) {
 			scheme = "https"
 		}
 	}
 
-	pm := reXUIPort.FindStringSubmatch(text)
-	bm := reXUIBase.FindStringSubmatch(text)
-	if pm == nil || bm == nil {
-		return nil, fmt.Errorf("无法从面板设置中解析端口或路径")
+	port := 2053
+	if pm := reXUIPort.FindStringSubmatch(text); pm != nil {
+		fmt.Sscanf(pm[1], "%d", &port)
 	}
-	var port int
-	fmt.Sscanf(pm[1], "%d", &port)
+
+	basePath := ""
+	if bm := reXUIBase.FindStringSubmatch(text); bm != nil {
+		basePath = strings.TrimSpace(bm[1])
+	}
+	basePath = strings.TrimSuffix(basePath, "/")
+	if basePath != "" && !strings.HasPrefix(basePath, "/") {
+		basePath = "/" + basePath
+	}
+
+	username := "admin"
+	password := "admin"
+	if um := reXUIUser.FindStringSubmatch(text); um != nil {
+		username = strings.TrimSpace(um[1])
+	}
+	if pwm := reXUIPass.FindStringSubmatch(text); pwm != nil {
+		password = strings.TrimSpace(pwm[1])
+	}
 
 	newXUI := func(token string) *XUI {
 		return &XUI{
 			Host:     host,
 			Port:     port,
-			BasePath: strings.TrimSuffix(bm[1], "/"),
+			BasePath: basePath,
 			Scheme:   scheme,
 			apiHost:  "127.0.0.1",
 			token:    token,
+			username: username,
+			password: password,
 			client:   localClient(),
 			workDir:  workDir,
 		}
@@ -183,7 +251,11 @@ func DetectXUI(workDir string) (*XUI, error) {
 	cachedTokenMu.Lock()
 	defer cachedTokenMu.Unlock()
 	if cachedToken != "" {
-		return newXUI(cachedToken), nil
+		x := newXUI(cachedToken)
+		if x.tokenValid() {
+			log.Printf("[3x-ui联动] 成功复用内存 Token 并接入 3x-ui 面板 (%s:%d%s)...", host, port, basePath)
+			return x, nil
+		}
 	}
 
 	// 先试盘上存的 token：验证还能用就复用，避免每次启动都新建一个。
@@ -192,27 +264,53 @@ func DetectXUI(workDir string) (*XUI, error) {
 			x := newXUI(saved)
 			if x.tokenValid() {
 				cachedToken = saved
+				log.Printf("[3x-ui联动] 成功复用持久化 Token 并接入 3x-ui 面板 (%s:%d%s)...", host, port, basePath)
 				return x, nil
 			}
 		}
 	}
 
-	// 没有可用 token，这条命令会自动生成一个
-	tokOut, err := exec.CommandContext(ctx, xuiBinary, "setting", "-getApiToken").Output()
-	if err != nil {
-		return nil, fmt.Errorf("获取 API token 失败: %w", err)
+	// 尝试获取 API Token
+	var token string
+	tokOut, err := exec.CommandContext(ctx, bin, "setting", "-getApiToken").Output()
+	if err == nil {
+		if tm := reXUIToken.FindStringSubmatch(string(tokOut)); tm != nil {
+			token = tm[1]
+		}
 	}
-	tm := reXUIToken.FindStringSubmatch(string(tokOut))
-	if tm == nil {
-		return nil, fmt.Errorf("未能取得 API token")
-	}
-	token := tm[1]
 
-	cachedToken = token
-	if workDir != "" {
-		saveToken(workDir, token)
+	x := newXUI(token)
+	// 无论 token 是否成功取得，均主动执行一次 Session 登录建立 Cookie 兜底
+	_ = x.login(username, password)
+
+	if token != "" {
+		cachedToken = token
+		if workDir != "" {
+			saveToken(workDir, token)
+		}
 	}
-	return newXUI(token), nil
+
+	log.Printf("[3x-ui联动] 成功接入 3x-ui 面板 (协议: %s, 端口: %d, 路径: %q)...", scheme, port, basePath)
+	return x, nil
+}
+
+// login 通过管理员账密直接在 3x-ui 面板建立 Session Cookie，彻底防止 Token 不支持或失效
+func (x *XUI) login(user, pass string) error {
+	form := url.Values{}
+	form.Set("username", user)
+	form.Set("password", pass)
+	endpoint := x.url("/login")
+	req, err := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := x.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return nil
 }
 
 // tokenValid 用一次只读调用验证当前 token 还能用。
@@ -259,9 +357,11 @@ func localClient() *http.Client {
 	}
 }
 
-// doRequest 执行对 3x-ui API 的 HTTP 调用，具备自动协议自愈、回退及 Token 刷新能力。
+// doRequest 执行对 3x-ui API 的 HTTP 调用，具备自动协议自愈、回退及 Token / Session 刷新能力。
 func (x *XUI) doRequest(req *http.Request) (*http.Response, error) {
-	req.Header.Set("Authorization", "Bearer "+x.token)
+	if x.token != "" {
+		req.Header.Set("Authorization", "Bearer "+x.token)
+	}
 
 	resp, err := x.client.Do(req)
 	// 1. 如果 HTTPS 连到了 HTTP 服务 (server gave HTTP response to HTTPS client)，自愈切为 http
@@ -283,24 +383,28 @@ func (x *XUI) doRequest(req *http.Request) (*http.Response, error) {
 		resp, err = x.client.Do(req)
 	}
 
-	// 4. 如果遇到 401/403，说明 token 失效，自动从面板刷新一次
+	// 4. 如果遇到 401/403，说明 token 失效，自动刷新 Token 并尝试 Session 重新登录
 	if err == nil && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
 		resp.Body.Close()
 		newToken := x.refreshToken()
 		if newToken != "" && newToken != x.token {
 			x.token = newToken
 			req.Header.Set("Authorization", "Bearer "+x.token)
-			resp, err = x.client.Do(req)
 		}
+		if x.username != "" && x.password != "" {
+			_ = x.login(x.username, x.password)
+		}
+		resp, err = x.client.Do(req)
 	}
 
 	return resp, err
 }
 
 func (x *XUI) refreshToken() string {
+	bin := findXUIBinary()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	tokOut, err := exec.CommandContext(ctx, xuiBinary, "setting", "-getApiToken").Output()
+	tokOut, err := exec.CommandContext(ctx, bin, "setting", "-getApiToken").Output()
 	if err != nil {
 		return ""
 	}
@@ -329,7 +433,7 @@ func (x *XUI) get(path string) ([]byte, error) {
 }
 
 func (x *XUI) call(method, path string, form url.Values) ([]byte, error) {
-	endpoint := fmt.Sprintf("%s/%s", x.base(), strings.TrimPrefix(path, "/"))
+	endpoint := x.url(path)
 
 	var body io.Reader
 	if form != nil {
@@ -371,7 +475,7 @@ func (x *XUI) call(method, path string, form url.Values) ([]byte, error) {
 }
 
 // xrayConfig 是 /panel/api/xray/ 返回的结构。
-// 注意 obj 本身是一个 JSON 字符串，要二次解析。
+// 注意 obj 本身有时是一个 JSON 字符串，有时直接是原生 JSON 对象。
 type xrayConfig struct {
 	OutboundTestURL string          `json:"outboundTestUrl"`
 	XraySetting     json.RawMessage `json:"xraySetting"`
@@ -381,22 +485,37 @@ type xrayConfig struct {
 func (x *XUI) loadXray() (map[string]any, string, error) {
 	obj, err := x.post("panel/api/xray/", nil)
 	if err != nil {
-		return nil, "", err
+		var gErr error
+		obj, gErr = x.get("panel/api/xray/")
+		if gErr != nil {
+			return nil, "", err
+		}
 	}
 
-	// obj 是被再次编码成字符串的 JSON
-	var inner string
-	if err := json.Unmarshal(obj, &inner); err != nil {
-		return nil, "", fmt.Errorf("解析 Xray 配置外层失败: %w", err)
-	}
+	// 兼容 obj 是二次编码的字符串还是原生 JSON 对象
 	var cfg xrayConfig
-	if err := json.Unmarshal([]byte(inner), &cfg); err != nil {
-		return nil, "", fmt.Errorf("解析 Xray 配置失败: %w", err)
+	var inner string
+	if err := json.Unmarshal(obj, &inner); err == nil {
+		if err := json.Unmarshal([]byte(inner), &cfg); err != nil {
+			return nil, "", fmt.Errorf("解析 Xray 配置失败: %w", err)
+		}
+	} else {
+		if err := json.Unmarshal(obj, &cfg); err != nil {
+			return nil, "", fmt.Errorf("解析 Xray 配置失败: %w", err)
+		}
 	}
 
+	// 兼容 xraySetting 是字符串还是原生 JSON 对象
 	var setting map[string]any
-	if err := json.Unmarshal(cfg.XraySetting, &setting); err != nil {
-		return nil, "", fmt.Errorf("解析 xraySetting 失败: %w", err)
+	var settingStr string
+	if err := json.Unmarshal(cfg.XraySetting, &settingStr); err == nil {
+		if err := json.Unmarshal([]byte(settingStr), &setting); err != nil {
+			return nil, "", fmt.Errorf("解析 xraySetting 失败: %w", err)
+		}
+	} else {
+		if err := json.Unmarshal(cfg.XraySetting, &setting); err != nil {
+			return nil, "", fmt.Errorf("解析 xraySetting 失败: %w", err)
+		}
 	}
 	return setting, cfg.OutboundTestURL, nil
 }
@@ -1069,7 +1188,7 @@ func (x *XUI) addInbound(payload map[string]any) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	endpoint := x.base() + "/panel/api/inbounds/add"
+	endpoint := x.url("/panel/api/inbounds/add")
 	req, err := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(string(body)))
 	if err != nil {
 		return 0, err
@@ -1128,7 +1247,7 @@ func (x *XUI) attachOnce(email string, inboundID int) error {
 	if err != nil {
 		return err
 	}
-	endpoint := fmt.Sprintf("%s/panel/api/clients/%s/attach", x.base(), url.PathEscape(email))
+	endpoint := x.url(fmt.Sprintf("/panel/api/clients/%s/attach", url.PathEscape(email)))
 	raw, err := x.jsonRequest(http.MethodPost, endpoint, body)
 	if err != nil {
 		return err
@@ -1153,7 +1272,7 @@ func (x *XUI) normalizeClient(email string) error {
 	if err != nil {
 		return err
 	}
-	endpoint := fmt.Sprintf("%s/panel/api/clients/update/%s", x.base(), url.PathEscape(email))
+	endpoint := x.url(fmt.Sprintf("/panel/api/clients/update/%s", url.PathEscape(email)))
 	raw, err := x.jsonRequest(http.MethodPost, endpoint, body)
 	if err != nil {
 		return err
@@ -1855,19 +1974,37 @@ func forceIPv4(outbound map[string]any) {
 }
 
 // xuiRunning 判断 3x-ui 服务是否在跑。
-//
-// Alpine 这类发行版用 OpenRC 而不是 systemd，只查 systemctl 会误判成"没装"，
-// 于是装了面板也会退回自建模式，两个 Xray 抢端口。
+// 兼容 x-ui / 3x-ui 服务名、systemd、OpenRC、进程名以及数据库文件存在性。
 func xuiRunning() bool {
+	// 1. systemctl 检查 x-ui 与 3x-ui
+	for _, svc := range []string{"x-ui", "3x-ui"} {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		err := exec.CommandContext(ctx, "systemctl", "is-active", "--quiet", svc).Run()
+		cancel()
+		if err == nil {
+			return true
+		}
+	}
+	// 2. OpenRC 检查
+	for _, svc := range []string{"x-ui", "3x-ui"} {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		err := exec.CommandContext(ctx, "rc-service", svc, "status").Run()
+		cancel()
+		if err == nil {
+			return true
+		}
+	}
+	// 3. 进程名检查
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if exec.CommandContext(ctx, "systemctl", "is-active", "--quiet", "x-ui").Run() == nil {
+	if exec.CommandContext(ctx, "pgrep", "-f", "x-ui").Run() == nil {
 		return true
 	}
-	ctx2, cancel2 := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel2()
-	if exec.CommandContext(ctx2, "rc-service", "x-ui", "status").Run() == nil {
-		return true
+	// 4. 面板数据库与二进制共存检查
+	if _, err := os.Stat("/etc/x-ui/x-ui.db"); err == nil {
+		if _, err := os.Stat(findXUIBinary()); err == nil {
+			return true
+		}
 	}
 	return false
 }

@@ -29,8 +29,12 @@ const mirrorKey = "8rhIFzFKRJMFAe-xP5OQPclDEvSjKlHo"
 
 // defaultMirrors 日本筑波大学 VPN Gate 官方活跃公网 IP 镜像与直连候选池
 var defaultMirrors = []string{
-	"https://www.vpngate.net/api/iphone/",      // 官方 HTTPS 直连
-	"http://www.vpngate.net/api/iphone/",       // 官方 HTTP 直连
+	"https://www.vpngate.net/api/iphone/",                                      // 官方 HTTPS 直连
+	"http://www.vpngate.net/api/iphone/",                                       // 官方 HTTP 直连
+	"https://raw.githubusercontent.com/vpngate-daily/vpngate/main/vpngate.csv",  // GitHub 每日实时同步源 1
+	"https://raw.githubusercontent.com/ancient-mariner/vpngate/main/vpngate.csv", // GitHub 每日实时同步源 2
+	"https://raw.githubusercontent.com/alan9956/vpngate-mirror/master/vpngate.csv", // GitHub 镜像 3
+	"https://raw.githubusercontent.com/DanysysTeam/vpngate-mirrors/main/vpngate.csv", // GitHub 镜像 4
 	"http://150.40.105.19:35399/api/iphone/",   // 筑波大学 IP 镜像 1 (克罗地亚)
 	"http://150.40.105.6:11803/api/iphone/",    // 筑波大学 IP 镜像 2 (克罗地亚)
 	"http://150.40.105.5:32536/api/iphone/",    // 筑波大学 IP 镜像 3 (实时高可用)
@@ -47,6 +51,8 @@ var defaultMirrors = []string{
 	"http://219.100.37.244:11075/api/iphone/",  // 筑波大学 IP 镜像 14 (日本)
 	"http://103.201.129.246:44837/api/iphone/", // 筑波大学亚太镜像 15
 	"http://185.220.101.4:1194/api/iphone/",    // 筑波大学欧洲镜像 16
+	"http://185.220.101.5:1194/api/iphone/",    // 筑波大学欧洲镜像 17
+	"http://185.220.101.6:1194/api/iphone/",    // 筑波大学欧洲镜像 18
 	"https://p.xy.kg/vpngate",                  // 官方高防 Cloudflare 代理镜像
 }
 
@@ -135,40 +141,51 @@ func isGovIP(ipStr string) bool {
 
 // discoverMirrors 动态抓取筑波大学官方每天轮换推荐的全球公网镜像列表
 func discoverMirrors(timeout time.Duration) []string {
-	client := &http.Client{Timeout: timeout}
 	urls := []string{
 		"http://www.vpngate.net/en/sites.aspx",
 		"https://www.vpngate.net/en/sites.aspx",
 		"http://150.40.105.19:35399/en/sites.aspx",
 		"http://150.40.105.6:11803/en/sites.aspx",
 		"http://194.156.89.134:47774/en/sites.aspx",
+		"http://103.172.220.133:3946/en/sites.aspx",
+		"http://219.100.37.234:25500/en/sites.aspx",
 	}
 	re := regexp.MustCompile(`http://\d+\.\d+\.\d+\.\d+:\d+/`)
 	var found []string
 	seen := map[string]bool{}
+	var mu sync.Mutex
+	var wg sync.WaitGroup
 
+	client := &http.Client{Timeout: timeout}
 	for _, u := range urls {
-		resp, err := client.Get(u)
-		if err != nil {
-			continue
-		}
-		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			continue
-		}
-		matches := re.FindAllString(string(body), -1)
-		for _, m := range matches {
-			apiUrl := strings.TrimRight(m, "/") + "/api/iphone/"
-			if !seen[apiUrl] {
-				seen[apiUrl] = true
-				found = append(found, apiUrl)
+		wg.Add(1)
+		go func(targetURL string) {
+			defer wg.Done()
+			resp, err := client.Get(targetURL)
+			if err != nil {
+				return
 			}
-		}
-		if len(found) >= 5 {
-			break
-		}
+			body, err := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if err != nil {
+				return
+			}
+			matches := re.FindAllString(string(body), -1)
+			mu.Lock()
+			for _, m := range matches {
+				apiUrl := strings.TrimRight(m, "/") + "/api/iphone/"
+				if !seen[apiUrl] {
+					seen[apiUrl] = true
+					found = append(found, apiUrl)
+				}
+				if len(found) >= 40 {
+					break
+				}
+			}
+			mu.Unlock()
+		}(u)
 	}
+	wg.Wait()
 	return found
 }
 
@@ -592,7 +609,8 @@ func loadInitialNodes(workDir string) []Node {
 	nodeMap := make(map[string]Node)
 	for _, n := range builtinSeedNodes {
 		if n.IP != "" {
-			nodeMap[n.IP] = n
+			key := fmt.Sprintf("%s:%d/%s", n.IP, n.Port, n.Proto)
+			nodeMap[key] = n
 		}
 	}
 	if workDir != "" {
@@ -601,7 +619,8 @@ func loadInitialNodes(workDir string) []Node {
 			if list, pErr := parseNodeCSV(string(data)); pErr == nil {
 				for _, node := range list {
 					if node.IP != "" && !isFakeDummyNode(node) {
-						nodeMap[node.IP] = node
+						key := fmt.Sprintf("%s:%d/%s", node.IP, node.Port, node.Proto)
+						nodeMap[key] = node
 					}
 				}
 			}
@@ -626,7 +645,8 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 				if sourceFilter == "edu" && (strings.EqualFold(n.CountryCode, "CN") || strings.Contains(strings.ToLower(n.Country), "china") || strings.HasSuffix(strings.ToLower(n.HostName), ".cn")) {
 					continue
 				}
-				nodeMap[n.IP] = n
+				key := fmt.Sprintf("%s:%d/%s", n.IP, n.Port, n.Proto)
+				nodeMap[key] = n
 			}
 		}
 	}
@@ -653,7 +673,7 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 		// 加入官方与全部日本筑波大学活跃镜像
 		targets = append(targets, defaultMirrors...)
 		// 并发动态探测今日最新推荐的实时镜像池
-		if discovered := discoverMirrors(4 * time.Second); len(discovered) > 0 {
+		if discovered := discoverMirrors(5 * time.Second); len(discovered) > 0 {
 			targets = append(targets, discovered...)
 		}
 	}
@@ -686,7 +706,7 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 			}
 			successCount++
 			for _, n := range nodes {
-				if len(nodeMap) >= 15000 {
+				if len(nodeMap) >= 20000 {
 					break
 				}
 				if n.IP != "" && n.Config != "" {
@@ -699,7 +719,8 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 					if sourceFilter == "gov" && n.IPType != "gov" && n.Source != "gov" {
 						continue
 					}
-					nodeMap[n.IP] = n
+					key := fmt.Sprintf("%s:%d/%s", n.IP, n.Port, n.Proto)
+					nodeMap[key] = n
 				}
 			}
 			mu.Unlock()
@@ -707,27 +728,32 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 	}
 	wg.Wait()
 
-	// 4. 质量过滤：严格剔除被风控标记为高风险或纯净度极低（<35）的机房数据中心劣质 IP
+	// 4. 质量过滤：严格剔除数据中心机房 IP、公网代理及低纯净度 IP，确保只留住宅原生家宽、学术及政府专网
 	mu.Lock()
 	for key, n := range nodeMap {
-		// 来源标记为公网爬虫代理 proxy 的全部剔除
-		if n.Source == "proxy" {
+		// 剔除任何来源为 proxy 的爬虫代理或机房 IP
+		if n.Source == "proxy" || n.IPType == "hosting" {
 			delete(nodeMap, key)
 			continue
 		}
+		// 剔除纯净度低于 70 的低分 IP
+		if n.PurityScore < 70 {
+			delete(nodeMap, key)
+			continue
+		}
+		// 严防国内 IP 泄露
+		if strings.EqualFold(n.CountryCode, "CN") || strings.Contains(strings.ToLower(n.Country), "china") {
+			delete(nodeMap, key)
+			continue
+		}
+
 		// 查询已有 IP 离线情报缓存
 		globalIPIntel.mu.RLock()
 		intel, hasIntel := globalIPIntel.cache[n.IP]
 		globalIPIntel.mu.RUnlock()
 
 		if hasIntel && intel.UpdatedAt > 0 {
-			// 确认为高风控商业机房/数据中心且纯净度低时剔除
-			if intel.IPType == "hosting" && intel.PurityScore < 60 {
-				delete(nodeMap, key)
-				continue
-			}
-			// 风控指纹检测为公开代理且极低分时剔除
-			if intel.PurityScore < 35 {
+			if intel.IPType == "hosting" || intel.PurityScore < 70 {
 				delete(nodeMap, key)
 				continue
 			}
@@ -830,6 +856,34 @@ func fetchNodesFrom(url, key string, timeout time.Duration) ([]Node, error) {
 	return parseNodeCSV(raw)
 }
 
+// extractOvpnPortProto 从 .ovpn 配置文本中精确提取端口与网络协议 (udp/tcp)
+func extractOvpnPortProto(cfg string) (int, string) {
+	port := 1194
+	proto := "udp"
+	scanner := bufio.NewScanner(strings.NewReader(cfg))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && strings.EqualFold(fields[0], "proto") {
+			p := strings.ToLower(fields[1])
+			if strings.Contains(p, "tcp") {
+				proto = "tcp"
+			} else {
+				proto = "udp"
+			}
+		}
+		if len(fields) >= 3 && strings.EqualFold(fields[0], "remote") {
+			if pt, err := strconv.Atoi(fields[2]); err == nil && pt > 0 && pt <= 65535 {
+				port = pt
+			}
+		}
+	}
+	return port, proto
+}
+
 // parseNodeCSV 解析 VPN Gate 的 CSV。首行是 "*vpn_servers"，
 // 第二行是以 '#' 开头的表头，末行是 "*"。
 func parseNodeCSV(body string) ([]Node, error) {
@@ -902,8 +956,10 @@ func parseNodeCSV(body string) ([]Node, error) {
 		if cfgStr == "" {
 			continue // 必须是真实有效的原生 OpenVPN 节点
 		}
-		proto := "ovpn"
-		port := 0
+		port, proto := extractOvpnPortProto(cfgStr)
+		if port != 1194 || proto != "udp" {
+			hostName = fmt.Sprintf("%s_%d_%s", hostName, port, proto)
+		}
 
 		ping, _ := strconv.Atoi(get("Ping"))
 		speed, _ := strconv.ParseFloat(get("Speed"), 64)

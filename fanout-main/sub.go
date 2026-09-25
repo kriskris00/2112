@@ -230,22 +230,21 @@ func apiSubscription(m *Manager, a *Auth) http.HandlerFunc {
 			return raw
 		}
 
-		// 按排好的顺序生成已绑定入站的代理链接
+		// 按排好的顺序生成已绑定入站的代理链接（严格维持 1 出口 = 1 节点链接）
 		for _, d := range validDetails {
 			t := findTunnel(d.BoundTo)
-			if t == nil {
+			if t == nil || len(d.Links) == 0 {
 				continue
 			}
-			for _, rawLink := range d.Links {
-				idx := strings.LastIndex(rawLink, "#")
-				cleanName := makeUniqueLinkName(formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP))
-				if idx != -1 {
-					rawLink = rawLink[:idx] + "#" + url.QueryEscape(cleanName)
-				} else {
-					rawLink = rawLink + "#" + url.QueryEscape(cleanName)
-				}
-				allLinks = append(allLinks, rawLink)
+			rawLink := d.Links[0]
+			idx := strings.LastIndex(rawLink, "#")
+			cleanName := makeUniqueLinkName(formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP))
+			if idx != -1 {
+				rawLink = rawLink[:idx] + "#" + url.QueryEscape(cleanName)
+			} else {
+				rawLink = rawLink + "#" + url.QueryEscape(cleanName)
 			}
+			allLinks = append(allLinks, rawLink)
 		}
 
 		// 仅对尚未绑定入站的独立出口隧道补充 SOCKS5 节点（纯净 [国旗Emoji] [企业/高校]，无协议与端口）
@@ -366,58 +365,60 @@ func generateClashConfig(details []*InboundDetail, tunnels []*Tunnel, host strin
 		}
 		coveredSlots[t.Slot] = true
 
-		for _, c := range d.Clients {
-			pName := makeUniqueName(formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP))
+		if len(d.Clients) == 0 {
+			continue
+		}
+		c := d.Clients[0]
+		pName := makeUniqueName(formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP))
 
-			switch proto {
-			case "vless":
-				tlsBool := d.TLS == "tls" || d.TLS == "reality"
-				netType := d.Network
-				if netType == "" {
-					netType = "tcp"
-				}
-				py := fmt.Sprintf("  - name: %q\r\n    type: vless\r\n    server: %q\r\n    port: %d\r\n    uuid: %q\r\n    udp: true\r\n    network: %q\r\n    tls: %v\r\n",
-					pName, host, d.Port, c.ID, netType, tlsBool)
-				if netType == "ws" {
-					py += "    ws-opts:\r\n      path: \"/\"\r\n"
-				}
-				proxies = append(proxies, proxyItem{name: pName, yaml: py})
-
-			case "vmess":
-				tlsBool := d.TLS == "tls"
-				netType := d.Network
-				if netType == "" {
-					netType = "tcp"
-				}
-				py := fmt.Sprintf("  - name: %q\r\n    type: vmess\r\n    server: %q\r\n    port: %d\r\n    uuid: %q\r\n    alterId: 0\r\n    cipher: auto\r\n    udp: true\r\n    network: %q\r\n    tls: %v\r\n",
-					pName, host, d.Port, c.ID, netType, tlsBool)
-				if netType == "ws" {
-					py += "    ws-opts:\r\n      path: \"/\"\r\n"
-				}
-				proxies = append(proxies, proxyItem{name: pName, yaml: py})
-
-			case "trojan":
-				py := fmt.Sprintf("  - name: %q\r\n    type: trojan\r\n    server: %q\r\n    port: %d\r\n    password: %q\r\n    udp: true\r\n    sni: %q\r\n",
-					pName, host, d.Port, c.ID, host)
-				proxies = append(proxies, proxyItem{name: pName, yaml: py})
-
-			case "shadowsocks":
-				parts := strings.SplitN(c.ID, ":", 2)
-				method := "aes-256-gcm"
-				pwd := c.ID
-				if len(parts) == 2 {
-					method = strings.TrimSpace(parts[0])
-					pwd = strings.TrimSpace(parts[1])
-				}
-				py := fmt.Sprintf("  - name: %q\r\n    type: ss\r\n    server: %q\r\n    port: %d\r\n    cipher: %q\r\n    password: %q\r\n    udp: true\r\n",
-					pName, host, d.Port, method, pwd)
-				proxies = append(proxies, proxyItem{name: pName, yaml: py})
-
-			case "socks":
-				py := fmt.Sprintf("  - name: %q\r\n    type: socks5\r\n    server: %q\r\n    port: %d\r\n    username: %q\r\n    password: %q\r\n    udp: true\r\n",
-					pName, host, d.Port, c.Email, c.ID)
-				proxies = append(proxies, proxyItem{name: pName, yaml: py})
+		switch proto {
+		case "vless":
+			tlsBool := d.TLS == "tls" || d.TLS == "reality"
+			netType := d.Network
+			if netType == "" {
+				netType = "tcp"
 			}
+			py := fmt.Sprintf("  - name: %q\r\n    type: vless\r\n    server: %q\r\n    port: %d\r\n    uuid: %q\r\n    udp: true\r\n    network: %q\r\n    tls: %v\r\n",
+				pName, host, d.Port, c.ID, netType, tlsBool)
+			if netType == "ws" {
+				py += "    ws-opts:\r\n      path: \"/\"\r\n"
+			}
+			proxies = append(proxies, proxyItem{name: pName, yaml: py})
+
+		case "vmess":
+			tlsBool := d.TLS == "tls"
+			netType := d.Network
+			if netType == "" {
+				netType = "tcp"
+			}
+			py := fmt.Sprintf("  - name: %q\r\n    type: vmess\r\n    server: %q\r\n    port: %d\r\n    uuid: %q\r\n    alterId: 0\r\n    cipher: auto\r\n    udp: true\r\n    network: %q\r\n    tls: %v\r\n",
+				pName, host, d.Port, c.ID, netType, tlsBool)
+			if netType == "ws" {
+				py += "    ws-opts:\r\n      path: \"/\"\r\n"
+			}
+			proxies = append(proxies, proxyItem{name: pName, yaml: py})
+
+		case "trojan":
+			py := fmt.Sprintf("  - name: %q\r\n    type: trojan\r\n    server: %q\r\n    port: %d\r\n    password: %q\r\n    udp: true\r\n    sni: %q\r\n",
+				pName, host, d.Port, c.ID, host)
+			proxies = append(proxies, proxyItem{name: pName, yaml: py})
+
+		case "shadowsocks":
+			parts := strings.SplitN(c.ID, ":", 2)
+			method := "aes-256-gcm"
+			pwd := c.ID
+			if len(parts) == 2 {
+				method = strings.TrimSpace(parts[0])
+				pwd = strings.TrimSpace(parts[1])
+			}
+			py := fmt.Sprintf("  - name: %q\r\n    type: ss\r\n    server: %q\r\n    port: %d\r\n    cipher: %q\r\n    password: %q\r\n    udp: true\r\n",
+				pName, host, d.Port, method, pwd)
+			proxies = append(proxies, proxyItem{name: pName, yaml: py})
+
+		case "socks":
+			py := fmt.Sprintf("  - name: %q\r\n    type: socks5\r\n    server: %q\r\n    port: %d\r\n    username: %q\r\n    password: %q\r\n    udp: true\r\n",
+				pName, host, d.Port, c.Email, c.ID)
+			proxies = append(proxies, proxyItem{name: pName, yaml: py})
 		}
 	}
 
@@ -526,51 +527,53 @@ func generateQuanXConfig(details []*InboundDetail, tunnels []*Tunnel, host strin
 		}
 		coveredSlots[t.Slot] = true
 
-		for _, c := range d.Clients {
-			pName := makeUniqueName(formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP))
+		if len(d.Clients) == 0 {
+			continue
+		}
+		c := d.Clients[0]
+		pName := makeUniqueName(formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP))
 
-			switch proto {
-			case "trojan":
-				sb.WriteString(fmt.Sprintf("trojan = %s:%d, password=%s, over-tls=true, tls-verification=false, fast-open=false, udp-relay=true, tag=%s\r\n",
-					host, d.Port, c.ID, pName))
+		switch proto {
+		case "trojan":
+			sb.WriteString(fmt.Sprintf("trojan = %s:%d, password=%s, over-tls=true, tls-verification=false, fast-open=false, udp-relay=true, tag=%s\r\n",
+				host, d.Port, c.ID, pName))
 
-			case "vmess":
-				netType := strings.ToLower(d.Network)
-				tlsOpt := ""
-				if d.TLS == "tls" {
-					tlsOpt = ", over-tls=true, tls-verification=false"
-				}
-				obfsOpt := ""
-				if netType == "ws" {
-					obfsOpt = ", obfs=ws, obfs-uri=/"
-				}
-				sb.WriteString(fmt.Sprintf("vmess = %s:%d, method=chacha20-ietf-poly1305, password=%s%s%s, fast-open=false, udp-relay=true, tag=%s\r\n",
-					host, d.Port, c.ID, obfsOpt, tlsOpt, pName))
-
-			case "shadowsocks":
-				parts := strings.SplitN(c.ID, ":", 2)
-				method := "aes-256-gcm"
-				pwd := c.ID
-				if len(parts) == 2 {
-					method = strings.TrimSpace(parts[0])
-					pwd = strings.TrimSpace(parts[1])
-				}
-				sb.WriteString(fmt.Sprintf("shadowsocks = %s:%d, method=%s, password=%s, fast-open=false, udp-relay=true, tag=%s\r\n",
-					host, d.Port, method, pwd, pName))
-
-			case "socks":
-				if c.Email != "" && c.ID != "" {
-					sb.WriteString(fmt.Sprintf("socks5 = %s:%d, username=%s, password=%s, fast-open=false, udp-relay=true, tag=%s\r\n",
-						host, d.Port, c.Email, c.ID, pName))
-				} else {
-					sb.WriteString(fmt.Sprintf("socks5 = %s:%d, fast-open=false, udp-relay=true, tag=%s\r\n",
-						host, d.Port, pName))
-				}
-
-			case "vless":
-				sb.WriteString(fmt.Sprintf("; [QuanX 不支持 VLESS] %s (端口:%d) 采用 VLESS 协议。由于 Quantumult X 官方内核不支持 VLESS，建议在 3x-ui 面板中改用 Trojan 或 VMess。\r\n",
-					pName, d.Port))
+		case "vmess":
+			netType := strings.ToLower(d.Network)
+			tlsOpt := ""
+			if d.TLS == "tls" {
+				tlsOpt = ", over-tls=true, tls-verification=false"
 			}
+			obfsOpt := ""
+			if netType == "ws" {
+				obfsOpt = ", obfs=ws, obfs-uri=/"
+			}
+			sb.WriteString(fmt.Sprintf("vmess = %s:%d, method=chacha20-ietf-poly1305, password=%s%s%s, fast-open=false, udp-relay=true, tag=%s\r\n",
+				host, d.Port, c.ID, obfsOpt, tlsOpt, pName))
+
+		case "shadowsocks":
+			parts := strings.SplitN(c.ID, ":", 2)
+			method := "aes-256-gcm"
+			pwd := c.ID
+			if len(parts) == 2 {
+				method = strings.TrimSpace(parts[0])
+				pwd = strings.TrimSpace(parts[1])
+			}
+			sb.WriteString(fmt.Sprintf("shadowsocks = %s:%d, method=%s, password=%s, fast-open=false, udp-relay=true, tag=%s\r\n",
+				host, d.Port, method, pwd, pName))
+
+		case "socks":
+			if c.Email != "" && c.ID != "" {
+				sb.WriteString(fmt.Sprintf("socks5 = %s:%d, username=%s, password=%s, fast-open=false, udp-relay=true, tag=%s\r\n",
+					host, d.Port, c.Email, c.ID, pName))
+			} else {
+				sb.WriteString(fmt.Sprintf("socks5 = %s:%d, fast-open=false, udp-relay=true, tag=%s\r\n",
+					host, d.Port, pName))
+			}
+
+		case "vless":
+			sb.WriteString(fmt.Sprintf("; [QuanX 不支持 VLESS] %s (端口:%d) 采用 VLESS 协议。由于 Quantumult X 官方内核不支持 VLESS，建议在 3x-ui 面板中改用 Trojan 或 VMess。\r\n",
+				pName, d.Port))
 		}
 	}
 

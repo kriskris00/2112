@@ -514,55 +514,58 @@ func (m *Manager) AutoOrchestrate() {
 	tunnels := m.Tunnels()
 
 	// 0. 严格执行 1 出口 = 1 节点：清理 3x-ui / native 面板中的重复入站与废弃孤儿入站
-	if p, err := openPanel(); err == nil && p != nil {
-		inbounds, _ := p.Inbounds(nil)
-		byExitInbounds := make(map[string][]int) // host -> []inboundID
-		existingTunnelHosts := make(map[string]bool)
-		for _, t := range tunnels {
-			existingTunnelHosts[t.Node.HostName] = true
-			existingTunnelHosts[sanitizeTag(t.Node.HostName)] = true
-			if t.Node.IP != "" {
-				existingTunnelHosts[t.Node.IP] = true
-			}
-			if t.ExitIP != "" {
-				existingTunnelHosts[t.ExitIP] = true
-			}
-		}
-
-		var orphanIDs []int
-		for _, ib := range inbounds {
-			bTo := strings.TrimSpace(ib.BoundTo)
-			if bTo == "" || strings.EqualFold(bTo, "direct") || strings.EqualFold(bTo, "none") {
-				continue
-			}
-			matchedHost := ""
+	// 仅在已有激活隧道运行时执行孤儿清理，避免冷启动期间误删历史已创建入站
+	if len(tunnels) > 0 {
+		if p, err := openPanel(); err == nil && p != nil {
+			inbounds, _ := p.Inbounds(nil)
+			byExitInbounds := make(map[string][]int) // host -> []inboundID
+			existingTunnelHosts := make(map[string]bool)
 			for _, t := range tunnels {
-				if bTo == t.Node.HostName || sanitizeTag(bTo) == sanitizeTag(t.Node.HostName) ||
-					(t.Node.IP != "" && bTo == t.Node.IP) || (t.ExitIP != "" && bTo == t.ExitIP) ||
-					bTo == fmt.Sprintf("exit-%d", t.Slot) || bTo == fmt.Sprintf("slot-%d", t.Slot) {
-					matchedHost = t.Node.HostName
-					break
+				existingTunnelHosts[t.Node.HostName] = true
+				existingTunnelHosts[sanitizeTag(t.Node.HostName)] = true
+				if t.Node.IP != "" {
+					existingTunnelHosts[t.Node.IP] = true
+				}
+				if t.ExitIP != "" {
+					existingTunnelHosts[t.ExitIP] = true
 				}
 			}
-			if matchedHost != "" {
-				byExitInbounds[matchedHost] = append(byExitInbounds[matchedHost], ib.ID)
-			} else {
-				orphanIDs = append(orphanIDs, ib.ID)
-			}
-		}
 
-		var duplicateIDs []int
-		for _, ids := range byExitInbounds {
-			if len(ids) > 1 {
-				// 严格 1:1，只保留第 1 个正常入站，多余的全部删除
-				duplicateIDs = append(duplicateIDs, ids[1:]...)
+			var orphanIDs []int
+			for _, ib := range inbounds {
+				bTo := strings.TrimSpace(ib.BoundTo)
+				if bTo == "" || strings.EqualFold(bTo, "direct") || strings.EqualFold(bTo, "none") {
+					continue
+				}
+				matchedHost := ""
+				for _, t := range tunnels {
+					if bTo == t.Node.HostName || sanitizeTag(bTo) == sanitizeTag(t.Node.HostName) ||
+						(t.Node.IP != "" && bTo == t.Node.IP) || (t.ExitIP != "" && bTo == t.ExitIP) ||
+						bTo == fmt.Sprintf("exit-%d", t.Slot) || bTo == fmt.Sprintf("slot-%d", t.Slot) {
+						matchedHost = t.Node.HostName
+						break
+					}
+				}
+				if matchedHost != "" {
+					byExitInbounds[matchedHost] = append(byExitInbounds[matchedHost], ib.ID)
+				} else {
+					orphanIDs = append(orphanIDs, ib.ID)
+				}
 			}
-		}
-		toDelete := append(duplicateIDs, orphanIDs...)
-		if len(toDelete) > 0 {
-			log.Printf("[1出口1节点] 正在清理面板中 %d 个冗余/孤儿入站...", len(toDelete))
-			_ = p.DeleteInbounds(toDelete, tunnels)
-			invalidateInbounds()
+
+			var duplicateIDs []int
+			for _, ids := range byExitInbounds {
+				if len(ids) > 1 {
+					// 严格 1:1，只保留第 1 个正常入站，多余的全部删除
+					duplicateIDs = append(duplicateIDs, ids[1:]...)
+				}
+			}
+			toDelete := append(duplicateIDs, orphanIDs...)
+			if len(toDelete) > 0 {
+				log.Printf("[1出口1节点] 正在清理面板中 %d 个冗余/孤儿入站...", len(toDelete))
+				_ = p.DeleteInbounds(toDelete, tunnels)
+				invalidateInbounds()
+			}
 		}
 	}
 
@@ -744,7 +747,13 @@ func (m *Manager) AutoOrchestrate() {
 				}
 			}
 			if len(okHosts) > 0 {
-				_, _ = cloneTemplateToTunnels(0, okHosts, m.Tunnels())
+				log.Printf("[全网智能编排] %d 个出口已连通，正在自动同步创建 3x-ui 节点与路由绑定...", len(okHosts))
+				ports, err := cloneTemplateToTunnels(0, okHosts, m.Tunnels())
+				if err != nil {
+					log.Printf("[全网智能编排] 同步创建 3x-ui 节点出错: %v", err)
+				} else {
+					log.Printf("[全网智能编排] 成功为 %d 个出口同步创建 3x-ui 节点 (已开端口: %v)！", len(ports), ports)
+				}
 			}
 		}(newStarted)
 	}

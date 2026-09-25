@@ -126,6 +126,8 @@ func (m *Manager) reconnect(t *Tunnel, oldHost string) {
 		// 提前重建配置会因为入站还指着旧节点名而丢掉路由规则
 		m.bringUpPersist(t, false, true)
 		if t.Status != "up" {
+			log.Printf("[自愈系统] 槽位 %d (%s) 同国候选节点已耗尽且无法连通，自动清理失效出口与 3x-ui 对应入站...", t.Slot, oldHost)
+			_ = m.Stop(t.Slot)
 			return
 		}
 		// 出站 tag 跟着节点名走，换了节点就要把原来指向它的入站重新绑过去，
