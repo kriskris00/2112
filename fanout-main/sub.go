@@ -68,6 +68,18 @@ func getSubCountryRank(cc string) int {
 }
 
 // formatProxyName 构造纯净的订阅节点名称：[国旗Emoji] [企业/高校名称] (仅国旗表情，不含文字国家，不含"出口"字样，完全去除协议与端口)
+func isServerDirectInbound(d *InboundDetail) bool {
+	if d == nil {
+		return false
+	}
+	b := strings.TrimSpace(d.BoundTo)
+	if b != "" && !strings.EqualFold(b, "direct") && !strings.EqualFold(b, "none") {
+		return false
+	}
+	r := strings.ToLower(strings.TrimSpace(d.Remark))
+	return strings.Contains(r, "服务器直连") || strings.Contains(r, "server-direct")
+}
+
 func formatProxyName(countryCode, country, isp string) string {
 	cc := strings.ToUpper(strings.TrimSpace(countryCode))
 	flag := getFlagEmoji(cc)
@@ -190,12 +202,10 @@ func apiSubscription(m *Manager, a *Auth) http.HandlerFunc {
 					d, dErr := p.InboundDetail(id, host)
 					if dErr == nil && d != nil {
 						t := findTunnel(d.BoundTo)
-						// 严格只同步当前正在运行(up)的出口节点，未绑定或已停止的不入订阅
-						if t == nil {
-							return
-						}
 						validMu.Lock()
-						if !coveredSlots[t.Slot] {
+						if isServerDirectInbound(d) {
+							validDetails = append(validDetails, d)
+						} else if t != nil && !coveredSlots[t.Slot] {
 							coveredSlots[t.Slot] = true
 							validDetails = append(validDetails, d)
 						}
@@ -261,6 +271,19 @@ func apiSubscription(m *Manager, a *Auth) http.HandlerFunc {
 		for _, d := range validDetails {
 			t := findTunnel(d.BoundTo)
 			if t == nil {
+				if !isServerDirectInbound(d) {
+					continue
+				}
+				for _, rawLink := range d.Links {
+					idx := strings.LastIndex(rawLink, "#")
+					cleanName := makeUniqueLinkName("🖥️ 服务器直连 · 本机")
+					if idx != -1 {
+						rawLink = rawLink[:idx] + "#" + url.QueryEscape(cleanName)
+					} else {
+						rawLink = rawLink + "#" + url.QueryEscape(cleanName)
+					}
+					allLinks = append(allLinks, rawLink)
+				}
 				continue
 			}
 			for _, rawLink := range d.Links {

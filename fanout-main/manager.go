@@ -23,7 +23,10 @@ type Manager struct {
 	jobs          JobStore
 	refreshing    bool
 	orchestrateMu sync.Mutex
+	bindingMu     sync.Mutex
 	stateMu       sync.Mutex
+	progressMu    sync.RWMutex
+	orchProgress  AutoOrchestrateProgress
 	cooldownMu    sync.RWMutex
 	cooldowns     map[string]time.Time
 }
@@ -47,6 +50,47 @@ const failedNodeCooldown = 10 * time.Minute
 
 // AutoOrchestrateOptions 控制智能编排。只有通过真实出口验证的隧道
 // 才会进入正式出口池；Sources 为空或包含 all 表示使用全部候选源。
+type AutoOrchestrateProgress struct {
+	Running          bool      `json:"running"`
+	Stage            string    `json:"stage"`
+	Message          string    `json:"message"`
+	StartedAt        time.Time `json:"started_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+	FinishedAt       time.Time `json:"finished_at,omitempty"`
+	CountriesTotal   int       `json:"countries_total"`
+	CandidatesTotal  int       `json:"candidates_total"`
+	CandidatesTested int       `json:"candidates_tested"`
+	LivePassed       int       `json:"live_passed"`
+	Started          int       `json:"started"`
+	Verified         int       `json:"verified"`
+	Added            int       `json:"added"`
+	Failed           int       `json:"failed"`
+	CurrentCountry   string    `json:"current_country"`
+	CurrentNode      string    `json:"current_node"`
+	LastError        string    `json:"last_error,omitempty"`
+}
+
+func (m *Manager) setOrchestrateProgress(fn func(*AutoOrchestrateProgress)) {
+	m.progressMu.Lock()
+	fn(&m.orchProgress)
+	m.orchProgress.UpdatedAt = time.Now()
+	m.progressMu.Unlock()
+}
+
+func (m *Manager) OrchestrateProgress() AutoOrchestrateProgress {
+	m.progressMu.RLock()
+	p := m.orchProgress
+	m.progressMu.RUnlock()
+	return p
+}
+
+func (m *Manager) IsOrchestrating() bool {
+	m.progressMu.RLock()
+	v := m.orchProgress.Running
+	m.progressMu.RUnlock()
+	return v
+}
+
 type AutoOrchestrateOptions struct {
 	Sources       []string      `json:"sources"`
 	HotTarget     int           `json:"hot_target"`

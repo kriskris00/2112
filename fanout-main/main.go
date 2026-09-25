@@ -115,6 +115,7 @@ func main() {
 	mux.HandleFunc("/api/sources/scan", apiSourcesScan(mgr))
 	mux.HandleFunc("/api/regions", apiRegions(mgr))
 	mux.HandleFunc("/api/auto/orchestrate", apiAutoOrchestrate(mgr))
+	mux.HandleFunc("/api/auto/orchestrate/status", apiAutoOrchestrateStatus(mgr))
 	mux.HandleFunc("/api/provision", apiProvision(mgr))
 	mux.HandleFunc("/api/jobs", apiJobs(mgr))
 	mux.HandleFunc("/api/jobs/dismiss", apiJobDismiss(mgr))
@@ -312,6 +313,12 @@ func apiTunnels(m *Manager) http.HandlerFunc {
 	}
 }
 
+func apiAutoOrchestrateStatus(m *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, m.OrchestrateProgress())
+	}
+}
+
 func apiAutoOrchestrate(m *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		opts := DefaultAutoOrchestrateOptions()
@@ -336,10 +343,14 @@ func apiAutoOrchestrate(m *Manager) http.HandlerFunc {
 				opts.MaxStarts = body.MaxStarts
 			}
 		}
+		if m.IsOrchestrating() {
+			writeJSON(w, http.StatusConflict, map[string]any{"status": "busy", "message": "已有智能编排正在运行，请查看实时进度", "progress": m.OrchestrateProgress()})
+			return
+		}
 		go m.AutoOrchestrateWithOptions(opts)
 		writeJSON(w, http.StatusOK, map[string]any{
 			"status":  "ok",
-			"message": fmt.Sprintf("已触发智能编排：热门 %d / 冷门 %d；最多补位 %d；先测活后加入", opts.HotTarget, opts.ColdTarget, opts.MaxStarts),
+			"message": fmt.Sprintf("已启动智能编排：热门 %d / 冷门 %d；最多验证 %d 个候选", opts.HotTarget, opts.ColdTarget, opts.MaxStarts),
 			"options": opts,
 		})
 	}

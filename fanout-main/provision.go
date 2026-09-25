@@ -561,9 +561,25 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 		opts.Sources = []string{"all"}
 	}
 	if !m.orchestrateMu.TryLock() {
+		m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
+			p.Running = true
+			p.Stage = "busy"
+			p.Message = "已有智能编排正在运行，当前请求排队跳过"
+		})
 		return
 	}
-	defer m.orchestrateMu.Unlock()
+	m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
+		*p = AutoOrchestrateProgress{Running: true, Stage: "prepare", Message: "正在整理出口、节点池与候选源…", StartedAt: time.Now(), UpdatedAt: time.Now()}
+	})
+	defer func() {
+		m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
+			p.Running = false
+			p.Stage = "done"
+			p.FinishedAt = time.Now()
+			p.Message = fmt.Sprintf("完成：验证通过 %d 个，新增正式出口 %d 个，失败 %d 个", p.Verified, p.Added, p.Failed)
+		})
+		m.orchestrateMu.Unlock()
+	}()
 
 	tunnels := m.Tunnels()
 
@@ -667,6 +683,11 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 		}
 	}
 
+	m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
+		p.Stage = "collect"
+		p.Message = "正在整理候选节点，只处理实际存在的国家…"
+	})
+
 	// 3. 汇集节点池中所有国家（仅限真实可用 OpenVPN 节点）
 	m.mu.RLock()
 	allNodes := make([]Node, len(m.nodes))
@@ -690,6 +711,17 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 		}
 		countryCandidates[cc] = append(countryCandidates[cc], n)
 	}
+
+	candidateTotal := 0
+	for _, list := range countryCandidates {
+		candidateTotal += len(list)
+	}
+	m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
+		p.CountriesTotal = len(countryCandidates)
+		p.CandidatesTotal = candidateTotal
+		p.Stage = "probe"
+		p.Message = fmt.Sprintf("已找到 %d 个国家、%d 个候选，开始逐个测活…", len(countryCandidates), candidateTotal)
+	})
 
 	// 4. 收集并按热门程度与可用节点数排序国家列表
 	allCountries := make(map[string]bool)
@@ -721,7 +753,18 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 	// 必须逐个启动并完成真实出网验证；失败立即停止并冷却。
 	var verifiedStarted []*Tunnel
 	startsUsed := 0
+	attemptsUsed := 0
 	for _, cc := range sortedCountries {
+		m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
+			p.CurrentCountry = cc
+			p.Stage = "probe"
+			p.Message = fmt.Sprintf("正在处理 %s：目标 %d 个", cc, func() int {
+				if hotCountries[cc] {
+					return opts.HotTarget
+				}
+				return opts.ColdTarget
+			}())
+		})
 		target := opts.ColdTarget
 		if hotCountries[cc] {
 			target = opts.HotTarget
@@ -781,32 +824,55 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 		})
 
 		for _, pick := range cands {
-			if needed <= 0 || startsUsed >= opts.MaxStarts {
+			if needed <= 0 || attemptsUsed >= opts.MaxStarts {
 				break
 			}
+			attemptsUsed++
+			m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
+				p.CurrentNode = pick.HostName
+				p.CandidatesTested++
+				p.Message = fmt.Sprintf("测活 %s / %s：先检查远端可达性…", cc, pick.HostName)
+			})
 			// 第一阶段快速实测：代理必须完成真实 CONNECT；OpenVPN 至少确认远端服务可达。
 			// 第二阶段 Start/tryNode 会在独立 netns 中再次验证真实出口 IP，这是最终准入门槛。
 			alive, rtt, _, probeErr := probeNodeLive(pick, 1800*time.Millisecond)
 			if !alive {
+				m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) { p.Failed++; p.LastError = firstLine(fmt.Sprint(probeErr)) })
 				m.markNodeFailed(pick)
 				log.Printf("[智能编排] 预检失败，跳过 %s (%s): %v", pick.HostName, cc, probeErr)
 				continue
 			}
 			pick.Ping = int(rtt)
+			m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
+				p.LivePassed++
+				p.Stage = "start"
+				p.Message = fmt.Sprintf("%s 测活通过，正在建立真实隧道…", pick.HostName)
+			})
 
 			t, err := m.Start(pick)
 			if err != nil {
+				m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) { p.Failed++; p.LastError = firstLine(fmt.Sprint(err)) })
 				m.markNodeFailed(pick)
 				log.Printf("[智能编排] 启动失败，跳过 %s (%s): %v", pick.HostName, cc, err)
 				continue
 			}
 			startsUsed++
+			m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
+				p.Started++
+				p.Stage = "verify"
+				p.Message = fmt.Sprintf("%s 隧道已启动，等待真实出口 IP…", pick.HostName)
+			})
 
 			deadline := time.Now().Add(opts.VerifyTimeout)
 			for time.Now().Before(deadline) && t.Status == "starting" {
 				time.Sleep(500 * time.Millisecond)
 			}
 			if t.Status != "up" || strings.TrimSpace(t.ExitIP) == "" {
+				m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
+					p.Failed++
+					p.LastError = firstLine(t.Err)
+					p.Message = fmt.Sprintf("%s 最终出网验证失败，已移除", pick.HostName)
+				})
 				m.markNodeFailed(pick)
 				log.Printf("[智能编排] 最终出网验证失败，移除 %s (%s): %s", pick.HostName, cc, firstLine(t.Err))
 				_ = m.Stop(t.Slot)
@@ -820,54 +886,153 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 			}
 			verifiedStarted = append(verifiedStarted, t)
 			needed--
+			m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
+				p.Verified++
+				p.Added++
+				p.Message = fmt.Sprintf("%s 验证通过：%s，加入正式出口并准备绑定节点", cc, t.ExitIP)
+			})
 			log.Printf("[智能编排] %s 验证通过并加入正式出口: %s -> %s (%dms)", cc, t.Node.HostName, t.ExitIP, rtt)
 		}
 	}
 
+	if len(verifiedStarted) == 0 {
+		m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
+			p.Stage = "done"
+			if p.CandidatesTotal == 0 {
+				p.Message = "本轮没有符合当前源筛选条件的候选节点，请先刷新节点源或放宽源筛选。"
+			} else if p.LivePassed == 0 {
+				p.Message = fmt.Sprintf("本轮验证了 %d 个候选，但没有一个通过测活。失败节点已进入冷却，不会加入出口。", p.CandidatesTested)
+			} else {
+				p.Message = fmt.Sprintf("有 %d 个候选测活通过，但真实出网验证没有形成正式出口。", p.LivePassed)
+			}
+		})
+	}
+
 	if len(verifiedStarted) > 0 {
 		log.Printf("[全网智能编排] 本轮仅加入 %d 个已实测出网的正式出口 (热门%d/冷门%d，最大补位%d)", len(verifiedStarted), opts.HotTarget, opts.ColdTarget, opts.MaxStarts)
-		var okHosts []string
-		for _, t := range verifiedStarted {
-			if t.Status == "up" {
-				okHosts = append(okHosts, t.Node.HostName)
+	}
+
+	m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
+		p.Stage = "bind"
+		p.Message = "出口验证完成，正在逐个绑定节点并检查服务器直连节点…"
+	})
+	// 出口启动与入站绑定严格分离：先确保所有 UP 出口都有节点，再保证本机直连节点存在。
+	m.reconcilePanelBindings()
+
+}
+
+// reconcilePanelBindings 保证两件事始终成立：
+// 1. 至少保留一个“服务器直连”入站，它不绑定任何出口，流量直接走本机公网；
+// 2. 每一条已真实验证为 UP 的出口，都必须有且只有一个对应入站。
+//
+// 这里故意按单出口串行补绑，而不是一次性批量调用，避免自建 Xray 在重建配置时
+// 与多个异步 CloneToTunnels 互相覆盖，造成“出口已经 UP、面板却显示无节点”。
+func (m *Manager) reconcilePanelBindings() {
+	m.bindingMu.Lock()
+	defer m.bindingMu.Unlock()
+
+	p, err := openPanel()
+	if err != nil || p == nil {
+		if err != nil {
+			log.Printf("[节点绑定] 打开面板后端失败: %v", err)
+		}
+		return
+	}
+
+	tunnels := m.Tunnels()
+	inbounds, err := p.Inbounds(nil)
+	if err != nil {
+		log.Printf("[节点绑定] 读取入站失败: %v", err)
+		return
+	}
+
+	// 没有任何未绑定入站时，自动创建一个“服务器直连 · 本机”节点。
+	// 已存在的未绑定入站则直接把其中一个明确标记为服务器直连，不重复制造垃圾节点。
+	directFound := false
+	for _, ib := range inbounds {
+		if strings.TrimSpace(ib.BoundTo) != "" && !strings.EqualFold(strings.TrimSpace(ib.BoundTo), "direct") && !strings.EqualFold(strings.TrimSpace(ib.BoundTo), "none") {
+			continue
+		}
+		if strings.Contains(strings.ToLower(ib.Remark), "服务器直连") || strings.Contains(strings.ToLower(ib.Remark), "server-direct") {
+			directFound = true
+			break
+		}
+	}
+	if !directFound {
+		var candidate *Inbound
+		for i := range inbounds {
+			ib := &inbounds[i]
+			b := strings.TrimSpace(ib.BoundTo)
+			if b == "" || strings.EqualFold(b, "direct") || strings.EqualFold(b, "none") {
+				candidate = ib
+				break
 			}
 		}
-		if len(okHosts) > 0 {
-			go func(hosts []string) {
-				if _, err := cloneTemplateToTunnels(0, hosts, m.Tunnels()); err != nil {
-					log.Printf("[智能编排] 自动绑定入站失败: %v", err)
-				}
-			}(okHosts)
+		if candidate != nil {
+			remark := "服务器直连 · 本机"
+			if err := p.UpdateInbound(candidate.ID, InboundPatch{Remark: &remark}, tunnels); err != nil {
+				log.Printf("[节点绑定] 标记服务器直连节点失败: %v", err)
+			} else {
+				directFound = true
+				log.Printf("[节点绑定] 已将入站 %d 标记为服务器直连 · 本机", candidate.ID)
+			}
+		} else {
+			// 使用 VLESS + TCP + REALITY，作为真正的“本机直连”节点：不绑定任何 VPN 出口。
+			ib, err := p.CreateInbound(NewInboundSpec{
+				Protocol:    "vless",
+				Network:     "tcp",
+				Security:    "reality",
+				Remark:      "服务器直连 · 本机",
+				Dest:        "www.microsoft.com:443",
+				ServerNames: "www.microsoft.com",
+				Fingerprint: "chrome",
+			}, tunnels)
+			if err != nil {
+				log.Printf("[节点绑定] 创建服务器直连节点失败: %v", err)
+			} else if ib != nil {
+				directFound = true
+				log.Printf("[节点绑定] 已创建服务器直连 · 本机 :%d（不走任何出口）", ib.Port)
+			}
 		}
 	}
 
-	// 5. 严格确保 1 出口 = 1 节点：检测已就绪 UP 出口是否已绑定入站，若缺失立即自动补齐绑定
-	go func() {
-		p, err := openPanel()
-		if err != nil || p == nil {
-			return
+	// 重新读取一次，确保刚创建/改名的直连节点已进入最新状态。
+	inbounds, _ = p.Inbounds(nil)
+	bound := make(map[string]bool)
+	for _, ib := range inbounds {
+		b := strings.TrimSpace(ib.BoundTo)
+		if b == "" || strings.EqualFold(b, "direct") || strings.EqualFold(b, "none") {
+			continue
 		}
-		allTunnels := m.Tunnels()
-		var unmappedHosts []string
-		inbounds, _ := p.Inbounds(nil)
-		boundHosts := make(map[string]bool)
-		for _, ib := range inbounds {
-			b := strings.TrimSpace(ib.BoundTo)
-			if b != "" && !strings.EqualFold(b, "direct") && !strings.EqualFold(b, "none") {
-				boundHosts[b] = true
-				boundHosts[sanitizeTag(b)] = true
+		bound[b] = true
+		bound[sanitizeTag(b)] = true
+	}
+
+	for _, t := range tunnels {
+		if t == nil || t.Status != "up" {
+			continue
+		}
+		host := t.Node.HostName
+		if bound[host] || bound[sanitizeTag(host)] {
+			continue
+		}
+		var lastErr error
+		for attempt := 1; attempt <= 3; attempt++ {
+			if _, err := cloneTemplateToTunnels(0, []string{host}, tunnels); err == nil {
+				bound[host] = true
+				bound[sanitizeTag(host)] = true
+				log.Printf("[节点绑定] 出口 %s 已自动创建并绑定入站（第 %d 次尝试）", host, attempt)
+				break
+			} else {
+				lastErr = err
+				time.Sleep(time.Second)
 			}
 		}
-		for _, t := range allTunnels {
-			if t.Status == "up" && !boundHosts[t.Node.HostName] && !boundHosts[sanitizeTag(t.Node.HostName)] {
-				unmappedHosts = append(unmappedHosts, t.Node.HostName)
-			}
+		if lastErr != nil && !bound[host] && !bound[sanitizeTag(host)] {
+			log.Printf("[节点绑定] 出口 %s 自动绑定失败，稍后继续重试: %v", host, lastErr)
 		}
-		if len(unmappedHosts) > 0 {
-			log.Printf("[全网智能编排] 发现 %d 个已连通出口尚未绑定 3x-ui 节点入站，立即自动克隆绑定...", len(unmappedHosts))
-			_, _ = cloneTemplateToTunnels(0, unmappedHosts, allTunnels)
-		}
-	}()
+	}
+	invalidateInbounds()
 }
 
 // WatchAutoOrchestrate 守护线程：定期巡检全网国家出口配额与自愈，并每 30 分钟定时拉取全网最新节点源
@@ -875,16 +1040,21 @@ func (m *Manager) WatchAutoOrchestrate() {
 	time.Sleep(10 * time.Second)
 	m.AutoOrchestrate()
 
-	// 1. 每 2 分钟做一次出口配额快速巡检与健康自愈维护（稳定运行的出口绝不触动）
+	// 1. 每 30 秒补一次“UP 出口 -> 入站”绑定，避免异步启动时序导致面板短暂显示“无节点”。
+	bindingTicker := time.NewTicker(30 * time.Second)
+	// 2. 每 2 分钟做一次出口配额快速巡检与健康自愈维护（稳定运行的出口绝不触动）
 	orchestrateTicker := time.NewTicker(2 * time.Minute)
-	// 2. 每 15 分钟定时拉取一次全网最新节点源（自动发现新国家直接添加，离线恢复的国家自动补齐）
+	// 3. 每 15 分钟定时拉取一次全网最新节点源（自动发现新国家直接添加，离线恢复的国家自动补齐）
 	sourceTicker := time.NewTicker(15 * time.Minute)
 
+	defer bindingTicker.Stop()
 	defer orchestrateTicker.Stop()
 	defer sourceTicker.Stop()
 
 	for {
 		select {
+		case <-bindingTicker.C:
+			m.reconcilePanelBindings()
 		case <-orchestrateTicker.C:
 			m.AutoOrchestrate()
 		case <-sourceTicker.C:

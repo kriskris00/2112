@@ -780,6 +780,12 @@ textarea:focus{outline:none;border-color:var(--accent)}
           <label class="orch-source"><input type="checkbox" id="orchAll" value="all"> 🌍 全部候选源</label>
         </div>
       </div>
+      <div id="orchProgress" style="display:none;margin-top:14px;padding:12px;border-radius:12px;background:rgba(2,132,199,.08);border:1px solid rgba(2,132,199,.18)">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><b id="orchProgressStage">准备中</b><span id="orchProgressCount" style="font-size:12px;color:var(--dim)">0 / 0</span></div>
+        <div style="height:8px;background:rgba(127,127,127,.18);border-radius:99px;overflow:hidden;margin:9px 0"><div id="orchProgressBar" style="height:100%;width:0%;background:linear-gradient(90deg,#2563eb,#8b5cf6);transition:width .3s"></div></div>
+        <div id="orchProgressMsg" style="font-size:12px;line-height:1.5">正在启动…</div>
+        <div id="orchProgressStats" style="margin-top:7px;font-size:11px;color:var(--dim)">测活通过 0 · 已启动 0 · 验证通过 0 · 新增 0 · 失败 0</div>
+      </div>
       <div style="margin-top:14px;padding:10px;border-radius:10px;background:rgba(2,132,199,.07);border:1px solid rgba(2,132,199,.16);font-size:12px;color:var(--dim)">测活为强制步骤，不能关闭。国家没有合格节点就不创建；有 4 个、5 个或更多合格节点时，可把目标数量调高。</div>
     </div>
     <div class="foot"><span class="spacer"></span><button data-close="orchestrateModal">取消</button><button class="primary" id="runOrchestrate">开始智能编排</button></div>
@@ -2512,7 +2518,26 @@ document.addEventListener('click', async e => {
     const maxStarts = Math.max(1, Math.min(20, parseInt($('#orchMax').value || '6', 10)));
     if(!sources.length){ toast('至少选择一个节点源', true); return; }
     btn.disabled = true;
-    toast('⚡ 正在测活并逐个验证，只有真正出网的节点才会加入...');
+    $('#orchProgress').style.display = 'block';
+    $('#orchProgressStage').textContent = '启动中';
+    $('#orchProgressMsg').textContent = '正在启动智能编排…';
+    let progressTimer = null;
+    const renderOrchProgress = (p) => {
+      if(!p) return;
+      const tested = Number(p.candidates_tested || 0), total = Number(p.candidates_total || 0);
+      const pct = total ? Math.min(100, Math.round(tested * 100 / total)) : (p.running ? 8 : 100);
+      $('#orchProgressBar').style.width = pct + '%';
+      const stageMap = {prepare:'准备',collect:'整理候选',probe:'测活',start:'建立隧道',verify:'真实出网验证',bind:'绑定节点',done:'完成',busy:'已有任务'};
+      $('#orchProgressStage').textContent = stageMap[p.stage] || p.stage || '处理中';
+      $('#orchProgressCount').textContent = total ? (tested + ' / ' + total + ' 候选') : '候选统计中';
+      $('#orchProgressMsg').textContent = p.message || '处理中…';
+      $('#orchProgressStats').textContent = '测活通过 ' + (p.live_passed||0) + ' · 已启动 ' + (p.started||0) + ' · 验证通过 ' + (p.verified||0) + ' · 新增 ' + (p.added||0) + ' · 失败 ' + (p.failed||0);
+      if(p.current_node) $('#orchProgressMsg').textContent += '（当前：' + p.current_node + '）';
+      if(!p.running && progressTimer){ clearInterval(progressTimer); progressTimer = null; }
+    };
+    const pollOrch = async () => {
+      try { renderOrchProgress(await api('/api/auto/orchestrate/status')); } catch(err) {}
+    };
     try {
       const res = await api('/api/auto/orchestrate', {
         method:'POST', headers:{'Content-Type':'application/json'},
@@ -2520,10 +2545,14 @@ document.addEventListener('click', async e => {
       });
       closeModal('orchestrateModal');
       toast(res.message || '智能编排已启动');
-      setTimeout(poll, 2000);
-      setTimeout(poll, 8000);
+      openModal('orchestrateModal');
+      $('#orchProgress').style.display = 'block';
+      progressTimer = setInterval(pollOrch, 1000);
+      await pollOrch();
+      setTimeout(poll, 1200); setTimeout(poll, 5000); setTimeout(poll, 12000);
     } catch(err) {
       toast('智能编排失败: ' + err.message, true);
+      $('#orchProgressMsg').textContent = '启动失败：' + err.message;
     } finally {
       setTimeout(() => { btn.disabled = false; }, 1200);
     }
