@@ -30,6 +30,29 @@ func isEduISP(isp string) bool {
 		strings.Contains(low, "tsukuba")
 }
 
+// isGovISP 判断运营商是否为政府机构、公共事务或市政网络专网（不含国内）
+func isGovISP(isp string) bool {
+	low := strings.ToLower(isp)
+	if strings.Contains(low, "china") || strings.Contains(low, ".cn") {
+		return false
+	}
+	return strings.Contains(low, "government") ||
+		strings.Contains(low, "ministry") ||
+		strings.Contains(low, "department of") ||
+		strings.Contains(low, "prefecture") ||
+		strings.Contains(low, "municipal") ||
+		strings.Contains(low, "public safety") ||
+		strings.Contains(low, "parliament") ||
+		strings.Contains(low, "senate") ||
+		strings.Contains(low, "federal") ||
+		strings.Contains(low, "state of") ||
+		strings.Contains(low, "police") ||
+		strings.Contains(low, "customs") ||
+		strings.Contains(low, "military") ||
+		strings.Contains(low, ".gov") ||
+		strings.Contains(low, ".go.jp")
+}
+
 // IPIntel 存储单个 IP 的归属类型、运营商与纯净度风控数据
 type IPIntel struct {
 	IP          string `json:"ip"`
@@ -207,7 +230,10 @@ func enrichSingleIPAsync(ip string) {
 	if ispName == "" {
 		ispName = data.Org
 	}
-	if (isEduISP(ispName) || isEduIP(ip)) && data.CountryCode != "CN" && !strings.Contains(strings.ToLower(data.Country), "china") {
+	if isGovISP(ispName) && data.CountryCode != "CN" && !strings.Contains(strings.ToLower(data.Country), "china") {
+		ipType = "gov"
+		purity = 99
+	} else if (isEduISP(ispName) || isEduIP(ip)) && data.CountryCode != "CN" && !strings.Contains(strings.ToLower(data.Country), "china") {
 		ipType = "edu"
 		purity = 98
 		if data.CountryCode == "" || data.CountryCode == "EDU" {
@@ -475,7 +501,10 @@ func BatchEnrichNodes(nodes []Node) {
 		}
 		country := item.Country
 		countryCode := item.CountryCode
-		if (isEduISP(isp) || isEduIP(item.Query)) && item.CountryCode != "CN" && !strings.Contains(strings.ToLower(item.Country), "china") {
+		if isGovISP(isp) && item.CountryCode != "CN" && !strings.Contains(strings.ToLower(item.Country), "china") {
+			ipType = "gov"
+			purity = 99
+		} else if (isEduISP(isp) || isEduIP(item.Query)) && item.CountryCode != "CN" && !strings.Contains(strings.ToLower(item.Country), "china") {
 			ipType = "edu"
 			purity = 98
 			if countryCode == "" || countryCode == "EDU" {

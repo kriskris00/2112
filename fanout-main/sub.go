@@ -16,7 +16,7 @@ var countryNameZH = map[string]string{
 	"TH": "泰国", "VN": "越南", "IN": "印度", "RU": "俄罗斯", "BR": "巴西",
 	"TR": "土耳其", "IT": "意大利", "ES": "西班牙", "SE": "瑞典", "CH": "瑞士",
 	"NO": "挪威", "FI": "芬兰", "PL": "波兰", "CZ": "捷克", "AT": "奥地利",
-	"GLOBAL": "全球", "EDU": "海外高校学术网",
+	"GLOBAL": "全球", "EDU": "海外高校学术网", "GOV": "政府公共机构专网",
 }
 
 // formatProxyName 构造纯净的订阅节点名称：[国旗Emoji] [企业/高校名称] (仅国旗表情，不含文字国家，不含"出口"字样，完全去除协议与端口)
@@ -499,6 +499,9 @@ func generateQuanXConfig(details []*InboundDetail, tunnels []*Tunnel, host strin
 // getFlagEmoji 把两位国家码（ISO 3166-1 alpha-2）转换为对应的国旗 Emoji
 func getFlagEmoji(countryCode string) string {
 	cc := strings.ToUpper(strings.TrimSpace(countryCode))
+	if cc == "GOV" {
+		return "🏛️"
+	}
 	if cc == "EDU" {
 		return "🎓"
 	}

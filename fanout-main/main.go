@@ -22,7 +22,7 @@ var version = "v0.3.3-enhanced"
 func main() {
 	var (
 		webPort  = flag.Int("web", 8899, "Web 管理端口")
-		maxSlots = flag.Int("max", 20, "最多同时运行的隧道数")
+		maxSlots = flag.Int("max", 150, "最多同时运行的隧道数")
 		workDir  = flag.String("dir", "/var/lib/fanout", "工作目录")
 	)
 	panelMode := flag.String("panel", "", "节点链接后端: 留空按界面设置/自动探测, 3x-ui, native, xray-cf-lite")
@@ -71,6 +71,8 @@ func main() {
 		} else {
 			log.Printf("全网节点池已聚合扩展至 %d 个节点", n)
 		}
+		// 节点池拉取完毕后立即触发全网自动编排（热门国家各3节点，冷门国家各1节点）
+		mgr.AutoOrchestrate()
 	}()
 
 	if n, err := mgr.restoreState(); err != nil {
@@ -83,6 +85,7 @@ func main() {
 	}
 
 	go mgr.WatchHealth()
+	go mgr.WatchAutoOrchestrate()
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
@@ -111,6 +114,7 @@ func main() {
 	mux.HandleFunc("/api/sources/refresh", apiSourcesRefresh(mgr))
 	mux.HandleFunc("/api/sources/scan", apiSourcesScan(mgr))
 	mux.HandleFunc("/api/regions", apiRegions(mgr))
+	mux.HandleFunc("/api/auto/orchestrate", apiAutoOrchestrate(mgr))
 	mux.HandleFunc("/api/provision", apiProvision(mgr))
 	mux.HandleFunc("/api/jobs", apiJobs(mgr))
 	mux.HandleFunc("/api/jobs/dismiss", apiJobDismiss(mgr))
@@ -215,7 +219,11 @@ func apiNodes(m *Manager) http.HandlerFunc {
 				}
 			}
 			if source != "" && source != "all" {
-				if source == "edu" {
+				if source == "gov" {
+					if n.Source != "gov" && !strings.EqualFold(n.IPType, "gov") {
+						continue
+					}
+				} else if source == "edu" {
 					if n.Source != "edu" && !isEduIP(n.IP) && !strings.EqualFold(n.IPType, "edu") {
 						continue
 					}
@@ -240,6 +248,8 @@ func apiNodes(m *Manager) http.HandlerFunc {
 		sort.Slice(filtered, func(i, j int) bool {
 			typeRank := func(t string) int {
 				switch strings.ToLower(t) {
+				case "gov":
+					return 4
 				case "edu":
 					return 3
 				case "residential":
@@ -299,6 +309,16 @@ func apiNodes(m *Manager) http.HandlerFunc {
 func apiTunnels(m *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, m.Tunnels())
+	}
+}
+
+func apiAutoOrchestrate(m *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		go m.AutoOrchestrate()
+		writeJSON(w, http.StatusOK, map[string]string{
+			"status":  "ok",
+			"message": "已触发全网出口智能编排（热门国家各3节点/冷门国家各1节点）",
+		})
 	}
 }
 

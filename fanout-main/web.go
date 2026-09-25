@@ -60,8 +60,9 @@ main{padding:14px 16px 40px;max-width:1180px;margin:0 auto}
 .exit .acts{grid-area:acts}
 .tag-res{background:rgba(63,166,107,.18);color:#3fa66b;border:1px solid rgba(63,166,107,.4);border-radius:3px;padding:1px 5px;font-size:11px;font-weight:600}
 .tag-host{background:rgba(74,158,218,.18);color:#4a9eda;border:1px solid rgba(74,158,218,.4);border-radius:3px;padding:1px 5px;font-size:11px;font-weight:600}
-.tag-mob{background:rgba(201,144,58,.18);color:#c9903a;border:1px solid rgba(201,144,58,.4);border-radius:3px;padding:1px 5px;font-size:11px;font-weight:600}
 .tag-purity{font-size:11px;font-weight:600;padding:1px 5px;border-radius:3px;background:#0e1116;border:1px solid var(--line)}
+.tag-gov{background:rgba(235,178,55,.18);color:#ebb237;border:1px solid rgba(235,178,55,.45);border-radius:3px;padding:1px 5px;font-size:11px;font-weight:600}
+.tag-edu{background:rgba(168,85,247,.18);color:#a855f7;border:1px solid rgba(168,85,247,.4);border-radius:3px;padding:1px 5px;font-size:11px;font-weight:600}
 .stats-summary{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
 .stat-pill{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:3px 9px;font-size:12px;color:var(--dim)}
 .stat-pill b{color:var(--text);margin-left:4px}
@@ -267,6 +268,10 @@ textarea:focus{outline:none;border-color:var(--accent)}
       <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><path d="M11 8v6M8 11h6"/></svg>
       测活扫节点
     </button>
+    <button class="primary" id="autoOrchestrateBtn" title="全网智能编排：热门国家各维持 3 个健康出口，冷门国家各维持 1 个，自动发现、失效同国轮换与自愈" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);border-color:#818cf8;color:#fff;font-weight:600">
+      <svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+      智能编排
+    </button>
     <button class="primary" id="newexit">
       <svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
       新建出口
@@ -294,8 +299,9 @@ textarea:focus{outline:none;border-color:var(--accent)}
           <span style="font-size:12px;color:var(--dim)">自由选择单独源或全部聚合</span>
         </div>
         <select id="wzSource" style="padding:8px 10px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--text);font-size:13px;width:100%">
-          <option value="all">🌐 官方与镜像优质节点 (全量家宽/高校原生 · 自动优选)</option>
+          <option value="all">🌐 官方与镜像优质节点 (全量家宽/高校/政府 · 自动优选)</option>
           <option value="vpngate">🇯🇵 日本筑波大学 (官方与高防镜像源)</option>
+          <option value="gov">🏛️ 全球政府公共机构网 (政府自治体/公共政务专网)</option>
           <option value="edu">🎓 海外高校学术科研网 (日本筑波/韩国/台湾/欧美名校)</option>
           <option value="residential">🏡 住宅家宽原生节点 (纯净高分 · 极速防封)</option>
           <option value="custom">📁 本地导入与自定义节点 (.ovpn / 自建)</option>
@@ -723,6 +729,7 @@ textarea:focus{outline:none;border-color:var(--accent)}
           <span style="font-size:11px;color:var(--dim)">扫描来源</span>
           <select id="lsSource" style="padding:6px 8px;font-size:12px;min-width:140px;background:#0e1116;border:1px solid var(--line);color:var(--text);border-radius:4px">
             <option value="all">🌐 全部优质源 (全量并发实测)</option>
+            <option value="gov">🏛️ 全球政府公共机构网 (政务专网)</option>
             <option value="edu" selected>🎓 海外高校学术网 (日本筑波/韩国/台湾/欧美)</option>
             <option value="vpngate">🇯🇵 日本筑波大学 (VPN Gate)</option>
             <option value="residential">🏡 住宅家宽原生节点</option>
@@ -923,6 +930,7 @@ const STATUS = {up:'已连通', starting:'连接中', failed:'失败', stopped:'
 function getFlagEmoji(countryCode) {
   if (!countryCode) return '🌐';
   const code = countryCode.toUpperCase();
+  if (code === 'GOV') return '🏛️';
   if (code === 'EDU') return '🎓';
   if (code === 'CUSTOM' || code === 'GLOBAL') return '🌐';
   if (code.length !== 2) return '🌐';
@@ -935,7 +943,7 @@ function getFlagEmoji(countryCode) {
 }
 
 const COUNTRY_ZH = {
-  EDU: '海外高校学术网络', GLOBAL: '全球公网', CUSTOM: '自定义',
+  GOV: '政府公共网络', EDU: '海外高校学术网络', GLOBAL: '全球公网', CUSTOM: '自定义',
   // 亚太地区
   JP: '日本', KR: '韩国', HK: '中国香港', TW: '中国台湾', SG: '新加坡',
   MY: '马来西亚', TH: '泰国', VN: '越南', PH: '菲律宾', ID: '印尼',
@@ -965,6 +973,7 @@ const COUNTRY_ZH = {
 
 function formatCountry(code, name) {
   if (!code || code === 'CUSTOM') return '🌐 ' + (name || '自定义');
+  if (code === 'GOV') return '🏛️ 全球政府公共机构专网' + (name && name !== 'GOV' && name !== '政府公共网络' ? ' · ' + name : '');
   if (code === 'EDU') return '🎓 海外高校学术科研网' + (name && name !== 'EDU' && name !== '教育网高校' && name !== '海外高校学术网络' ? ' · ' + name : '');
   const flag = getFlagEmoji(code);
   const zh = COUNTRY_ZH[code.toUpperCase()] || '';
@@ -982,13 +991,17 @@ function renderExits(){
   $('#exportAll').disabled = !hasInboundsOrExits;
   $('#stopall').disabled = !n;
 
+  const govCount = view.exits.filter(e => e.ip_type === 'gov').length;
+  const eduCount = view.exits.filter(e => e.ip_type === 'edu').length;
   const resCount = view.exits.filter(e => e.ip_type === 'residential').length;
   const purities = view.exits.map(e => e.purity_score || 55);
   const avgPurity = purities.length ? Math.round(purities.reduce((a, b) => a + b, 0) / purities.length) : 0;
 
   const summaryBar = '<div class="stats-summary">'
     + '<span class="stat-pill">运行出口<b>' + n + '</b></span>'
-    + '<span class="stat-pill">🏡 住宅出口<b style="color:#3fa66b">' + resCount + '</b></span>'
+    + (govCount ? '<span class="stat-pill">🏛️ 政府专网<b style="color:#ebb237">' + govCount + '</b></span>' : '')
+    + (eduCount ? '<span class="stat-pill">🎓 学术科研<b style="color:#a855f7">' + eduCount + '</b></span>' : '')
+    + '<span class="stat-pill">🏡 住宅家宽<b style="color:#3fa66b">' + resCount + '</b></span>'
     + '<span class="stat-pill">平均纯净度<b style="color:' + (avgPurity>=80?'#3fa66b':'#c9903a') + '">' + (n ? avgPurity + '%' : '—') + '</b></span>'
     + '<span class="stat-pill">联动后端<b>' + esc(backendName()) + '</b></span>'
     + '</div>';
@@ -1003,10 +1016,14 @@ function renderExits(){
 
   list.innerHTML = summaryBar + view.exits.map(e => {
     const label = e.exit_ip || (e.status === 'starting' ? '连接中…' : '—');
+    const isGov = e.ip_type === 'gov';
+    const isEdu = e.ip_type === 'edu';
     const isRes = e.ip_type === 'residential';
-    const typeTag = isRes ? '<span class="tag-res" title="家庭宽带住宅 IP">🏡 住宅</span>'
+    const typeTag = isGov ? '<span class="tag-gov" title="政府/公共机构专网">🏛️ 政府</span>'
+      : (isEdu ? '<span class="tag-edu" title="海外高校学术科研网络">🎓 学术</span>'
+      : (isRes ? '<span class="tag-res" title="家庭宽带住宅 IP">🏡 住宅</span>'
       : (e.ip_type === 'mobile' ? '<span class="tag-mob" title="移动蜂窝网络 IP">📱 移动</span>'
-      : '<span class="tag-host" title="数据中心机房 IP">🏢 机房</span>');
+      : '<span class="tag-host" title="数据中心机房 IP">🏢 机房</span>')));
 
     const purity = e.purity_score || 55;
     let pColor = '#c25450';
@@ -1184,6 +1201,7 @@ const DEFAULT_CORE_REGIONS = [
   {code: 'FR', name: '法国', available: 8, avg_purity: 90},
   {code: 'AU', name: '澳大利亚', available: 8, avg_purity: 90},
   {code: 'NL', name: '荷兰', available: 8, avg_purity: 92},
+  {code: 'GOV', name: '全球政府公共机构专网', available: 5, avg_purity: 99},
   {code: 'EDU', name: '海外高校学术科研网 (不含国内)', available: 15, avg_purity: 99}
 ];
 
@@ -2256,6 +2274,21 @@ document.addEventListener('click', async e => {
     const val = ($('#subUrlClash').value || '').trim();
     if(val){
       window.location.href = 'clash://install-config?url=' + encodeURIComponent(val) + '&name=FanoutGateway';
+    }
+    return;
+  }
+  if(e.target.closest('#autoOrchestrateBtn')){
+    const btn = e.target.closest('#autoOrchestrateBtn');
+    btn.disabled = true;
+    toast('⚡ 正在执行全网智能编排：热门国家各维持 3 个出口，冷门国家各维持 1 个...');
+    try {
+      await api('/api/auto/orchestrate', {method: 'POST'});
+      toast('全网智能编排已触发！正在检查各国家配额并拉起可用节点...');
+      setTimeout(poll, 2500);
+    } catch(err) {
+      toast('触发编排失败: ' + err.message, true);
+    } finally {
+      setTimeout(() => { btn.disabled = false; }, 3000);
     }
     return;
   }
