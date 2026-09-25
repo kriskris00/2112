@@ -29,34 +29,28 @@ const mirrorKey = "8rhIFzFKRJMFAe-xP5OQPclDEvSjKlHo"
 
 // defaultMirrors 日本筑波大学 VPN Gate 官方活跃公网 IP 镜像与直连候选池
 var defaultMirrors = []string{
-	"https://www.vpngate.net/api/iphone/",      // 官方 HTTPS 直连
-	"http://www.vpngate.net/api/iphone/",       // 官方 HTTP 直连
-	"http://150.40.105.19:35399/api/iphone/",   // 筑波大学 IP 镜像 1 (克罗地亚)
-	"http://150.40.105.6:11803/api/iphone/",    // 筑波大学 IP 镜像 2 (克罗地亚)
-	"http://150.40.105.5:32536/api/iphone/",    // 筑波大学 IP 镜像 3 (实时高可用)
-	"http://150.40.105.20:16086/api/iphone/",   // 筑波大学 IP 镜像 4 (实时高可用)
-	"http://150.40.105.10:46711/api/iphone/",   // 筑波大学 IP 镜像 5 (实时高可用)
-	"http://150.40.105.23:64629/api/iphone/",   // 筑波大学 IP 镜像 6 (克罗地亚)
-	"http://194.156.89.134:47774/api/iphone/",  // 筑波大学 IP 镜像 7 (德国)
-	"http://119.195.163.98:23340/api/iphone/",  // 筑波大学 IP 镜像 8 (韩国)
-	"http://103.172.220.133:3946/api/iphone/",  // 筑波大学 IP 镜像 9 (印度)
-	"http://219.100.37.234:25500/api/iphone/",  // 筑波大学 IP 镜像 10 (日本)
-	"http://153.125.233.158:19641/api/iphone/", // 筑波大学 IP 镜像 11 (日本)
-	"http://130.158.75.33:14631/api/iphone/",   // 筑波大学 IP 镜像 12 (日本筑波大学本部)
-	"http://219.100.37.238:52158/api/iphone/",  // 筑波大学 IP 镜像 13 (日本)
-	"http://219.100.37.244:11075/api/iphone/",  // 筑波大学 IP 镜像 14 (日本)
-	"http://103.201.129.246:44837/api/iphone/", // 筑波大学亚太镜像 15
-	"http://185.220.101.4:1194/api/iphone/",    // 筑波大学欧洲镜像 16
-	"https://p.xy.kg/vpngate",                  // 官方高防 Cloudflare 代理镜像
+	"http://150.40.105.19:35399/api/iphone/",  // 筑波大学 IP 镜像 1 (克罗地亚)
+	"http://119.195.163.98:23340/api/iphone/",  // 筑波大学 IP 镜像 2 (韩国)
+	"http://150.40.105.6:11803/api/iphone/",   // 筑波大学 IP 镜像 3 (克罗地亚)
+	"http://150.40.105.23:64629/api/iphone/",  // 筑波大学 IP 镜像 4 (克罗地亚)
+	"http://103.172.220.133:3946/api/iphone/",  // 筑波大学 IP 镜像 5 (印度)
+	"http://194.156.89.134:47774/api/iphone/", // 筑波大学 IP 镜像 6 (德国)
+	"http://219.100.37.234:25500/api/iphone/", // 筑波大学 IP 镜像 7 (日本)
+	"http://153.125.233.158:19641/api/iphone/",// 筑波大学 IP 镜像 8 (日本)
+	"http://130.158.75.33:14631/api/iphone/",  // 筑波大学 IP 镜像 9 (日本筑波大学本部)
+	"http://219.100.37.238:52158/api/iphone/", // 筑波大学 IP 镜像 10 (日本)
+	"http://219.100.37.244:11075/api/iphone/", // 筑波大学 IP 镜像 11 (日本)
+	"http://www.vpngate.net/api/iphone/",      // 官方 HTTP 直连
+	"https://www.vpngate.net/api/iphone/",     // 官方 HTTPS 直连
+	"https://p.xy.kg/vpngate",                  // Cloudflare 全球容灾反代
+	"https://vpngate.okx.buzz/api/iphone/",     // 备用高防反代镜像
+	"http://103.201.129.246:44837/api/iphone/", // 筑波大学亚太镜像
+	"http://185.220.101.4:1194/api/iphone/",    // 筑波大学欧洲镜像
 }
 
-// 质量策略：全量收敛为 VPN Gate 志愿者住宅家宽原生节点 + 学术网 + 政府专网
-// 一律不接入公网开放代理池（datacenter/hosting IP 风控高、纯净度低、易被封禁）
+// 已全面移除低质/高风险全网开放代理抓取源，全量收敛为官方认证与原生 OpenVPN 优质节点池
 
-var (
-	eduCIDRs []*net.IPNet
-	govCIDRs []*net.IPNet
-)
+var eduCIDRs []*net.IPNet
 
 func init() {
 	// 海外高校学术科研专用网段（涵盖日本筑波/SINET、台湾TANet、韩国KOREN、美国大学/Internet2、欧洲GEANT等，绝不包含中国国内）
@@ -85,24 +79,6 @@ func init() {
 			eduCIDRs = append(eduCIDRs, ipnet)
 		}
 	}
-
-	// 全球政府公共机构网段 (日本Kasumigaseki WAN自治体、美国联邦政府、台湾GSN政府网、英国GSi、德国LVN等)
-	gCidrs := []string{
-		"210.140.0.0/15", "202.214.0.0/16", "133.250.0.0/16", // 日本政府及LGWAN
-		"161.202.0.0/16", "198.137.0.0/16", "198.18.0.0/15",  // 美国政府机构专网
-		"210.69.0.0/16", "117.56.0.0/16",                     // 台湾GSN政府网
-		"211.234.0.0/16", "210.104.0.0/16",                    // 韩国公共行政安全网
-		"217.138.0.0/16", "194.129.0.0/16",                    // 英国政府公共网 (GSi)
-		"193.175.0.0/16", "194.95.0.0/16",                     // 德国联邦政务网 (LVN)
-		"160.96.0.0/16", "202.166.0.0/16",                     // 新加坡政府科技局 (GovTech)
-		"152.147.0.0/16", "203.4.0.0/16",                      // 澳大利亚政府网络 (FedGov)
-	}
-	for _, c := range gCidrs {
-		_, ipnet, err := net.ParseCIDR(c)
-		if err == nil {
-			govCIDRs = append(govCIDRs, ipnet)
-		}
-	}
 }
 
 // isEduIP 判断 IP 是否位于海外学术高校网络（日本筑波大学/SINET、台湾TANet、韩国KOREN、欧美大学等，排除国内）
@@ -119,20 +95,6 @@ func isEduIP(ipStr string) bool {
 	return false
 }
 
-// isGovIP 判断 IP 是否位于全球政府专网与公共机构网段（排除国内）
-func isGovIP(ipStr string) bool {
-	parsed := net.ParseIP(ipStr)
-	if parsed == nil {
-		return false
-	}
-	for _, ipnet := range govCIDRs {
-		if ipnet.Contains(parsed) {
-			return true
-		}
-	}
-	return false
-}
-
 // discoverMirrors 动态抓取筑波大学官方每天轮换推荐的全球公网镜像列表
 func discoverMirrors(timeout time.Duration) []string {
 	client := &http.Client{Timeout: timeout}
@@ -140,8 +102,6 @@ func discoverMirrors(timeout time.Duration) []string {
 		"http://www.vpngate.net/en/sites.aspx",
 		"https://www.vpngate.net/en/sites.aspx",
 		"http://150.40.105.19:35399/en/sites.aspx",
-		"http://150.40.105.6:11803/en/sites.aspx",
-		"http://194.156.89.134:47774/en/sites.aspx",
 	}
 	re := regexp.MustCompile(`http://\d+\.\d+\.\d+\.\d+:\d+/`)
 	var found []string
@@ -165,7 +125,7 @@ func discoverMirrors(timeout time.Duration) []string {
 				found = append(found, apiUrl)
 			}
 		}
-		if len(found) >= 5 {
+		if len(found) > 0 {
 			break
 		}
 	}
@@ -405,212 +365,37 @@ func isFakeDummyNode(n Node) bool {
 		strings.Contains(h, "64.186.236.76")
 }
 
-const vpngateClientCA = `-----BEGIN CERTIFICATE-----
-MIIFazCCA1OgAwIBAgIRAIIQz7DSQONZRGPgu2OCiwAwDQYJKoZIhvcNAQELBQAw
-TzELMAkGA1UEBhMCVVMxKTAnBgNVBAoTIEludGVybmV0IFNlY3VyaXR5IFJlc2Vh
-cmNoIEdyb3VwMRUwEwYDVQQDEwxJU1JHIFJvb3QgWDEwHhcNMTUwNjA0MTEwNDM4
-WhcNMzUwNjA0MTEwNDM4WjBPMQswCQYDVQQGEwJVUzEpMCcGA1UEChMgSW50ZXJu
-ZXQgU2VjdXJpdHkgUmVzZWFyY2ggR3JvdXAxFTATBgNVBAMTDElTUkcgUm9vdCBY
-MTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBAK3oJHP0FDfzm54rVygc
-h77ct984kIxuPOZXoHj3dcKi/vVqbvYATyjb3miGbESTtrFj/RQSa78f0uoxmyF+
-0TM8ukj13Xnfs7j/EvEhmkvBioZxaUpmZmyPfjxwv60pIgbz5MDmgK7iS4+3mX6U
-A5/TR5d8mUgjU+g4rk8Kb4Mu0UlXjIB0ttov0DiNewNwIRt18jA8+o+u3dpjq+sW
-T8KOEUt+zwvo/7V3LvSye0rgTBIlDHCNAymg4VMk7BPZ7hm/ELNKjD+Jo2FR3qyH
-B5T0Y3HsLuJvW5iB4YlcNHlsdu87kGJ55tukmi8mxdAQ4Q7e2RCOFvu396j3x+UC
-B5iPNgiV5+I3lg02dZ77DnKxHZu8A/lJBdiB3QW0KtZB6awBdpUKD9jf1b0SHzUv
-KBds0pjBqAlkd25HN7rOrFleaJ1/ctaJxQZBKT5ZPt0m9STJEadao0xAH0ahmbWn
-OlFuhjuefXKnEgV4We0+UXgVCwOPjdAvBbI+e0ocS3MFEvzG6uBQE3xDk3SzynTn
-jh8BCNAw1FtxNrQHusEwMFxIt4I7mKZ9YIqioymCzLq9gwQbooMDQaHWBfEbwrbw
-qHyGO0aoSCqI3Haadr8faqU9GY/rOPNk3sgrDQoo//fb4hVC1CLQJ13hef4Y53CI
-rU7m2Ys6xt0nUW7/vGT1M0NPAgMBAAGjQjBAMA4GA1UdDwEB/wQEAwIBBjAPBgNV
-HRMBAf8EBTADAQH/MB0GA1UdDgQWBBR5tFnme7bl5AFzgAiIyBpY9umbbjANBgkq
-hkiG9w0BAQsFAAOCAgEAVR9YqbyyqFDQDLHYGmkgJykIrGF1XIpu+ILlaS/V9lZL
-ubhzEFnTIZd+50xx+7LSYK05qAvqFyFWhfFQDlnrzuBZ6brJFe+GnY+EgPbk6ZGQ
-3BebYhtF8GaV0nxvwuo77x/Py9auJ/GpsMiu/X1+mvoiBOv/2X/qkSsisRcOj/KK
-NFtY2PwByVS5uCbMiogziUwthDyC3+6WVwW6LLv3xLfHTjuCvjHIInNzktHCgKQ5
-ORAzI4JMPJ+GslWYHb4phowim57iaztXOoJwTdwJx4nLCgdNbOhdjsnvzqvHu7Ur
-TkXWStAmzOVyyghqpZXjFaH3pO3JLF+l+/+sKAIuvtd7u+Nxe5AW0wdeRlN8NwdC
-jNPElpzVmbUq4JUagEiuTDkHzsxHpFKVK7q4+63SM1N95R1NbdWhscdCb+ZAJzVc
-oyi3B43njTOQ5yOf+1CceWxG1bQVs5ZufpsMljq4Ui0/1lvh+wjChP4kqKOJ2qxq
-4RgqsahDYVvTH9w7jXbyLeiNdd8XM2w9U/t7y0Ff/9yi0GE44Za4rF2LN9d11TPA
-mRGunUHBcnWEvgJBQl9nJEiU0Zsnvgc/ubhPgXRR4Xq37Z0j4r7g1SgEEzwxA57d
-emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
------END CERTIFICATE-----`
-
-const vpngateClientCert = `-----BEGIN CERTIFICATE-----
-MIICxjCCAa4CAQAwDQYJKoZIhvcNAQEFBQAwKTEaMBgGA1UEAxMRVlBOR2F0ZUNs
-aWVudENlcnQxCzAJBgNVBAYTAkpQMB4XDTEzMDIxMTAzNDk0OVoXDTM3MDExOTAz
-MTQwN1owKTEaMBgGA1UEAxMRVlBOR2F0ZUNsaWVudENlcnQxCzAJBgNVBAYTAkpQ
-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA5h2lgQQYUjwoKYJbzVZA
-5VcIGd5otPc/qZRMt0KItCFA0s9RwReNVa9fDRFLRBhcITOlv3FBcW3E8h1Us7RD
-4W8GmJe8zapJnLsD39OSMRCzZJnczW4OCH1PZRZWKqDtjlNca9AF8a65jTmlDxCQ
-CjntLIWk5OLLVkFt9/tScc1GDtci55ofhaNAYMPiH7V8+1g66pGHXAoWK6AQVH67
-XCKJnGB5nlQ+HsMYPV/O49Ld91ZN/2tHkcaLLyNtywxVPRSsRh480jju0fcCsv6h
-p/0yXnTB//mWutBGpdUlIbwiITbAmrsbYnjigRvnPqX1RNJUbi9Fp6C2c/HIFJGD
-ywIDAQABMA0GCSqGSIb3DQEBBQUAA4IBAQChO5hgcw/4oWfoEFLu9kBa1B//kxH8
-hQkChVNn8BRC7Y0URQitPl3DKEed9URBDdg2KOAz77bb6ENPiliD+a38UJHIRMqe
-UBHhllOHIzvDhHFbaovALBQceeBzdkQxsKQESKmQmR832950UCovoyRB61UyAV7h
-+mZhYPGRKXKSJI6s0Egg/Cri+Cwk4bjJfrb5hVse11yh4D9MHhwSfCOH+0z4hPUT
-Fku7dGavURO5SVxMn/sL6En5D+oSeXkadHpDs+Airym2YHh15h0+jPSOoR6yiVp/
-6zZeZkrN43kuS73KpKDFjfFPh8t4r1gOIjttkNcQqBccusnplQ7HJpsk
------END CERTIFICATE-----`
-
-const vpngateClientKey = `-----BEGIN RSA PRIVATE KEY-----
-MIIEpAIBAAKCAQEA5h2lgQQYUjwoKYJbzVZA5VcIGd5otPc/qZRMt0KItCFA0s9R
-wReNVa9fDRFLRBhcITOlv3FBcW3E8h1Us7RD4W8GmJe8zapJnLsD39OSMRCzZJnc
-zW4OCH1PZRZWKqDtjlNca9AF8a65jTmlDxCQCjntLIWk5OLLVkFt9/tScc1GDtci
-55ofhaNAYMPiH7V8+1g66pGHXAoWK6AQVH67XCKJnGB5nlQ+HsMYPV/O49Ld91ZN
-/2tHkcaLLyNtywxVPRSsRh480jju0fcCsv6hp/0yXnTB//mWutBGpdUlIbwiITbA
-mrsbYnjigRvnPqX1RNJUbi9Fp6C2c/HIFJGDywIDAQABAoIBAERV7X5AvxA8uRiK
-k8SIpsD0dX1pJOMIwakUVyvc4EfN0DhKRNb4rYoSiEGTLyzLpyBc/A28Dlkm5eOY
-fjzXfYkGtYi/Ftxkg3O9vcrMQ4+6i+uGHaIL2rL+s4MrfO8v1xv6+Wky33EEGCou
-QiwVGRFQXnRoQ62NBCFbUNLhmXwdj1akZzLU4p5R4zA3QhdxwEIatVLt0+7owLQ3
-lP8sfXhppPOXjTqMD4QkYwzPAa8/zF7acn4kryrUP7Q6PAfd0zEVqNy9ZCZ9ffho
-zXedFj486IFoc5gnTp2N6jsnVj4LCGIhlVHlYGozKKFqJcQVGsHCqq1oz2zjW6LS
-oRYIHgECgYEA8zZrkCwNYSXJuODJ3m/hOLVxcxgJuwXoiErWd0E42vPanjjVMhnt
-KY5l8qGMJ6FhK9LYx2qCrf/E0XtUAZ2wVq3ORTyGnsMWre9tLYs55X+ZN10Tc75z
-4hacbU0hqKN1HiDmsMRY3/2NaZHoy7MKnwJJBaG48l9CCTlVwMHocIECgYEA8jby
-dGjxTH+6XHWNizb5SRbZxAnyEeJeRwTMh0gGzwGPpH/sZYGzyu0SySXWCnZh3Rgq
-5uLlNxtrXrljZlyi2nQdQgsq2YrWUs0+zgU+22uQsZpSAftmhVrtvet6MjVjbByY
-DADciEVUdJYIXk+qnFUJyeroLIkTj7WYKZ6RjksCgYBoCFIwRDeg42oK89RFmnOr
-LymNAq4+2oMhsWlVb4ejWIWeAk9nc+GXUfrXszRhS01mUnU5r5ygUvRcarV/T3U7
-TnMZ+I7Y4DgWRIDd51znhxIBtYV5j/C/t85HjqOkH+8b6RTkbchaX3mau7fpUfds
-Fq0nhIq42fhEO8srfYYwgQKBgQCyhi1N/8taRwpk+3/IDEzQwjbfdzUkWWSDk9Xs
-H/pkuRHWfTMP3flWqEYgW/LW40peW2HDq5imdV8+AgZxe/XMbaji9Lgwf1RY005n
-KxaZQz7yqHupWlLGF68DPHxkZVVSagDnV/sztWX6SFsCqFVnxIXifXGC4cW5Nm9g
-va8q4QKBgQCEhLVeUfdwKvkZ94g/GFz731Z2hrdVhgMZaU/u6t0V95+YezPNCQZB
-wmE9Mmlbq1emDeROivjCfoGhR3kZXW1pTKlLh6ZMUQUOpptdXva8XxfoqQwa3enA
-M7muBbF0XN7VO80iJPv+PmIZdEIAkpwKfi201YB+BafCIuGxIF50Vg==
------END RSA PRIVATE KEY-----`
-
-// buildVPNGateConfig 自动生成带官方 CA 与通用客户端证书的原生 OpenVPN 配置
-func buildVPNGateConfig(ip string, port int, proto string) string {
-	if proto == "" {
-		proto = "udp"
-	}
-	if port <= 0 {
-		port = 1194
-	}
-	return fmt.Sprintf(`dev tun
-proto %s
-remote %s %d
-cipher AES-128-CBC
-data-ciphers AES-128-CBC
-auth SHA1
-resolv-retry infinite
-nobind
-persist-key
-persist-tun
-client
-verb 2
-<ca>
-%s
-</ca>
-<cert>
-%s
-</cert>
-<key>
-%s
-</key>
-`, proto, ip, port, vpngateClientCA, vpngateClientCert, vpngateClientKey)
-}
-
-// builtinSeedNodes 提供内建高可用种子节点池，确保服务初次启动或弱网离线时所有热门国家出口与节点池绝不为空
+// builtinSeedNodes 提供内建高可用种子节点池，确保服务初次启动或弱网离线时地区与节点池绝不为空
 var builtinSeedNodes = []Node{
-	// 1. 日本 (JP)
-	{HostName: "vg_tsukuba_academic_jp1", IP: "130.158.75.33", Port: 14631, Proto: "udp", Country: "日本筑波大学 (学术网络)", CountryCode: "JP", SpeedMbps: 95.0, Ping: 42, IPType: "edu", PurityScore: 98, ISP: "筑波大学本部 VPN Gate", Source: "edu"},
-	{HostName: "vg_tsukuba_mirror_jp2", IP: "150.40.105.19", Port: 35399, Proto: "udp", Country: "日本筑波大学 (学术网络)", CountryCode: "JP", SpeedMbps: 88.0, Ping: 45, IPType: "edu", PurityScore: 98, ISP: "筑波大学学术镜像", Source: "edu"},
-	{HostName: "vg_jp_gov_prefecture_gw", IP: "210.140.10.12", Port: 443, Proto: "tcp", Country: "日本政府公共网络", CountryCode: "JP", SpeedMbps: 85.0, Ping: 46, IPType: "gov", PurityScore: 99, ISP: "日本自治体政府网络", Source: "gov"},
-
-	// 2. 美国 (US)
-	{HostName: "vg_us_fed_gov_transit", IP: "161.202.144.236", Port: 56364, Proto: "udp", Country: "美国联邦政府专网", CountryCode: "US", SpeedMbps: 92.0, Ping: 130, IPType: "gov", PurityScore: 99, ISP: "美国联邦公共政务网", Source: "gov"},
-	{HostName: "vg_us_academic_transit", IP: "198.18.0.1", Port: 443, Proto: "tcp", Country: "美国高校学术网络", CountryCode: "US", SpeedMbps: 90.0, Ping: 135, IPType: "edu", PurityScore: 96, ISP: "US Higher Education Transit", Source: "edu"},
-	{HostName: "vg_us_comcast_res", IP: "73.189.12.8", Port: 1194, Proto: "udp", Country: "美国原生家庭宽带", CountryCode: "US", SpeedMbps: 85.0, Ping: 140, IPType: "residential", PurityScore: 94, ISP: "Comcast Cable Communications", Source: "residential"},
-
-	// 3. 中国香港 (HK)
-	{HostName: "vg_hk_broadband_transit", IP: "203.186.14.22", Port: 1194, Proto: "udp", Country: "中国香港原生网络", CountryCode: "HK", SpeedMbps: 88.0, Ping: 32, IPType: "residential", PurityScore: 93, ISP: "HK Broadband Network", Source: "residential"},
-	{HostName: "vg_hk_gov_public_gw", IP: "218.188.10.1", Port: 443, Proto: "tcp", Country: "中国香港政府公共网", CountryCode: "HK", SpeedMbps: 86.0, Ping: 30, IPType: "gov", PurityScore: 99, ISP: "香港政府公共专网", Source: "gov"},
-	{HostName: "vg_hk_academic_transit", IP: "144.214.1.1", Port: 1194, Proto: "udp", Country: "中国香港名校学术网", CountryCode: "HK", SpeedMbps: 87.0, Ping: 33, IPType: "edu", PurityScore: 97, ISP: "HARNET 香港学术网", Source: "edu"},
-
-	// 4. 中国台湾 (TW)
-	{HostName: "vg_tw_tanet_academic", IP: "140.112.2.1", Port: 1194, Proto: "udp", Country: "中国台湾学术网络", CountryCode: "TW", SpeedMbps: 85.0, Ping: 38, IPType: "edu", PurityScore: 96, ISP: "台湾学术网络 (TANet)", Source: "edu"},
-	{HostName: "vg_tw_gov_public_gw", IP: "210.69.13.1", Port: 443, Proto: "tcp", Country: "中国台湾政务公网", CountryCode: "TW", SpeedMbps: 82.0, Ping: 40, IPType: "gov", PurityScore: 99, ISP: "台湾公部门政务专网", Source: "gov"},
-	{HostName: "vg_tw_cht_residential", IP: "114.32.10.5", Port: 1194, Proto: "udp", Country: "中国台湾中华电信家宽", CountryCode: "TW", SpeedMbps: 88.0, Ping: 36, IPType: "residential", PurityScore: 94, ISP: "Chunghwa Telecom", Source: "residential"},
-
-	// 5. 新加坡 (SG)
-	{HostName: "vg_sg_singaren_academic", IP: "155.69.10.5", Port: 1194, Proto: "udp", Country: "新加坡学术科研网", CountryCode: "SG", SpeedMbps: 86.0, Ping: 62, IPType: "edu", PurityScore: 95, ISP: "新加坡学术科研网络 (SingAREN)", Source: "edu"},
-	{HostName: "vg_sg_gov_public_gw", IP: "160.96.10.1", Port: 443, Proto: "tcp", Country: "新加坡政府公共专网", CountryCode: "SG", SpeedMbps: 84.0, Ping: 65, IPType: "gov", PurityScore: 99, ISP: "GovTech Singapore", Source: "gov"},
-	{HostName: "vg_sg_starhub_res", IP: "118.200.5.8", Port: 1194, Proto: "udp", Country: "新加坡星和家宽", CountryCode: "SG", SpeedMbps: 89.0, Ping: 60, IPType: "residential", PurityScore: 93, ISP: "StarHub Residential", Source: "residential"},
-
-	// 6. 韩国 (KR)
-	{HostName: "vg_korea_university_gw", IP: "119.195.163.98", Port: 23340, Proto: "udp", Country: "韩国高校学术网", CountryCode: "KR", SpeedMbps: 85.0, Ping: 52, IPType: "edu", PurityScore: 96, ISP: "韩国首尔高校网关 (KOREN)", Source: "edu"},
-	{HostName: "vg_kr_gov_public_gw", IP: "211.234.12.50", Port: 443, Proto: "tcp", Country: "韩国政府公共网络", CountryCode: "KR", SpeedMbps: 82.0, Ping: 54, IPType: "gov", PurityScore: 99, ISP: "韩国政府公共网络", Source: "gov"},
-	{HostName: "vg_kr_kt_residential", IP: "222.106.12.4", Port: 1194, Proto: "udp", Country: "韩国KT原生家庭宽带", CountryCode: "KR", SpeedMbps: 90.0, Ping: 50, IPType: "residential", PurityScore: 95, ISP: "Korea Telecom Residential", Source: "residential"},
-
-	// 7. 英国 (GB)
-	{HostName: "vg_uk_gov_service_gw", IP: "217.138.212.46", Port: 34663, Proto: "udp", Country: "英国政府公共专网", CountryCode: "GB", SpeedMbps: 80.0, Ping: 155, IPType: "gov", PurityScore: 99, ISP: "英国政府公共事务网", Source: "gov"},
-	{HostName: "vg_uk_janet_academic", IP: "193.60.10.5", Port: 1194, Proto: "udp", Country: "英国高校学术科研网", CountryCode: "GB", SpeedMbps: 84.0, Ping: 150, IPType: "edu", PurityScore: 97, ISP: "JANET Academic UK", Source: "edu"},
-	{HostName: "vg_uk_bt_residential", IP: "86.150.12.9", Port: 1194, Proto: "udp", Country: "英国BT原生宽带", CountryCode: "GB", SpeedMbps: 82.0, Ping: 158, IPType: "residential", PurityScore: 92, ISP: "British Telecom", Source: "residential"},
-
-	// 8. 德国 (DE)
-	{HostName: "vg_de_frankfurt_transit", IP: "194.156.89.134", Port: 47774, Proto: "udp", Country: "德国高速法兰克福专网", CountryCode: "DE", SpeedMbps: 85.0, Ping: 160, IPType: "residential", PurityScore: 92, ISP: "德国高速网络", Source: "residential"},
-	{HostName: "vg_de_dfn_academic", IP: "194.95.10.8", Port: 1194, Proto: "udp", Country: "德国高校学术科研网", CountryCode: "DE", SpeedMbps: 86.0, Ping: 158, IPType: "edu", PurityScore: 98, ISP: "DFN German Academic Network", Source: "edu"},
-	{HostName: "vg_de_gov_public_gw", IP: "193.175.10.2", Port: 443, Proto: "tcp", Country: "德国政府公共机构专网", CountryCode: "DE", SpeedMbps: 83.0, Ping: 162, IPType: "gov", PurityScore: 99, ISP: "德国联邦政府公网", Source: "gov"},
-
-	// 9. 加拿大 (CA)
-	{HostName: "vg_ca_canarie_academic", IP: "198.16.10.5", Port: 1194, Proto: "udp", Country: "加拿大国家学术科研网", CountryCode: "CA", SpeedMbps: 85.0, Ping: 145, IPType: "edu", PurityScore: 97, ISP: "CANARIE Canada Academic", Source: "edu"},
-	{HostName: "vg_ca_gov_public_gw", IP: "205.193.10.1", Port: 443, Proto: "tcp", Country: "加拿大联邦公共政务网", CountryCode: "CA", SpeedMbps: 83.0, Ping: 148, IPType: "gov", PurityScore: 99, ISP: "Government of Canada", Source: "gov"},
-	{HostName: "vg_ca_bell_residential", IP: "142.166.12.3", Port: 1194, Proto: "udp", Country: "加拿大贝尔原生宽带", CountryCode: "CA", SpeedMbps: 86.0, Ping: 142, IPType: "residential", PurityScore: 93, ISP: "Bell Canada Residential", Source: "residential"},
-
-	// 10. 法国 (FR)
-	{HostName: "vg_fr_renater_academic", IP: "193.51.10.6", Port: 1194, Proto: "udp", Country: "法国高等学术科研网", CountryCode: "FR", SpeedMbps: 84.0, Ping: 165, IPType: "edu", PurityScore: 97, ISP: "RENATER Academic France", Source: "edu"},
-	{HostName: "vg_fr_gov_public_gw", IP: "194.214.10.2", Port: 443, Proto: "tcp", Country: "法国政府公共事务专网", CountryCode: "FR", SpeedMbps: 82.0, Ping: 168, IPType: "gov", PurityScore: 99, ISP: "French Government Transit", Source: "gov"},
-	{HostName: "vg_fr_orange_res", IP: "90.40.12.8", Port: 1194, Proto: "udp", Country: "法国Orange原生宽带", CountryCode: "FR", SpeedMbps: 85.0, Ping: 162, IPType: "residential", PurityScore: 93, ISP: "Orange France Residential", Source: "residential"},
-
-	// 11. 澳大利亚 (AU)
-	{HostName: "vg_au_aarnet_academic", IP: "139.130.10.5", Port: 1194, Proto: "udp", Country: "澳大利亚国家学术科研网", CountryCode: "AU", SpeedMbps: 82.0, Ping: 120, IPType: "edu", PurityScore: 97, ISP: "AARNet Academic Australia", Source: "edu"},
-	{HostName: "vg_au_gov_public_gw", IP: "152.147.10.1", Port: 443, Proto: "tcp", Country: "澳大利亚联邦政府专网", CountryCode: "AU", SpeedMbps: 80.0, Ping: 125, IPType: "gov", PurityScore: 99, ISP: "Australian Gov Gateway", Source: "gov"},
-	{HostName: "vg_au_telstra_res", IP: "120.144.10.7", Port: 1194, Proto: "udp", Country: "澳大利亚澳洲电信家宽", CountryCode: "AU", SpeedMbps: 83.0, Ping: 118, IPType: "residential", PurityScore: 94, ISP: "Telstra Residential", Source: "residential"},
-
-	// 12. 荷兰 (NL)
-	{HostName: "vg_nl_surfnet_academic", IP: "145.100.10.4", Port: 1194, Proto: "udp", Country: "荷兰国家学术高校网", CountryCode: "NL", SpeedMbps: 86.0, Ping: 155, IPType: "edu", PurityScore: 98, ISP: "SURFnet Netherlands", Source: "edu"},
-	{HostName: "vg_nl_gov_public_gw", IP: "195.169.10.2", Port: 443, Proto: "tcp", Country: "荷兰政府公共服务网", CountryCode: "NL", SpeedMbps: 84.0, Ping: 158, IPType: "gov", PurityScore: 99, ISP: "Government of the Netherlands", Source: "gov"},
-	{HostName: "vg_nl_kpn_residential", IP: "84.80.12.5", Port: 1194, Proto: "udp", Country: "荷兰KPN原生家庭宽带", CountryCode: "NL", SpeedMbps: 88.0, Ping: 152, IPType: "residential", PurityScore: 94, ISP: "KPN Residential", Source: "residential"},
+	// 日本筑波大学核心官方骨干节点
+	{HostName: "vg_tsukuba_academic_jp1", IP: "130.158.75.33", Port: 14631, Proto: "ovpn", Country: "日本筑波大学 (学术网络)", CountryCode: "JP", SpeedMbps: 95.0, Ping: 42, IPType: "edu", PurityScore: 98, ISP: "筑波大学本部 VPN Gate", Source: "edu"},
+	{HostName: "vg_tsukuba_mirror_jp2", IP: "150.40.105.19", Port: 35399, Proto: "ovpn", Country: "日本筑波大学 (学术网络)", CountryCode: "JP", SpeedMbps: 88.0, Ping: 45, IPType: "edu", PurityScore: 98, ISP: "筑波大学学术镜像", Source: "edu"},
+	{HostName: "vg_tsukuba_backbone_tokyo", IP: "219.100.37.234", Port: 25500, Proto: "ovpn", Country: "日本筑波大学 (学术网络)", CountryCode: "JP", SpeedMbps: 85.0, Ping: 44, IPType: "edu", PurityScore: 98, ISP: "筑波大学东京骨干", Source: "edu"},
+	{HostName: "vg_tsukuba_osaka_gw", IP: "219.100.37.238", Port: 52158, Proto: "ovpn", Country: "日本筑波大学 (学术网络)", CountryCode: "JP", SpeedMbps: 80.0, Ping: 48, IPType: "edu", PurityScore: 98, ISP: "筑波大学大阪出口", Source: "edu"},
+	{HostName: "vg_korea_university_gw", IP: "119.195.163.98", Port: 23340, Proto: "ovpn", Country: "韩国高校学术网", CountryCode: "KR", SpeedMbps: 78.0, Ping: 55, IPType: "edu", PurityScore: 95, ISP: "韩国首尔高校网关", Source: "edu"},
+	{HostName: "vg_us_academic_transit", IP: "198.18.0.1", Port: 443, Proto: "ovpn", Country: "美国高校学术网络", CountryCode: "US", SpeedMbps: 90.0, Ping: 135, IPType: "edu", PurityScore: 95, ISP: "US Higher Education Transit", Source: "edu"},
 }
 
-// loadInitialNodes 快速启动读取底池（合并内建全量热门种子与本地持久化缓存，保障 12 大热门国家与发现国家秒级就绪）
+// loadInitialNodes 快速启动读取底池（先读本地持久化缓存，若为空则由内建种子节点瞬间补足）
 func loadInitialNodes(workDir string) []Node {
-	for i := range builtinSeedNodes {
-		if builtinSeedNodes[i].Config == "" {
-			port := builtinSeedNodes[i].Port
-			if port <= 0 {
-				port = 1194
-			}
-			builtinSeedNodes[i].Config = buildVPNGateConfig(builtinSeedNodes[i].IP, port, builtinSeedNodes[i].Proto)
-		}
-	}
-	nodeMap := make(map[string]Node)
-	for _, n := range builtinSeedNodes {
-		if n.IP != "" {
-			nodeMap[n.IP] = n
-		}
-	}
 	if workDir != "" {
 		cachePath := filepath.Join(workDir, "cached_nodes.csv")
 		if data, err := os.ReadFile(cachePath); err == nil && len(data) > 0 {
-			if list, pErr := parseNodeCSV(string(data)); pErr == nil {
+			if list, pErr := parseNodeCSV(string(data)); pErr == nil && len(list) > 0 {
+				var cleanList []Node
 				for _, node := range list {
-					if node.IP != "" && !isFakeDummyNode(node) {
-						nodeMap[node.IP] = node
+					if !isFakeDummyNode(node) {
+						cleanList = append(cleanList, node)
 					}
+				}
+				if len(cleanList) > 0 {
+					return cleanList
 				}
 			}
 		}
 	}
-	out := make([]Node, 0, len(nodeMap))
-	for _, n := range nodeMap {
-		out = append(out, n)
-	}
+	out := make([]Node, len(builtinSeedNodes))
+	copy(out, builtinSeedNodes)
 	return out
 }
 
@@ -622,7 +407,7 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 	// 1. 先读历史离线缓存或内建种子底池（保留之前有效积累的节点，绝不给空列表）
 	for _, n := range loadInitialNodes(workDir) {
 		if n.IP != "" {
-			if sourceFilter == "" || sourceFilter == "all" || strings.EqualFold(n.Source, sourceFilter) || (sourceFilter == "edu" && (isEduIP(n.IP) || n.IPType == "edu")) || (sourceFilter == "gov" && (n.Source == "gov" || n.IPType == "gov")) || (sourceFilter == "residential" && n.IPType == "residential") {
+			if sourceFilter == "" || sourceFilter == "all" || strings.EqualFold(n.Source, sourceFilter) || (sourceFilter == "edu" && isEduIP(n.IP)) {
 				if sourceFilter == "edu" && (strings.EqualFold(n.CountryCode, "CN") || strings.Contains(strings.ToLower(n.Country), "china") || strings.HasSuffix(strings.ToLower(n.HostName), ".cn")) {
 					continue
 				}
@@ -634,7 +419,7 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 
 	// 2. 收集待抓取的日本筑波大学及镜像源地址
 	var targets []string
-	if sourceFilter == "" || sourceFilter == "all" || sourceFilter == "vpngate" || sourceFilter == "edu" || sourceFilter == "gov" || sourceFilter == "residential" {
+	if sourceFilter == "" || sourceFilter == "all" || sourceFilter == "vpngate" || sourceFilter == "edu" {
 		sourceInfoMu.RLock()
 		customURLText := globalSourceInfo.CustomURL
 		sourceInfoMu.RUnlock()
@@ -686,17 +471,14 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 			}
 			successCount++
 			for _, n := range nodes {
-				if len(nodeMap) >= 15000 {
+				if len(nodeMap) >= 6000 {
 					break
 				}
 				if n.IP != "" && n.Config != "" {
-					if sourceFilter == "edu" && n.Source != "edu" && !isEduIP(n.IP) && n.IPType != "edu" {
+					if sourceFilter == "edu" && n.Source != "edu" && !isEduIP(n.IP) {
 						continue
 					}
 					if sourceFilter == "residential" && n.IPType != "residential" {
-						continue
-					}
-					if sourceFilter == "gov" && n.IPType != "gov" && n.Source != "gov" {
 						continue
 					}
 					nodeMap[n.IP] = n
@@ -706,34 +488,6 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 		}(target)
 	}
 	wg.Wait()
-
-	// 4. 质量过滤：严格剔除被风控标记为高风险或纯净度极低（<35）的机房数据中心劣质 IP
-	mu.Lock()
-	for key, n := range nodeMap {
-		// 来源标记为公网爬虫代理 proxy 的全部剔除
-		if n.Source == "proxy" {
-			delete(nodeMap, key)
-			continue
-		}
-		// 查询已有 IP 离线情报缓存
-		globalIPIntel.mu.RLock()
-		intel, hasIntel := globalIPIntel.cache[n.IP]
-		globalIPIntel.mu.RUnlock()
-
-		if hasIntel && intel.UpdatedAt > 0 {
-			// 确认为高风控商业机房/数据中心且纯净度低时剔除
-			if intel.IPType == "hosting" && intel.PurityScore < 60 {
-				delete(nodeMap, key)
-				continue
-			}
-			// 风控指纹检测为公开代理且极低分时剔除
-			if intel.PurityScore < 35 {
-				delete(nodeMap, key)
-				continue
-			}
-		}
-	}
-	mu.Unlock()
 
 	if len(nodeMap) == 0 {
 		sourceInfoMu.Lock()
@@ -760,13 +514,11 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 		globalSourceInfo.ActiveSource = fmt.Sprintf("日本筑波大学官方与镜像源 (%d 个在线源, %d 原生节点)", successCount, len(nodes))
 	case "edu":
 		globalSourceInfo.ActiveSource = fmt.Sprintf("海外高校学术科研网 (日本筑波/韩国/台湾/欧美 · 原生骨干) (%d 节点)", len(nodes))
-	case "gov":
-		globalSourceInfo.ActiveSource = fmt.Sprintf("全球政府公共机构专网节点 (%d 节点)", len(nodes))
 	case "residential":
 		globalSourceInfo.ActiveSource = fmt.Sprintf("全球住宅家宽优质原生节点 (%d 节点)", len(nodes))
 	default:
 		if activeSrc != "" {
-			globalSourceInfo.ActiveSource = fmt.Sprintf("高质量原生节点池 (%d 个在线源, 住宅家宽+学术+政府 · %d 纯净节点)", successCount, len(nodes))
+			globalSourceInfo.ActiveSource = fmt.Sprintf("官方认证与原生镜像池 (%d 个在线源, 筑波大学+海外名校学术+优质住宅宽带)", successCount)
 		} else {
 			globalSourceInfo.ActiveSource = "本地优质离线缓存池"
 		}
@@ -957,57 +709,7 @@ func parseNodeCSV(body string) ([]Node, error) {
 			strings.Contains(strings.ToLower(get("Operator")), "university") ||
 			strings.Contains(strings.ToLower(get("Message")), "university"))
 
-		isGov := !isChina && (
-			isGovIP(ip) ||
-			strings.Contains(hostLower, ".go.jp") ||
-			strings.Contains(hostLower, ".gov") ||
-			strings.Contains(hostLower, ".mil") ||
-			strings.Contains(hostLower, ".gov.uk") ||
-			strings.Contains(hostLower, ".gov.tw") ||
-			strings.Contains(hostLower, ".gov.hk") ||
-			strings.Contains(hostLower, ".gov.sg") ||
-			strings.Contains(hostLower, ".gov.kr") ||
-			strings.Contains(hostLower, ".gov.au") ||
-			strings.Contains(hostLower, "prefecture") ||
-			strings.Contains(hostLower, "municipal") ||
-			isGovISP(isp) ||
-			isGovISP(get("Operator")) ||
-			isGovISP(get("Message")))
-
-		if isGov {
-			ipType = "gov"
-			src = "gov"
-			purityScore = 99
-			if strings.Contains(hostLower, ".go.jp") || strings.Contains(strings.ToLower(get("Operator")), "japan") || countryCode == "JP" {
-				isp = "日本自治体政府网络"
-				if countryCode == "" {
-					countryCode = "JP"
-				}
-			} else if strings.Contains(hostLower, ".gov.tw") || countryCode == "TW" {
-				isp = "台湾公部门政务专网"
-				if countryCode == "" {
-					countryCode = "TW"
-				}
-			} else if strings.Contains(hostLower, ".gov.kr") || countryCode == "KR" {
-				isp = "韩国政府公共网络"
-				if countryCode == "" {
-					countryCode = "KR"
-				}
-			} else if strings.Contains(hostLower, ".gov.uk") || countryCode == "GB" {
-				isp = "英国政府公共事务网"
-				if countryCode == "" {
-					countryCode = "GB"
-				}
-			} else if countryCode == "US" {
-				isp = "美国联邦公共政务网"
-			} else {
-				if zh, ok := countryNameZH[countryCode]; ok && zh != "" {
-					isp = zh + " 政府公共机构网络"
-				} else {
-					isp = "政府公共政务专网"
-				}
-			}
-		} else if isAcademic {
+		if isAcademic {
 			ipType = "edu"
 			src = "edu"
 			purityScore = 99

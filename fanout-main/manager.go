@@ -22,13 +22,9 @@ type Manager struct {
 	maxSlots    int
 	jobs        JobStore
 	refreshing  bool
-	orchestrateMu sync.Mutex
 }
 
 func NewManager(maxSlots int, workDir string) *Manager {
-	if maxSlots < 100 {
-		maxSlots = 150
-	}
 	initial := loadInitialNodes(workDir)
 	return &Manager{
 		tunnels:  map[int]*Tunnel{},
@@ -90,10 +86,6 @@ func (m *Manager) RefreshNodesSource(source string) (int, error) {
 	m.nodes = nodes
 	m.fetched = time.Now()
 	m.mu.Unlock()
-
-	// 节点刷新成功后触发全网自愈编排检查
-	go m.AutoOrchestrate()
-
 	return len(nodes), nil
 }
 
@@ -330,27 +322,36 @@ const (
 // 一直循环到连上或这条隧道被用户停掉。VPN Gate 死节点多，"当前都不可用"往往只是
 // 这一批候选恰好都挂了，过一会儿就有新节点，不该让出口永久躺死。
 func (m *Manager) bringUpPersist(t *Tunnel, notify bool, persist bool) {
-	if m.tryCandidates(t, notify) {
-		return
-	}
-	if persist {
-		// 再尝试一次短暂延时重试，避免瞬时网络抖动
-		time.Sleep(3 * time.Second)
-		if !m.tunnelActive(t) {
-			return
-		}
+	backoff := reconnectBackoffMin
+	for {
 		if m.tryCandidates(t, notify) {
 			return
 		}
-		// 同国所有候选节点皆不可用，严格遵循用户策略：删除该失效节点，保持订阅及面板 100% 纯净可用！
-		log.Printf("隧道 %d (国家: %s) 同国候选均不可用，已自动删除此失效出口", t.Slot, t.TargetRegion)
-		_ = m.Stop(t.Slot)
-		return
-	}
+		// 隧道已被用户停掉或从管理器移除，别再重试
+		if !persist || !m.tunnelActive(t) {
+			if persist {
+				return
+			}
+			t.Status = "failed"
+			if serr := m.saveState(); serr != nil {
+				log.Printf("保存状态失败: %v", serr)
+			}
+			return
+		}
 
-	t.Status = "failed"
-	if serr := m.saveState(); serr != nil {
-		log.Printf("保存状态失败: %v", serr)
+		t.Status = "starting"
+		t.Err = fmt.Sprintf("暂无可用节点，%.0f 秒后重试", backoff.Seconds())
+		log.Printf("隧道 %d 一轮候选均失败，%.0f 秒后重试", t.Slot, backoff.Seconds())
+		time.Sleep(backoff)
+		if !m.tunnelActive(t) {
+			return
+		}
+		if backoff < reconnectBackoffMax {
+			backoff *= 2
+			if backoff > reconnectBackoffMax {
+				backoff = reconnectBackoffMax
+			}
+		}
 	}
 }
 
@@ -504,11 +505,9 @@ func (m *Manager) candidatesFor(first Node) []Node {
 
 	// 智能质量优选排序：纯净度优先、速度/低延迟优先
 	sort.Slice(pool, func(i, j int) bool {
-		// 1. 纯净度等级 (gov > edu/住宅家宽 > 移动 > 其它)
+		// 1. 纯净度等级 (edu/住宅家宽 > 移动 > 其它)
 		typeRank := func(t string) int {
 			switch strings.ToLower(t) {
-			case "gov":
-				return 4
 			case "edu":
 				return 3
 			case "residential":
@@ -580,28 +579,6 @@ func (m *Manager) Stop(slot int) error {
 	if err := m.saveState(); err != nil {
 		log.Printf("保存状态失败: %v", err)
 	}
-
-	// 坏死彻底剔除：从 3x-ui 与面板中同步移除与此出口绑定的入站，绝不留任何失效死节点
-	if p, err := openPanel(); err == nil && p != nil {
-		inbounds, _ := p.Inbounds(nil)
-		var toDel []int
-		for _, ib := range inbounds {
-			bTo := strings.TrimSpace(ib.BoundTo)
-			if bTo == "" || strings.EqualFold(bTo, "direct") || strings.EqualFold(bTo, "none") {
-				continue
-			}
-			if bTo == t.Node.HostName || sanitizeTag(bTo) == sanitizeTag(t.Node.HostName) ||
-				(t.Node.IP != "" && bTo == t.Node.IP) || (t.ExitIP != "" && bTo == t.ExitIP) ||
-				bTo == fmt.Sprintf("exit-%d", t.Slot) || bTo == fmt.Sprintf("slot-%d", t.Slot) {
-				toDel = append(toDel, ib.ID)
-			}
-		}
-		if len(toDel) > 0 {
-			_ = p.DeleteInbounds(toDel, m.Tunnels())
-			invalidateInbounds()
-		}
-	}
-
 	m.notifyPanel()
 	return nil
 }
