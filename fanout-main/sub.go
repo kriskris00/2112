@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 )
@@ -17,6 +18,51 @@ var countryNameZH = map[string]string{
 	"TR": "土耳其", "IT": "意大利", "ES": "西班牙", "SE": "瑞典", "CH": "瑞士",
 	"NO": "挪威", "FI": "芬兰", "PL": "波兰", "CZ": "捷克", "AT": "奥地利",
 	"GLOBAL": "全球", "EDU": "海外高校学术网", "GOV": "政府公共机构专网",
+}
+
+// subCountryRank 定义订阅导出与客户端展示的核心国家权重：
+// 热门国家在前（美国 3 节点在前，日本 3 节点紧随其后，港台新韩英德加法澳荷等依次排列），冷门国家在后。
+var subCountryRank = map[string]int{
+	"US":  1,  // 美国 (优先最前)
+	"JP":  2,  // 日本 (紧随其后)
+	"HK":  3,  // 中国香港
+	"TW":  4,  // 中国台湾
+	"SG":  5,  // 新加坡
+	"KR":  6,  // 韩国
+	"GB":  7,  // 英国
+	"DE":  8,  // 德国
+	"CA":  9,  // 加拿大
+	"FR":  10, // 法国
+	"AU":  11, // 澳大利亚
+	"NL":  12, // 荷兰
+	"GOV": 13, // 政府公共机构专网
+	"EDU": 14, // 海外高校学术网
+	"VN":  15, // 越南
+	"TH":  16, // 泰国
+	"MY":  17, // 马来西亚
+	"PH":  18, // 菲律宾
+	"ID":  19, // 印尼
+	"IN":  20, // 印度
+	"RU":  21, // 俄罗斯
+	"BR":  22, // 巴西
+	"TR":  23, // 土耳其
+	"IT":  24, // 意大利
+	"ES":  25, // 西班牙
+	"CH":  26, // 瑞士
+	"SE":  27, // 瑞典
+	"NO":  28, // 挪威
+	"FI":  29, // 芬兰
+	"PL":  30, // 波兰
+	"CZ":  31, // 捷克
+	"AT":  32, // 奥地利
+}
+
+func getSubCountryRank(cc string) int {
+	cc = strings.ToUpper(strings.TrimSpace(cc))
+	if r, ok := subCountryRank[cc]; ok {
+		return r
+	}
+	return 999
 }
 
 // formatProxyName 构造纯净的订阅节点名称：[国旗Emoji] [企业/高校名称] (仅国旗表情，不含文字国家，不含"出口"字样，完全去除协议与端口)
@@ -109,52 +155,7 @@ func apiSubscription(m *Manager, a *Auth) http.HandlerFunc {
 			return nil
 		}
 
-// subCountryRank 定义订阅导出与客户端展示的核心国家权重：
-// 热门国家在前（美国 3 节点在前，日本 3 节点紧随其后，港台新韩英德加法澳荷等依次排列），冷门国家在后。
-var subCountryRank = map[string]int{
-	"US":  1,  // 美国 (优先最前)
-	"JP":  2,  // 日本 (紧随其后)
-	"HK":  3,  // 中国香港
-	"TW":  4,  // 中国台湾
-	"SG":  5,  // 新加坡
-	"KR":  6,  // 韩国
-	"GB":  7,  // 英国
-	"DE":  8,  // 德国
-	"CA":  9,  // 加拿大
-	"FR":  10, // 法国
-	"AU":  11, // 澳大利亚
-	"NL":  12, // 荷兰
-	"GOV": 13, // 政府公共机构专网
-	"EDU": 14, // 海外高校学术网
-	"VN":  15, // 越南
-	"TH":  16, // 泰国
-	"MY":  17, // 马来西亚
-	"PH":  18, // 菲律宾
-	"ID":  19, // 印尼
-	"IN":  20, // 印度
-	"RU":  21, // 俄罗斯
-	"BR":  22, // 巴西
-	"TR":  23, // 土耳其
-	"IT":  24, // 意大利
-	"ES":  25, // 西班牙
-	"CH":  26, // 瑞士
-	"SE":  27, // 瑞典
-	"NO":  28, // 挪威
-	"FI":  29, // 芬兰
-	"PL":  30, // 波兰
-	"CZ":  31, // 捷克
-	"AT":  32, // 奥地利
-}
-
-func getSubCountryRank(cc string) int {
-	cc = strings.ToUpper(strings.TrimSpace(cc))
-	if r, ok := subCountryRank[cc]; ok {
-		return r
-	}
-	return 999
-}
-
-// 收集运行中的出口节点与绑定的 3x-ui 入站（严格 1:1 实时同步，绝不重复生成 20->40 个）
+		// 收集运行中的出口节点与绑定的 3x-ui 入站（严格 1:1 实时同步，绝不重复生成 20->40 个）
 		coveredSlots := make(map[int]bool)
 		var validDetails []*InboundDetail
 
