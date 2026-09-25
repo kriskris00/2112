@@ -82,3 +82,28 @@ func TestFirstLine(t *testing.T) {
 		t.Fatalf("firstLine = %q", got)
 	}
 }
+
+func TestOrchestrateSourceAllowed(t *testing.T) {
+	vpn := Node{Source: "vpngate", CountryCode: "JP", Config: "client"}
+	proxy := Node{Source: "proxy", CountryCode: "US", Proto: "socks5", IP: "1.2.3.4", Port: 1080}
+	edu := Node{Source: "edu", CountryCode: "KR", IPType: "edu"}
+	if !orchestrateSourceAllowed(vpn, []string{"vpngate"}) {
+		t.Fatal("vpngate 节点应允许")
+	}
+	if orchestrateSourceAllowed(vpn, []string{"proxy"}) {
+		t.Fatal("vpngate 节点不应被 proxy 源选中")
+	}
+	if !orchestrateSourceAllowed(proxy, []string{"proxy"}) {
+		t.Fatal("proxy 节点应允许")
+	}
+	if !orchestrateSourceAllowed(edu, []string{"edu"}) {
+		t.Fatal("edu 节点应允许")
+	}
+}
+
+func TestDefaultAutoOrchestrateOptions(t *testing.T) {
+	o := DefaultAutoOrchestrateOptions()
+	if o.HotTarget != 3 || o.ColdTarget != 1 || o.MaxStarts != 6 {
+		t.Fatalf("默认编排参数异常: %+v", o)
+	}
+}

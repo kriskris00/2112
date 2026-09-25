@@ -314,10 +314,33 @@ func apiTunnels(m *Manager) http.HandlerFunc {
 
 func apiAutoOrchestrate(m *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		go m.AutoOrchestrate()
-		writeJSON(w, http.StatusOK, map[string]string{
+		opts := DefaultAutoOrchestrateOptions()
+		if r.Method == http.MethodPost {
+			var body struct {
+				Sources    []string `json:"sources"`
+				HotTarget  int      `json:"hot_target"`
+				ColdTarget int      `json:"cold_target"`
+				MaxStarts  int      `json:"max_starts"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if len(body.Sources) > 0 {
+				opts.Sources = body.Sources
+			}
+			if body.HotTarget > 0 {
+				opts.HotTarget = body.HotTarget
+			}
+			if body.ColdTarget > 0 {
+				opts.ColdTarget = body.ColdTarget
+			}
+			if body.MaxStarts > 0 {
+				opts.MaxStarts = body.MaxStarts
+			}
+		}
+		go m.AutoOrchestrateWithOptions(opts)
+		writeJSON(w, http.StatusOK, map[string]any{
 			"status":  "ok",
-			"message": "已触发全网出口智能编排（热门国家各3节点/冷门国家各1节点）",
+			"message": fmt.Sprintf("已触发智能编排：热门 %d / 冷门 %d；最多补位 %d；先测活后加入", opts.HotTarget, opts.ColdTarget, opts.MaxStarts),
+			"options": opts,
 		})
 	}
 }

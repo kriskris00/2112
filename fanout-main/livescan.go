@@ -85,11 +85,8 @@ func probeNodeLive(n Node, timeout time.Duration) (bool, int64, string, error) {
 			}
 		}
 
-		// 筑波大学官方节点若本身附带有效 Ping 与会话信息，允许通过
-		if n.Ping > 0 && n.Ping < 500 && n.Sessions >= 0 && (strings.Contains(n.HostName, "tsukuba") || strings.Contains(n.Country, "Japan")) {
-			return true, int64(n.Ping), n.IP, nil
-		}
-
+		// 不能仅凭 VPN Gate 的 Ping/会话元数据放行：那只是列表信息，
+		// 不代表当前服务器真的能建立 OpenVPN。自动编排必须以真实探测为准。
 		return false, 0, "", fmt.Errorf("OpenVPN 服务端口不可达")
 	}
 

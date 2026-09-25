@@ -482,6 +482,53 @@ var hotCountries = map[string]bool{
 	"CA": true, "FR": true, "AU": true, "NL": true,
 }
 
+func orchestrateSourceAllowed(n Node, sources []string) bool {
+	if len(sources) == 0 {
+		return true
+	}
+	for _, raw := range sources {
+		s := strings.ToLower(strings.TrimSpace(raw))
+		if s == "" || s == "all" {
+			return true
+		}
+		switch s {
+		case "vpngate", "openvpn":
+			if strings.EqualFold(n.Source, "vpngate") {
+				return true
+			}
+		case "edu":
+			if strings.EqualFold(n.Source, "edu") || strings.EqualFold(n.IPType, "edu") || isEduIP(n.IP) {
+				return true
+			}
+		case "gov":
+			if strings.EqualFold(n.Source, "gov") || strings.EqualFold(n.IPType, "gov") {
+				return true
+			}
+		case "residential":
+			if strings.EqualFold(n.Source, "residential") || strings.EqualFold(n.IPType, "residential") {
+				return true
+			}
+		case "proxy":
+			if strings.EqualFold(n.Source, "proxy") || n.Proto == "socks5" || n.Proto == "http" {
+				return true
+			}
+		case "ipspeed":
+			if strings.EqualFold(n.Source, "ipspeed") {
+				return true
+			}
+		case "custom":
+			if strings.EqualFold(n.Source, "custom") || strings.EqualFold(n.CountryCode, "CUSTOM") {
+				return true
+			}
+		default:
+			if strings.EqualFold(n.Source, s) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // AutoOrchestrate 全网出口智能自愈与编排：
 // 1. 热门国家各维持 3 个健康可用出口；
 // 2. 所有发现可用 OpenVPN 节点的冷门国家各维持 1 个健康可用出口；
@@ -489,6 +536,30 @@ var hotCountries = map[string]bool{
 // 4. 节点失效后自动换同国；若同国节点耗尽自动删除，待新节点出现时再自动补回；
 // 5. 自动绑定 3x-ui / 节点链接，保持所有订阅节点 100% 实时可用！
 func (m *Manager) AutoOrchestrate() {
+	m.AutoOrchestrateWithOptions(DefaultAutoOrchestrateOptions())
+}
+
+// AutoOrchestrateWithOptions 先筛选候选源，再逐个真实建立隧道并等待出网验证。
+// 只有 Status=up 的节点才会被绑定入站并进入正式出口池；失败节点进入冷却。
+func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
+	if opts.HotTarget < 1 {
+		opts.HotTarget = 3
+	}
+	if opts.ColdTarget < 1 {
+		opts.ColdTarget = 1
+	}
+	if opts.MaxStarts < 1 {
+		opts.MaxStarts = 6
+	}
+	if opts.MaxStarts > 20 {
+		opts.MaxStarts = 20
+	}
+	if opts.VerifyTimeout <= 0 {
+		opts.VerifyTimeout = 45 * time.Second
+	}
+	if len(opts.Sources) == 0 {
+		opts.Sources = []string{"all"}
+	}
 	if !m.orchestrateMu.TryLock() {
 		return
 	}
@@ -571,9 +642,9 @@ func (m *Manager) AutoOrchestrate() {
 
 	// 2. 超额出口自动精简：热门国家严格限制最多 3 个，冷门国家严格限制最多 1 个
 	for cc, tList := range activeTunnelsByCountry {
-		target := 1
+		target := opts.ColdTarget
 		if hotCountries[cc] {
-			target = 3
+			target = opts.HotTarget
 		}
 		if len(tList) > target {
 			// 排序保留最优质/最稳定运行的出口，剔除超额出口
@@ -611,6 +682,9 @@ func (m *Manager) AutoOrchestrate() {
 		if cc == "" || cc == "GLOBAL" || cc == "CUSTOM" {
 			continue
 		}
+		if !orchestrateSourceAllowed(n, opts.Sources) {
+			continue
+		}
 		if usedHosts[n.HostName] || (n.IP != "" && usedIPs[n.IP]) {
 			continue
 		}
@@ -642,24 +716,23 @@ func (m *Manager) AutoOrchestrate() {
 		return len(countryCandidates[sortedCountries[i]]) > len(countryCandidates[sortedCountries[j]])
 	})
 
-	// 5. 为节点池中实际存在的国家补齐配额：热门最多 3 个，其他最多 1 个；没有节点的国家绝不强制创建
-	var newStarted []*Tunnel
-	const maxNewStartsPerRun = 8
+	// 5. 为节点池中实际存在的国家补齐配额。
+	// 关键规则：候选节点不会因为“看起来可用”就直接进入正式出口，
+	// 必须逐个启动并完成真实出网验证；失败立即停止并冷却。
+	var verifiedStarted []*Tunnel
+	startsUsed := 0
 	for _, cc := range sortedCountries {
-		target := 1
+		target := opts.ColdTarget
 		if hotCountries[cc] {
-			target = 3
+			target = opts.HotTarget
 		}
 		curCount := len(activeTunnelsByCountry[cc])
 		needed := target - curCount
-		if needed <= 0 {
+		if needed <= 0 || startsUsed >= opts.MaxStarts {
 			continue
 		}
 
-		cands := countryCandidates[cc]
-		if len(cands) == 0 {
-			continue
-		}
+		cands := append([]Node(nil), countryCandidates[cc]...)
 		filtered := cands[:0]
 		for _, c := range cands {
 			if !m.nodeCooling(c) {
@@ -671,8 +744,8 @@ func (m *Manager) AutoOrchestrate() {
 			continue
 		}
 
-		// 优选排序：政府 > 学术 > 住宅家宽 > 移动 > 其它，延迟低优先，带宽大优先
-		sort.Slice(cands, func(i, j int) bool {
+		// 先按已有质量信息排序；真正是否加入由下面的实际隧道验证决定。
+		sort.SliceStable(cands, func(i, j int) bool {
 			typeRank := func(t string) int {
 				switch strings.ToLower(t) {
 				case "gov":
@@ -696,10 +769,10 @@ func (m *Manager) AutoOrchestrate() {
 			}
 			p1, p2 := cands[i].Ping, cands[j].Ping
 			if p1 <= 0 {
-				p1 = 999
+				p1 = 9999
 			}
 			if p2 <= 0 {
-				p2 = 999
+				p2 = 9999
 			}
 			if p1 != p2 {
 				return p1 < p2
@@ -707,37 +780,65 @@ func (m *Manager) AutoOrchestrate() {
 			return cands[i].SpeedMbps > cands[j].SpeedMbps
 		})
 
-		for i := 0; i < needed && i < len(cands) && len(newStarted) < maxNewStartsPerRun; i++ {
-			pick := cands[i]
-			t, err := m.Start(pick)
-			if err != nil {
+		for _, pick := range cands {
+			if needed <= 0 || startsUsed >= opts.MaxStarts {
+				break
+			}
+			// 第一阶段快速实测：代理必须完成真实 CONNECT；OpenVPN 至少确认远端服务可达。
+			// 第二阶段 Start/tryNode 会在独立 netns 中再次验证真实出口 IP，这是最终准入门槛。
+			alive, rtt, _, probeErr := probeNodeLive(pick, 1800*time.Millisecond)
+			if !alive {
+				m.markNodeFailed(pick)
+				log.Printf("[智能编排] 预检失败，跳过 %s (%s): %v", pick.HostName, cc, probeErr)
 				continue
 			}
-			usedHosts[pick.HostName] = true
-			if pick.IP != "" {
-				usedIPs[pick.IP] = true
+			pick.Ping = int(rtt)
+
+			t, err := m.Start(pick)
+			if err != nil {
+				m.markNodeFailed(pick)
+				log.Printf("[智能编排] 启动失败，跳过 %s (%s): %v", pick.HostName, cc, err)
+				continue
 			}
+			startsUsed++
+
+			deadline := time.Now().Add(opts.VerifyTimeout)
+			for time.Now().Before(deadline) && t.Status == "starting" {
+				time.Sleep(500 * time.Millisecond)
+			}
+			if t.Status != "up" || strings.TrimSpace(t.ExitIP) == "" {
+				m.markNodeFailed(pick)
+				log.Printf("[智能编排] 最终出网验证失败，移除 %s (%s): %s", pick.HostName, cc, firstLine(t.Err))
+				_ = m.Stop(t.Slot)
+				continue
+			}
+
 			activeTunnelsByCountry[cc] = append(activeTunnelsByCountry[cc], t)
-			newStarted = append(newStarted, t)
+			usedHosts[t.Node.HostName] = true
+			if t.Node.IP != "" {
+				usedIPs[t.Node.IP] = true
+			}
+			verifiedStarted = append(verifiedStarted, t)
+			needed--
+			log.Printf("[智能编排] %s 验证通过并加入正式出口: %s -> %s (%dms)", cc, t.Node.HostName, t.ExitIP, rtt)
 		}
 	}
 
-	if len(newStarted) > 0 {
-		log.Printf("[全网智能编排] 自动拉起 %d 个国家/地区出口 (热门各3/冷门各1)...", len(newStarted))
-		go func(tuns []*Tunnel) {
-			var okHosts []string
-			for _, t := range tuns {
-				m.waitUp(t)
-				if t.Status == "up" {
-					okHosts = append(okHosts, t.Node.HostName)
-				} else if t.Status == "failed" {
-					_ = m.Stop(t.Slot)
+	if len(verifiedStarted) > 0 {
+		log.Printf("[全网智能编排] 本轮仅加入 %d 个已实测出网的正式出口 (热门%d/冷门%d，最大补位%d)", len(verifiedStarted), opts.HotTarget, opts.ColdTarget, opts.MaxStarts)
+		var okHosts []string
+		for _, t := range verifiedStarted {
+			if t.Status == "up" {
+				okHosts = append(okHosts, t.Node.HostName)
+			}
+		}
+		if len(okHosts) > 0 {
+			go func(hosts []string) {
+				if _, err := cloneTemplateToTunnels(0, hosts, m.Tunnels()); err != nil {
+					log.Printf("[智能编排] 自动绑定入站失败: %v", err)
 				}
-			}
-			if len(okHosts) > 0 {
-				_, _ = cloneTemplateToTunnels(0, okHosts, m.Tunnels())
-			}
-		}(newStarted)
+			}(okHosts)
+		}
 	}
 
 	// 5. 严格确保 1 出口 = 1 节点：检测已就绪 UP 出口是否已绑定入站，若缺失立即自动补齐绑定

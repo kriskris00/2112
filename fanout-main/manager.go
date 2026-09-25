@@ -45,6 +45,26 @@ func NewManager(maxSlots int, workDir string) *Manager {
 
 const failedNodeCooldown = 10 * time.Minute
 
+// AutoOrchestrateOptions 控制智能编排。只有通过真实出口验证的隧道
+// 才会进入正式出口池；Sources 为空或包含 all 表示使用全部候选源。
+type AutoOrchestrateOptions struct {
+	Sources       []string      `json:"sources"`
+	HotTarget     int           `json:"hot_target"`
+	ColdTarget    int           `json:"cold_target"`
+	MaxStarts     int           `json:"max_starts"`
+	VerifyTimeout time.Duration `json:"-"`
+}
+
+func DefaultAutoOrchestrateOptions() AutoOrchestrateOptions {
+	return AutoOrchestrateOptions{
+		Sources:       []string{"all"},
+		HotTarget:     3,
+		ColdTarget:    1,
+		MaxStarts:     6,
+		VerifyTimeout: 45 * time.Second,
+	}
+}
+
 func nodeKey(n Node) string {
 	if n.IP != "" {
 		return strings.ToLower(strings.TrimSpace(n.IP)) + ":" + fmt.Sprint(n.Port)

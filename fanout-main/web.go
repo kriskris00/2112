@@ -148,7 +148,7 @@ body{
   background-repeat:repeat;
 }
 
-header{display:flex;align-items:center;gap:14px;padding:12px 20px;
+header{display:flex;align-items:center;gap:10px;padding:10px 16px;min-width:0;
   position:sticky;top:0;z-index:40;
   border-bottom:1px solid rgba(255, 255, 255, 0.75);background:rgba(255, 255, 255, 0.60);
   backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);
@@ -157,7 +157,7 @@ header{display:flex;align-items:center;gap:14px;padding:12px 20px;
 h1{font-size:16px;font-weight:700;margin:0;letter-spacing:-0.3px;
   background:linear-gradient(135deg, #0f172a 0%, #0369a1 60%, #0d9488 100%);
   -webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.badge-jesee{font-size:11px;font-weight:600;padding:2px 8px;border-radius:9999px;
+.badge-jesee{font-size:10px;font-weight:600;padding:3px 8px;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-radius:9999px;
   background:rgba(2, 132, 199, 0.12);color:#0284c7;border:1px solid rgba(2, 132, 199, 0.3);
   box-shadow:0 2px 6px rgba(2, 132, 199, 0.1);letter-spacing:0.3px}
 .author-banner{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--dim);
@@ -191,7 +191,7 @@ button.icon:hover:not(:disabled){color:var(--text);background:#ffffff;border-col
 button.icon.danger:hover:not(:disabled){color:var(--bad);background:rgba(220,38,38,0.1);border-color:rgba(220,38,38,0.3)}
 svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.8;
   stroke-linecap:round;stroke-linejoin:round;flex:none}
-main{position:relative;z-index:10;padding:18px 20px 48px;max-width:1200px;margin:0 auto}
+main{position:relative;z-index:10;padding:18px 20px 48px;max-width:1200px;width:100%;margin:0 auto;min-width:0}
 .bar{display:flex;align-items:center;gap:12px;margin-bottom:14px}
 .bar h2{font-size:13px;margin:0;font-weight:700;color:var(--text);letter-spacing:0.2px}
 .exit{border:1px solid rgba(255, 255, 255, 0.75);border-top:1.5px solid rgba(255, 255, 255, 0.98);
@@ -287,12 +287,32 @@ main{position:relative;z-index:10;padding:18px 20px 48px;max-width:1200px;margin
 .links{display:flex;gap:14px;margin-right:4px}
 .links a{color:var(--dim);text-decoration:none;font-size:12px;transition:color .15s}
 .links a:hover{color:var(--accent)}
+#panel{max-width:min(34vw,360px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--dim)}
+.orch-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.orch-source-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.orch-source{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.45)}
+.orch-source input{accent-color:var(--accent)}
 @media(max-width:860px){.links, .author-banner{display:none}
-  main{padding:12px 14px 40px}
-  .exit>.row{grid-template-columns:14px 1fr auto;
+  header{padding:9px 10px;gap:7px}
+  .brand-wrap{min-width:0;gap:6px}
+  .badge-jesee{max-width:118px}
+  #panel{flex:1;min-width:0;max-width:none}
+  main{padding:12px 10px 40px}
+  .bar{gap:7px}
+  .bar button{padding:5px 9px}
+  .exit>.row{grid-template-columns:12px minmax(0,1fr) auto;
     grid-template-areas:"dot ip acts" ". meta meta" ". socks socks" ". chips chips"}
   .exit .chips{margin-top:2px}
+  .orow{grid-template-columns:minmax(0,1fr) auto}
+  .orow select{grid-column:1 / -1;grid-row:2}
+  .orch-grid,.orch-source-grid{grid-template-columns:1fr}
   .bar{flex-wrap:wrap}}
+@media(max-width:480px){
+  .badge-jesee{max-width:100px;font-size:9px;padding:3px 7px}
+  #panel{font-size:10px}
+  .exit{border-radius:14px}
+  .exit>.row{padding:10px 12px}
+}
 .modal{position:fixed;inset:0;background:rgba(15, 23, 42, 0.25);
   backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
   display:none;align-items:center;justify-content:center;z-index:50;padding:20px}
@@ -338,8 +358,8 @@ select{cursor:pointer}
 .chead{display:flex;align-items:center;justify-content:space-between;margin:16px 0 8px}
 .chead h3{font-size:12px;margin:0;font-weight:700;color:var(--text)}
 .client{border:1px solid rgba(255,255,255,0.85);border-radius:10px;padding:10px 12px;margin-bottom:8px;background:rgba(255,255,255,0.55)}
-.orow{display:flex;align-items:center;gap:10px;padding:6px 0}
-.orow select{width:200px}
+.orow{display:grid;grid-template-columns:minmax(0,1fr) minmax(170px,220px) auto;align-items:center;gap:8px;padding:6px 0;min-width:0}
+.orow select{width:100%;min-width:0}
 .crow{display:flex;align-items:center;gap:10px}
 .cemail{font-weight:600;font-size:12px;color:var(--text)}
 .cid{color:var(--dim);font-size:11px;overflow:hidden;text-overflow:ellipsis;
@@ -427,7 +447,7 @@ textarea:focus{outline:none;border-color:var(--accent)}
       <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><path d="M11 8v6M8 11h6"/></svg>
       测活扫节点
     </button>
-    <button class="primary" id="autoOrchestrateBtn" title="全网智能编排：热门国家各维持 3 个健康出口，冷门国家各维持 1 个，自动发现、失效同国轮换与自愈" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);border-color:#818cf8;color:#fff;font-weight:600">
+    <button class="primary" id="autoOrchestrateBtn" title="智能编排：先测活再加入；热门国家默认3个，其它有节点国家默认1个，可自定义源与数量" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);border-color:#818cf8;color:#fff;font-weight:600">
       <svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
       智能编排
     </button>
@@ -731,6 +751,38 @@ textarea:focus{outline:none;border-color:var(--accent)}
       <button data-close="settings">取消</button>
       <button class="primary" id="setSave">保存</button>
     </div>
+  </div>
+</div>
+
+<div class="modal" id="orchestrateModal">
+  <div class="sheet" style="max-width:620px">
+    <div class="head">
+      <h2>⚡ 智能编排</h2><span class="spacer"></span>
+      <button class="icon" data-close="orchestrateModal" title="关闭"><svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+    </div>
+    <div class="body">
+      <div class="hint" style="margin-bottom:12px">严格模式：<b>先测活 → 再真实建立隧道 → 再验证出口 IP → 验证通过才进入正式出口</b>。失败节点自动冷却，不会一上来批量塞一堆未经验证的节点。</div>
+      <div class="orch-grid">
+        <label class="f"><span>热门国家目标数量</span><input id="orchHot" type="number" min="1" max="20" value="3"></label>
+        <label class="f"><span>其他有节点国家目标数量</span><input id="orchCold" type="number" min="1" max="10" value="1"></label>
+      </div>
+      <label class="f" style="margin-top:10px"><span>本轮最多尝试验证多少个候选</span><input id="orchMax" type="number" min="1" max="20" value="6"></label>
+      <div style="margin-top:14px">
+        <div style="font-weight:700;margin-bottom:8px">候选节点源（可多选）</div>
+        <div class="orch-source-grid">
+          <label class="orch-source"><input type="checkbox" class="orch-src" value="vpngate" checked> 🇯🇵 VPN Gate / 筑波大学</label>
+          <label class="orch-source"><input type="checkbox" class="orch-src" value="ipspeed" checked> 🌐 IPSpeed OpenVPN</label>
+          <label class="orch-source"><input type="checkbox" class="orch-src" value="proxy" checked> 🔌 公共 SOCKS5 / HTTP</label>
+          <label class="orch-source"><input type="checkbox" class="orch-src" value="edu" checked> 🎓 海外高校学术</label>
+          <label class="orch-source"><input type="checkbox" class="orch-src" value="residential" checked> 🏠 已识别住宅</label>
+          <label class="orch-source"><input type="checkbox" class="orch-src" value="gov"> 🏛️ 已识别公共机构</label>
+          <label class="orch-source"><input type="checkbox" class="orch-src" value="custom" checked> 🧩 自定义 / 本地</label>
+          <label class="orch-source"><input type="checkbox" id="orchAll" value="all"> 🌍 全部候选源</label>
+        </div>
+      </div>
+      <div style="margin-top:14px;padding:10px;border-radius:10px;background:rgba(2,132,199,.07);border:1px solid rgba(2,132,199,.16);font-size:12px;color:var(--dim)">测活为强制步骤，不能关闭。国家没有合格节点就不创建；有 4 个、5 个或更多合格节点时，可把目标数量调高。</div>
+    </div>
+    <div class="foot"><span class="spacer"></span><button data-close="orchestrateModal">取消</button><button class="primary" id="runOrchestrate">开始智能编排</button></div>
   </div>
 </div>
 
@@ -2444,17 +2496,36 @@ document.addEventListener('click', async e => {
     return;
   }
   if(e.target.closest('#autoOrchestrateBtn')){
-    const btn = e.target.closest('#autoOrchestrateBtn');
+    openModal('orchestrateModal');
+    return;
+  }
+  if(e.target.closest('#orchAll')){
+    const all = e.target.closest('#orchAll').checked;
+    document.querySelectorAll('.orch-src').forEach(x => { x.checked = all; });
+    return;
+  }
+  if(e.target.closest('#runOrchestrate')){
+    const btn = e.target.closest('#runOrchestrate');
+    const sources = Array.from(document.querySelectorAll('.orch-src:checked')).map(x => x.value);
+    const hot = Math.max(1, Math.min(20, parseInt($('#orchHot').value || '3', 10)));
+    const cold = Math.max(1, Math.min(10, parseInt($('#orchCold').value || '1', 10)));
+    const maxStarts = Math.max(1, Math.min(20, parseInt($('#orchMax').value || '6', 10)));
+    if(!sources.length){ toast('至少选择一个节点源', true); return; }
     btn.disabled = true;
-    toast('⚡ 正在执行全网智能编排：热门国家各维持 3 个出口，冷门国家各维持 1 个...');
+    toast('⚡ 正在测活并逐个验证，只有真正出网的节点才会加入...');
     try {
-      await api('/api/auto/orchestrate', {method: 'POST'});
-      toast('全网智能编排已触发！正在检查各国家配额并拉起可用节点...');
-      setTimeout(poll, 2500);
+      const res = await api('/api/auto/orchestrate', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({sources:sources,hot_target:hot,cold_target:cold,max_starts:maxStarts})
+      });
+      closeModal('orchestrateModal');
+      toast(res.message || '智能编排已启动');
+      setTimeout(poll, 2000);
+      setTimeout(poll, 8000);
     } catch(err) {
-      toast('触发编排失败: ' + err.message, true);
+      toast('智能编排失败: ' + err.message, true);
     } finally {
-      setTimeout(() => { btn.disabled = false; }, 3000);
+      setTimeout(() => { btn.disabled = false; }, 1200);
     }
     return;
   }

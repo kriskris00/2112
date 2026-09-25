@@ -91,6 +91,22 @@ var proxyListSources = []struct {
 	// ===== vakhov/fresh-proxy-list =====
 	{URL: "https://raw.githubusercontent.com/vakhov/fresh-proxy-list/master/socks5.txt", Proto: "socks5"},
 	{URL: "https://raw.githubusercontent.com/vakhov/fresh-proxy-list/master/http.txt", Proto: "http"},
+
+	// ===== HProxy：持续实测、去重、带国家/延迟/存活率；这里只拉 live 候选，仍由本机最终复测 =====
+	{URL: "https://raw.githubusercontent.com/hproxy-com/free-proxy-list/main/socks5.txt", Proto: "socks5"},
+	{URL: "https://raw.githubusercontent.com/hproxy-com/free-proxy-list/main/http.txt", Proto: "http"},
+
+	// ===== Proxio：约 20 分钟更新的实测公共代理镜像 =====
+	{URL: "https://raw.githubusercontent.com/proxio-io/proxy-list/main/socks5.txt", Proto: "socks5"},
+	{URL: "https://raw.githubusercontent.com/proxio-io/proxy-list/main/http.txt", Proto: "http"},
+
+	// ===== Databay：约 5 分钟发布一次的已验证代理列表 =====
+	{URL: "https://raw.githubusercontent.com/databay-labs/free-proxy-list/master/socks5.txt", Proto: "socks5"},
+	{URL: "https://raw.githubusercontent.com/databay-labs/free-proxy-list/master/http.txt", Proto: "http"},
+
+	// ===== Tianndev：多源聚合、约 30 分钟刷新；只作为候选源 =====
+	{URL: "https://raw.githubusercontent.com/Tianndev/free-proxy/main/proxy/socks5.txt", Proto: "socks5"},
+	{URL: "https://raw.githubusercontent.com/Tianndev/free-proxy/main/proxy/http.txt", Proto: "http"},
 }
 
 var englishCountryToCode = map[string]string{
@@ -436,10 +452,10 @@ func parseProxyList(body string, defaultProto string) []Node {
 			countryCode, country = guessCountryByIP(ip)
 		}
 
-		ipType := "residential"
-		isp := "优质网络"
-		src := "residential"
-		purityScore := 88
+		ipType := "unknown"
+		isp := "公共代理"
+		src := "proxy"
+		purityScore := 55
 
 		if isEduIP(ip) {
 			ipType = "edu"
@@ -450,8 +466,6 @@ func parseProxyList(body string, defaultProto string) []Node {
 				countryCode = "EDU"
 				country = "海外高校学术网络"
 			}
-		} else if zh, ok := countryNameZH[countryCode]; ok && zh != "" && countryCode != "GLOBAL" {
-			isp = zh + " 原生住宅网络"
 		}
 
 		// 检查本地已有 IP 智能缓存
@@ -1332,27 +1346,15 @@ func parseNodeCSV(body string) ([]Node, error) {
 				isp = "海外高校学术网络 (EDU)"
 			}
 		} else {
-			ipType = "residential"
-			src = "residential"
-			if purityScore < 90 {
-				purityScore = 92
+			// VPN Gate 的公共中继不能仅凭来源推断“住宅/政府/学术”。
+			// 未被情报明确识别的节点保持 unknown，避免面板虚标“住宅”。
+			ipType = "unknown"
+			src = "vpngate"
+			if purityScore < 65 {
+				purityScore = 65
 			}
-			if isp == "优质网络" || isp == "VPN Gate" {
-				if countryCode == "JP" {
-					isp = "日本家庭宽带 (NTT/SoftBank)"
-				} else if countryCode == "KR" {
-					isp = "韩国高速家宽 (KT/SKB)"
-				} else if countryCode == "US" {
-					isp = "美国原生住宅宽带"
-				} else if countryCode == "TW" {
-					isp = "台湾中华电信/远传家宽"
-				} else if countryCode == "GB" {
-					isp = "英国原生宽带"
-				} else if countryCode == "DE" {
-					isp = "德国原生家宽"
-				} else if zh, ok := countryNameZH[countryCode]; ok && zh != "" {
-					isp = zh + " 原生住宅网络"
-				}
+			if isp == "优质网络" {
+				isp = "VPN Gate 公共中继"
 			}
 		}
 		nodes = append(nodes, Node{

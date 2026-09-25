@@ -31,10 +31,10 @@ type Tunnel struct {
 	Node         Node      `json:"node"`
 	TargetRegion string    `json:"target_region,omitempty"` // 锁定目标国家代码，故障时优先重连同国节点
 	Status       string    `json:"status"`                  // starting | up | failed | stopped
-	ExitIP string    `json:"exit_ip"`
-	Err    string    `json:"err,omitempty"`
-	Since  time.Time `json:"since"`
-	Cred   SocksCred `json:"cred"`
+	ExitIP       string    `json:"exit_ip"`
+	Err          string    `json:"err,omitempty"`
+	Since        time.Time `json:"since"`
+	Cred         SocksCred `json:"cred"`
 
 	ns       string
 	listener net.Listener
@@ -291,11 +291,8 @@ func (t *Tunnel) probeExitIP() (string, error) {
 			}
 		}
 
-		// 2. 如果 curl 探测遇上远端慢速/高延迟节点，但 tun0 已经起来且节点本身有已知 IP，兜底放行避免误杀
-		if t.Node.IP != "" && net.ParseIP(t.Node.IP) != nil {
-			return t.Node.IP, nil
-		}
-
+		// 严格模式：tun0 起来不等于真的能出网。不能使用节点元数据里的 IP 作为伪成功结果，
+		// 否则会把“OpenVPN 进程启动但没有真实出网”的坏节点加入正式出口。
 		return "", fmt.Errorf("查询出口 IP 失败 (curl1: %v, curl2: %v)", err, err2)
 	}
 
