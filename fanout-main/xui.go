@@ -821,7 +821,35 @@ func (x *XUI) syncOutbounds(setting map[string]any, tunnels []*Tunnel) {
 func (x *XUI) CloneToTunnels(templateID int, hosts []string, tunnels []*Tunnel) ([]int, error) {
 	raw, err := x.rawInbound(templateID)
 	if err != nil {
-		return nil, err
+		// 尝试从面板寻找已有可用入站
+		inbounds, _ := x.Inbounds(nil)
+		for _, ib := range inbounds {
+			if ib.Enable && ib.ID > 0 {
+				if r, rErr := x.rawInbound(ib.ID); rErr == nil {
+					raw = r
+					err = nil
+					break
+				}
+			}
+		}
+		// 若面板完全为空，自动创建一个母版入站
+		if err != nil {
+			createdIb, cErr := x.CreateInbound(NewInboundSpec{
+				Protocol: "vless",
+				Network:  "tcp",
+				Security: "none",
+				Remark:   "Fanout-Master",
+			}, tunnels)
+			if cErr == nil && createdIb != nil {
+				if r, rErr := x.rawInbound(createdIb.ID); rErr == nil {
+					raw = r
+					err = nil
+				}
+			}
+		}
+		if err != nil {
+			return nil, fmt.Errorf("读取/初始化入站模板失败: %w", err)
+		}
 	}
 
 	byHost := map[string]*Tunnel{}
@@ -836,8 +864,22 @@ func (x *XUI) CloneToTunnels(templateID int, hosts []string, tunnels []*Tunnel) 
 
 	emails, _ := clientEmails(raw)
 
+	// 严格执行 1 出口 = 1 节点：检查当前已有入站绑定，仅对确实已绑定该出口主机的跳过
+	existingInbounds, _ := x.Inbounds(nil)
+	boundHosts := make(map[string]bool)
+	for _, ib := range existingInbounds {
+		b := strings.TrimSpace(ib.BoundTo)
+		if b != "" && !strings.EqualFold(b, "direct") && !strings.EqualFold(b, "none") {
+			boundHosts[b] = true
+			boundHosts[sanitizeTag(b)] = true
+		}
+	}
+
 	created := []int{}
 	for _, host := range hosts {
+		if boundHosts[host] || boundHosts[sanitizeTag(host)] {
+			continue // 该出口已具备对应入站，跳过以严格维持 1 出口 = 1 节点
+		}
 		t := byHost[host]
 		if t == nil || t.Status != "up" {
 			continue

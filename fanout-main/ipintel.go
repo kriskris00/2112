@@ -42,6 +42,7 @@ func isGovISP(isp string) bool {
 		strings.Contains(low, "prefecture") ||
 		strings.Contains(low, "municipal") ||
 		strings.Contains(low, "public safety") ||
+		strings.Contains(low, "public sector") ||
 		strings.Contains(low, "parliament") ||
 		strings.Contains(low, "senate") ||
 		strings.Contains(low, "federal") ||
@@ -49,6 +50,17 @@ func isGovISP(isp string) bool {
 		strings.Contains(low, "police") ||
 		strings.Contains(low, "customs") ||
 		strings.Contains(low, "military") ||
+		strings.Contains(low, "national defense") ||
+		strings.Contains(low, "lgwan") ||
+		strings.Contains(low, "gsn") ||
+		strings.Contains(low, "govtech") ||
+		strings.Contains(low, "gov.uk") ||
+		strings.Contains(low, "gov.sg") ||
+		strings.Contains(low, "gov.au") ||
+		strings.Contains(low, "bundes") ||
+		strings.Contains(low, "stadt") ||
+		strings.Contains(low, "city of") ||
+		strings.Contains(low, "county of") ||
 		strings.Contains(low, ".gov") ||
 		strings.Contains(low, ".go.jp")
 }
