@@ -685,7 +685,7 @@ func loadInitialNodes(workDir string) []Node {
 	nodeMap := make(map[string]Node)
 	for _, n := range builtinSeedNodes {
 		if n.IP != "" {
-			nodeMap[n.IP] = n
+			nodeMap[nodeKey(n)] = n
 		}
 	}
 	if workDir != "" {
@@ -694,7 +694,7 @@ func loadInitialNodes(workDir string) []Node {
 			if list, pErr := parseNodeCSV(string(data)); pErr == nil {
 				for _, node := range list {
 					if node.IP != "" && !isFakeDummyNode(node) {
-						nodeMap[node.IP] = node
+						nodeMap[nodeKey(node)] = node
 					}
 				}
 			}
@@ -819,7 +819,7 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 				if sourceFilter == "edu" && (strings.EqualFold(n.CountryCode, "CN") || strings.Contains(strings.ToLower(n.Country), "china") || strings.HasSuffix(strings.ToLower(n.HostName), ".cn")) {
 					continue
 				}
-				nodeMap[n.IP] = n
+				nodeMap[nodeKey(n)] = n
 			}
 		}
 	}
@@ -832,7 +832,8 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 		customURLText := globalSourceInfo.CustomURL
 		sourceInfoMu.RUnlock()
 
-		if customURLText != "" {
+		sf := strings.ToLower(strings.TrimSpace(sourceFilter))
+		if customURLText != "" && (sf == "" || sf == "all" || sf == "custom") {
 			for _, u := range strings.Split(customURLText, "\n") {
 				u = strings.TrimSpace(u)
 				for _, sub := range strings.Split(u, ",") {
@@ -843,11 +844,13 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 				}
 			}
 		}
-		// 始终加入官方与全部日本筑波大学活跃镜像（硬性要求：不受 sourceFilter 限制）
-		targets = append(targets, defaultMirrors...)
-		// 并发动态探测今日最新推荐的实时镜像池
-		if discovered := discoverMirrors(4 * time.Second); len(discovered) > 0 {
-			targets = append(targets, discovered...)
+		// 只有需要 VPN Gate/学术/住宅聚合的来源才抓取筑波大学镜像。
+		// 选择 IPSpeed / 公共代理 / 自定义时绝不混入其它来源。
+		if sf == "" || sf == "all" || sf == "vpngate" || sf == "edu" || sf == "residential" || sf == "gov" {
+			targets = append(targets, defaultMirrors...)
+			if discovered := discoverMirrors(4 * time.Second); len(discovered) > 0 {
+				targets = append(targets, discovered...)
+			}
 		}
 	}
 
@@ -892,7 +895,7 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 					if sourceFilter == "gov" && n.IPType != "gov" && n.Source != "gov" {
 						continue
 					}
-					nodeMap[n.IP] = n
+					nodeMap[nodeKey(n)] = n
 				}
 			}
 			mu.Unlock()
@@ -900,7 +903,7 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 	}
 
 	// 3b. 并发拉取全网高质量住宅与公网代理源（覆盖美日港台新韩英德加法澳荷等数千活跃节点）
-	if sourceFilter == "" || sourceFilter == "all" || sourceFilter == "residential" || sourceFilter == "proxy" {
+	if sourceFilter == "" || sourceFilter == "all" || sourceFilter == "residential" || sourceFilter == "proxy" || sourceFilter == "edu" || sourceFilter == "gov" {
 		for _, pSrc := range proxyListSources {
 			wg.Add(1)
 			go func(url string, defaultProto string) {
@@ -948,10 +951,10 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 							continue
 						}
 						// 如果已有带 OpenVPN 配置的节点，优先保留
-						if existing, ok := nodeMap[n.IP]; ok && existing.Config != "" {
+						if existing, ok := nodeMap[nodeKey(n)]; ok && existing.Config != "" {
 							continue
 						}
-						nodeMap[n.IP] = n
+						nodeMap[nodeKey(n)] = n
 					}
 				}
 				mu.Unlock()
@@ -960,7 +963,7 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 	}
 
 	// 3c. IPSpeed：独立的公开 OpenVPN 配置源。失败只影响这一源，不阻塞其他来源。
-	if sourceFilter == "" || sourceFilter == "all" || sourceFilter == "vpngate" || sourceFilter == "openvpn" {
+	if sourceFilter == "" || sourceFilter == "all" || sourceFilter == "ipspeed" || sourceFilter == "openvpn" {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -974,7 +977,7 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 				}
 				mu.Lock()
 				if len(nodeMap) < 25000 {
-					key := n.IP + ":" + strconv.Itoa(n.Port)
+					key := nodeKey(n)
 					if _, exists := nodeMap[key]; !exists {
 						nodeMap[key] = n
 						successCount++

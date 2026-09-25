@@ -103,7 +103,22 @@ func TestOrchestrateSourceAllowed(t *testing.T) {
 
 func TestDefaultAutoOrchestrateOptions(t *testing.T) {
 	o := DefaultAutoOrchestrateOptions()
-	if o.HotTarget != 3 || o.ColdTarget != 1 || o.MaxStarts != 6 {
+	if o.HotTarget != 3 || o.ColdTarget != 1 || o.MaxStarts != 12 {
 		t.Fatalf("默认编排参数异常: %+v", o)
+	}
+}
+
+func TestNodeMatchesSourceIsStrict(t *testing.T) {
+	vpn := Node{Source: "vpngate", Proto: "ovpn", IP: "1.1.1.1"}
+	ips := Node{Source: "ipspeed", Proto: "ovpn", IP: "2.2.2.2"}
+	proxy := Node{Source: "proxy", Proto: "socks5", IP: "3.3.3.3"}
+	if !nodeMatchesSource(vpn, "vpngate") || nodeMatchesSource(vpn, "ipspeed") || nodeMatchesSource(vpn, "proxy") {
+		t.Fatal("VPN Gate 节点来源过滤不严格")
+	}
+	if !nodeMatchesSource(ips, "ipspeed") || nodeMatchesSource(ips, "vpngate") {
+		t.Fatal("IPSpeed 节点来源过滤不严格")
+	}
+	if !nodeMatchesSource(proxy, "proxy") || nodeMatchesSource(proxy, "vpngate") {
+		t.Fatal("代理节点来源过滤不严格")
 	}
 }

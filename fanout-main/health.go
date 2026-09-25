@@ -2,7 +2,6 @@ package main
 
 import (
 	"log"
-	"net/http"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -10,20 +9,24 @@ import (
 )
 
 const (
-	healthInterval = 3 * time.Second
-	healthFailures = 2 // 连续失败 2 次（约 6s），再触发同国换节点，降低瞬时抖动误判
-	healthTimeout  = 3 * time.Second
+	healthInterval = 5 * time.Second
+	healthFailures = 2 // 连续失败 2 次（约 10s），再触发同国换节点，降低瞬时抖动误判
+	healthTimeout  = 2 * time.Second
 )
 
 // WatchHealth 周期检查每条隧道是否还能出网，连续健康检查失败自动同国换节点重连，候选耗尽彻底删除。
 func (m *Manager) WatchHealth() {
 	fails := map[int]int{}
+	ticker := time.NewTicker(healthInterval)
+	defer ticker.Stop()
 
-	for range time.Tick(healthInterval) {
+	for range ticker.C {
+		active := make(map[int]bool)
 		for _, t := range m.Tunnels() {
 			if t.Status != "up" {
 				continue
 			}
+			active[t.Slot] = true
 			if m.tunnelHealthy(t) {
 				fails[t.Slot] = 0
 				continue
@@ -39,6 +42,11 @@ func (m *Manager) WatchHealth() {
 			fails[t.Slot] = 0
 			m.reconnect(t, t.Node.HostName)
 		}
+		for slot := range fails {
+			if !active[slot] {
+				delete(fails, slot)
+			}
+		}
 	}
 }
 
@@ -50,30 +58,11 @@ func (m *Manager) WatchHealth() {
 func (m *Manager) tunnelHealthy(t *Tunnel) bool {
 	// 1. 上游公开代理（无 netns，通过 dialer 探测连通性）
 	if t.Node.Proto == "socks5" || t.Node.Proto == "http" || t.Node.Config == "" {
-		if t.dialer == nil {
+		if t.dialer == nil || strings.TrimSpace(t.ExitIP) == "" {
 			return false
 		}
-		client := &http.Client{
-			Transport: &http.Transport{Dial: t.dialer},
-			Timeout:   healthTimeout,
-		}
-		resp, err := client.Get("http://1.1.1.1/cdn-cgi/trace")
-		if err == nil && resp.StatusCode == http.StatusOK {
-			resp.Body.Close()
-			return true
-		}
-		if resp != nil {
-			resp.Body.Close()
-		}
-		resp2, err2 := client.Get("http://api.ipify.org")
-		if err2 == nil && resp2.StatusCode == http.StatusOK {
-			resp2.Body.Close()
-			return true
-		}
-		if resp2 != nil {
-			resp2.Body.Close()
-		}
-		return false
+		got, err := t.probeExitIP()
+		return err == nil && strings.TrimSpace(got) == strings.TrimSpace(t.ExitIP)
 	}
 
 	// 2. OpenVPN netns 隧道探测

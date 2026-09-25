@@ -14,10 +14,11 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // version 由构建时通过 -ldflags 注入。
-var version = "v3.0.0-Jesee-Mod"
+var version = "v3.1.0-live-engine"
 
 func main() {
 	var (
@@ -60,6 +61,9 @@ func main() {
 	}
 
 	mgr := NewManager(*maxSlots, *workDir)
+	// 服务刚启动就保证存在一个真正不走任何出口的“服务器直连 · 本机”节点，
+	// 不必等智能编排跑完几十个候选后才出现。
+	go mgr.reconcilePanelBindings()
 	initNodes, _ := mgr.Nodes()
 	log.Printf("节点底池已就绪: %d 个节点 (动态多源节点池，含 VPN Gate/筑波大学及其他公开 OpenVPN 源)", len(initNodes))
 
@@ -83,6 +87,7 @@ func main() {
 		// 出站没有认证字段，端口一旦要认证就连不上，这里恢复后对账一次
 		go mgr.ReconcileOutbounds()
 	}
+	go mgr.reconcilePanelBindings()
 
 	go mgr.WatchHealth()
 	go mgr.WatchAutoOrchestrate()
@@ -194,6 +199,7 @@ func apiNodes(m *Manager) http.HandlerFunc {
 		region := strings.ToUpper(strings.TrimSpace(q.Get("region")))
 		source := strings.ToLower(strings.TrimSpace(q.Get("source")))
 		search := strings.ToLower(strings.TrimSpace(q.Get("search")))
+		liveOnly := q.Get("live") == "1" || strings.EqualFold(q.Get("live"), "true")
 		limit := 300
 		if limitStr := q.Get("limit"); limitStr != "" {
 			if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
@@ -219,22 +225,8 @@ func apiNodes(m *Manager) http.HandlerFunc {
 					continue
 				}
 			}
-			if source != "" && source != "all" {
-				if source == "gov" {
-					if n.Source != "gov" && !strings.EqualFold(n.IPType, "gov") {
-						continue
-					}
-				} else if source == "edu" {
-					if n.Source != "edu" && !isEduIP(n.IP) && !strings.EqualFold(n.IPType, "edu") {
-						continue
-					}
-				} else if source == "residential" {
-					if !strings.EqualFold(n.IPType, "residential") {
-						continue
-					}
-				} else if !strings.EqualFold(n.Source, source) {
-					continue
-				}
+			if !nodeMatchesSource(n, source) {
+				continue
 			}
 			if search != "" {
 				s := strings.ToLower(n.HostName + " " + n.IP + " " + n.ISP + " " + n.Country + " " + n.CountryCode)
@@ -281,6 +273,23 @@ func apiNodes(m *Manager) http.HandlerFunc {
 			}
 			return filtered[i].SpeedMbps > filtered[j].SpeedMbps
 		})
+
+		if liveOnly {
+			// 不要只测前 120 个就结束：前排可能全部是死节点。扩大到 2x 候选，
+			// 但设置硬上限，保证手机点国家时不会拖成几十秒。
+			probeLimit := limit * 2
+			if probeLimit < 120 {
+				probeLimit = 120
+			}
+			if probeLimit > 300 {
+				probeLimit = 300
+			}
+			if len(filtered) > probeLimit {
+				filtered = filtered[:probeLimit]
+			}
+			filtered = probeNodesLive(filtered, 1200*time.Millisecond)
+			// live 模式只返回本机刚刚真实探测通过的节点；没有成功探测到的绝不展示。
+		}
 
 		total := len(filtered)
 		if len(filtered) > limit {
@@ -369,7 +378,7 @@ func apiStart(m *Manager) http.HandlerFunc {
 		}
 
 		startNode := func(vn Node) {
-			t, err := m.Start(vn)
+			t, err := m.StartExact(vn)
 			if err != nil {
 				writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 				return
@@ -450,6 +459,26 @@ func apiSwap(m *Manager) http.HandlerFunc {
 func apiRegions(m *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		source := r.URL.Query().Get("source")
+		if r.URL.Query().Get("live") == "1" || strings.EqualFold(r.URL.Query().Get("live"), "true") {
+			// 选定单一来源时，如果当前内存池还没有该来源，后台立即补拉；前端不被长时间请求卡住。
+			nodes, _ := m.Nodes()
+			hasSource := false
+			for _, n := range nodes {
+				if nodeMatchesSource(n, source) {
+					hasSource = true
+					break
+				}
+			}
+			if !hasSource && strings.TrimSpace(source) != "" && !strings.EqualFold(source, "all") {
+				go func(src string) {
+					if _, err := m.RefreshNodesSource(src); err != nil {
+						log.Printf("[节点源] 后台补拉 %s 失败: %v", src, err)
+					}
+				}(source)
+			}
+			writeJSON(w, http.StatusOK, liveRegions(m, source))
+			return
+		}
 		writeJSON(w, http.StatusOK, m.Regions(source))
 	}
 }

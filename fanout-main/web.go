@@ -175,7 +175,7 @@ button{font:inherit;color:var(--text);background:rgba(255, 255, 255, 0.65);
   transition:all .18s cubic-bezier(0.16, 1, 0.3, 1)}
 button, a, input, select, textarea, [data-rg], [data-close], [data-detail], [data-cred],
 [data-stop], [data-swap], [data-job], [data-del], [data-delone], [data-delclient],
-[data-resetclient], [data-togglejobfailed], [data-cleanjobfailed], .chip, .rg, .step, .btn-xs {
+[data-resetclient], .chip, .rg, .step, .btn-xs {
   cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
 button:hover:not(:disabled){background:#ffffff;border-color:rgba(2, 132, 199, 0.4);
   color:var(--accent);transform:translateY(-1px);box-shadow:0 4px 16px rgba(0,0,0,0.08)}
@@ -282,8 +282,6 @@ main{position:relative;z-index:10;padding:18px 20px 48px;max-width:1200px;width:
 .btn-xs.danger:hover{border-color:var(--bad);background:rgba(220,38,38,0.15)}
 .step.failed-summary{cursor:pointer;border-style:dashed}
 .step.failed-summary:hover{background:rgba(220,38,38,.15)}
-.failed-steps-wrap{width:100%;margin-top:8px;padding-top:8px;border-top:1px dashed rgba(255,255,255,0.6);display:none}
-.failed-steps-wrap.open{display:flex;flex-wrap:wrap;gap:6px}
 .links{display:flex;gap:14px;margin-right:4px}
 .links a{color:var(--dim);text-decoration:none;font-size:12px;transition:color .15s}
 .links a:hover{color:var(--accent)}
@@ -475,15 +473,17 @@ textarea:focus{outline:none;border-color:var(--accent)}
       <label class="f">
         <div style="display:flex;justify-content:space-between;align-items:center">
           <span>节点来源 / 节点池</span>
-          <span style="font-size:12px;color:var(--dim)">自由选择单独源或全部聚合</span>
+          <span style="font-size:12px;color:var(--dim)">选择后下面只显示该来源的实时节点</span>
         </div>
         <select id="wzSource" style="padding:8px 10px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--text);font-size:13px;width:100%">
-          <option value="all">🌐 官方与镜像优质节点 (全量家宽/高校/政府 · 自动优选)</option>
-          <option value="vpngate">🇯🇵 日本筑波大学 (官方与高防镜像源)</option>
-          <option value="gov">🏛️ 全球政府公共机构网 (政府自治体/公共政务专网)</option>
-          <option value="edu">🎓 海外高校学术科研网 (日本筑波/韩国/台湾/欧美名校)</option>
-          <option value="residential">🏡 住宅家宽原生节点 (纯净高分 · 极速防封)</option>
-          <option value="custom">📁 本地导入与自定义节点 (.ovpn / 自建)</option>
+          <option value="all">🌐 全部来源（只显示实时测活通过的节点）</option>
+          <option value="vpngate">🇯🇵 VPN Gate / 筑波大学官方与镜像</option>
+          <option value="ipspeed">⚡ IPSpeed OpenVPN</option>
+          <option value="proxy">🔌 公共 SOCKS5 / HTTP</option>
+          <option value="edu">🎓 海外高校学术科研网</option>
+          <option value="residential">🏡 已识别住宅 / 家宽</option>
+          <option value="gov">🏛️ 已识别公共机构</option>
+          <option value="custom">📁 本地导入与自定义节点</option>
         </select>
       </label>
       <label class="f">
@@ -494,7 +494,7 @@ textarea:focus{outline:none;border-color:var(--accent)}
       <div id="wzCandidateSection" style="margin-bottom:14px">
         <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;padding:8px 12px;background:var(--subtle);border-radius:6px;border:1px solid var(--border)" id="toggleWzCandidates">
           <span style="font-size:12px;font-weight:600;display:flex;align-items:center;gap:6px">
-            <span id="wzCandArrow">▶</span> 展开候选节点详情 (<span id="wzCandCount">0</span> 个候选 · 优劣推荐 / 自由选择启动)
+            <span id="wzCandArrow">▶</span> 实时节点 (<span id="wzCandCount">0</span> 个已测活 · 显示 IP / Ping / 来源 / 协议)
           </span>
           <span style="font-size:11px;color:var(--accent)" id="wzCandStatus">点击展开</span>
         </div>
@@ -766,7 +766,7 @@ textarea:focus{outline:none;border-color:var(--accent)}
         <label class="f"><span>热门国家目标数量</span><input id="orchHot" type="number" min="1" max="20" value="3"></label>
         <label class="f"><span>其他有节点国家目标数量</span><input id="orchCold" type="number" min="1" max="10" value="1"></label>
       </div>
-      <label class="f" style="margin-top:10px"><span>本轮最多尝试验证多少个候选</span><input id="orchMax" type="number" min="1" max="20" value="6"></label>
+      <label class="f" style="margin-top:10px"><span>本轮最多尝试验证多少个候选</span><input id="orchMax" type="number" min="1" max="20" value="12"></label>
       <div style="margin-top:14px">
         <div style="font-weight:700;margin-bottom:8px">候选节点源（可多选）</div>
         <div class="orch-source-grid">
@@ -1317,8 +1317,6 @@ function renderOrphans(){
     + '</div>';
 }
 
-let showAllFailed = false;
-
 function renderJobs(jobs){
   const box = $('#jobs');
   if(!jobs || !jobs.length){
@@ -1329,8 +1327,7 @@ function renderJobs(jobs){
   const header = '<div class="jobs-bar">'
     + '<span>任务进度 (' + jobs.length + ')</span>'
     + '<span class="spacer"></span>'
-    + '<button class="btn-xs" id="clearAllDoneJobs" title="清空所有已完成/失败的任务卡片">🧹 清空任务卡片</button>'
-    + '<button class="btn-xs" id="toggleAllFailedBtn">' + (showAllFailed ? '🙈 隐藏全部爆红' : '👁️ 显示全部爆红') + '</button>'
+    + '<button class="btn-xs" id="clearAllDoneJobs" title="清空已结束任务卡片">🧹 清空任务</button>'
     + '</div>';
 
   const items = jobs.map(j => {
@@ -1350,15 +1347,10 @@ function renderJobs(jobs){
     stepsHtml += runningSteps.map(renderStep).join('');
 
     if(failedSteps.length > 0){
-      const isRunning = j.status === 'running';
-      // 跑完后默认优雅自动折叠隐藏爆红失败项！
-      const isFailedOpen = showAllFailed || (isRunning && failedSteps.length < 4);
-      stepsHtml += '<button class="btn-xs step failed-summary" data-togglejobfailed="' + esc(j.id) + '" title="点击展开/折叠未连通候选">'
-        + (isFailedOpen ? '▲ 收起 ' : '▼ 查看 ') + failedSteps.length + ' 个未连通候选</button>';
-      stepsHtml += '<button class="btn-xs danger" data-cleanjobfailed="' + esc(j.id) + '" title="彻底清除此任务里的爆红记录">🧹 清理爆红</button>';
-      stepsHtml += '<div class="failed-steps-wrap' + (isFailedOpen ? ' open' : '') + '" id="failed_wrap_' + esc(j.id) + '">'
-        + failedSteps.map(renderStep).join('')
-        + '</div>';
+      // 失败候选不再逐个渲染成红色按钮；它们已经被后端过滤/冷却，
+      // 页面只保留一个轻量统计，避免几百个死节点把移动端页面撑爆。
+      stepsHtml += '<span class="step failed-summary" title="失败节点已自动隐藏并进入冷却">'
+        + ICON.bad + '已自动过滤 ' + failedSteps.length + ' 个失败候选</span>';
     }
 
     const close = j.status === 'running' ? ''
@@ -1367,7 +1359,7 @@ function renderJobs(jobs){
     return '<div class="job"><div class="top"><strong>' + esc(j.summary) + '</strong>'
       + '<span class="count">' + j.done + '/' + j.total
       + (okSteps.length ? ' · <span style="color:var(--ok)">已成功 ' + okSteps.length + '</span>' : '')
-      + (failedSteps.length ? ' · <span style="color:var(--bad)">失败 ' + failedSteps.length + '</span>' : '')
+      + (failedSteps.length ? ' · <span style="color:var(--dim)">已过滤 ' + failedSteps.length + '</span>' : '')
       + '</span>'
       + '<span class="spacer"></span>' + close + '</div>'
       + '<div class="steps">' + stepsHtml + '</div></div>';
@@ -1410,23 +1402,6 @@ document.querySelectorAll('.modal').forEach(m => {
   m.onclick = e => { if(e.target === m) m.classList.remove('open'); };
 });
 
-const DEFAULT_CORE_REGIONS = [
-  {code: 'GLOBAL', name: '全球推荐 (自动优选)', available: 50, avg_purity: 92},
-  {code: 'JP', name: '日本 (筑波大学官方/镜像)', available: 20, avg_purity: 95},
-  {code: 'US', name: '美国 (家宽/科研)', available: 25, avg_purity: 90},
-  {code: 'HK', name: '中国香港', available: 15, avg_purity: 92},
-  {code: 'TW', name: '中国台湾', available: 12, avg_purity: 90},
-  {code: 'SG', name: '新加坡', available: 12, avg_purity: 92},
-  {code: 'KR', name: '韩国 (高校/家宽)', available: 10, avg_purity: 95},
-  {code: 'GB', name: '英国', available: 10, avg_purity: 90},
-  {code: 'DE', name: '德国', available: 10, avg_purity: 92},
-  {code: 'CA', name: '加拿大', available: 8, avg_purity: 90},
-  {code: 'FR', name: '法国', available: 8, avg_purity: 90},
-  {code: 'AU', name: '澳大利亚', available: 8, avg_purity: 90},
-  {code: 'NL', name: '荷兰', available: 8, avg_purity: 92},
-  {code: 'GOV', name: '全球政府公共机构专网', available: 5, avg_purity: 99},
-  {code: 'EDU', name: '海外高校学术科研网 (不含国内)', available: 15, avg_purity: 99}
-];
 
 function clampCount(val) {
   let n = parseInt(val, 10);
@@ -1437,7 +1412,7 @@ function clampCount(val) {
 
 function renderRegions(){
   const kw = ($('#rgfilter').value || '').trim().toLowerCase();
-  const sourceList = regions.length ? regions : DEFAULT_CORE_REGIONS;
+  const sourceList = regions;
   const list = sourceList.filter(r => {
     if(!kw) return true;
     const zh = (COUNTRY_ZH[r.code.toUpperCase()] || '').toLowerCase();
@@ -1471,7 +1446,7 @@ function renderRegions(){
 }
 
 function availOf(code){
-  const sourceList = regions.length ? regions : DEFAULT_CORE_REGIONS;
+  const sourceList = regions;
   if(code === '') return sourceList.reduce((a, r) => a + r.available, 0);
   const r = sourceList.find(x => x.code === code);
   return r ? r.available : 0;
@@ -1485,26 +1460,35 @@ function updateAvail(){
   const hint = $('#availhint');
   const goBtn = $('#go');
 
-  hint.textContent = avail ? '当前源可用 ' + avail + ' 个空闲节点' : (region ? '当前源此地区暂无空闲节点，将尝试全网池' : '全网可用');
+  hint.textContent = avail ? '当前来源已实测通过 ' + avail + ' 个节点' : '当前来源暂无实测通过节点（死节点不显示）';
   hint.className = 'hint' + (want > avail && avail ? ' bad' : '');
   if(want > avail && avail) hint.textContent = '只剩 ' + avail + ' 个，将全部使用';
-  goBtn.disabled = false;
+  goBtn.disabled = selectedWzHosts.size === 0 && avail <= 0;
 }
 
+let wizardRegionRetryTimer = null;
+let wizardRegionRetry = 0;
 async function loadWizard(selectedSrc){
   const src = selectedSrc !== undefined ? selectedSrc : ($('#wzSource') ? $('#wzSource').value : 'all');
+  wizardRegionRetry = 0;
+  if(wizardRegionRetryTimer){ clearTimeout(wizardRegionRetryTimer); wizardRegionRetryTimer = null; }
   const regionsBox = $('#regions');
   if (!regions.length) {
     regionsBox.innerHTML = '<div style="padding:16px;text-align:center;color:var(--dim);font-size:12px">'
       + '<div class="spin" style="display:inline-block;margin-bottom:8px">' + ICON.run + '</div>'
-      + '<div>正在载入可用地区与节点列表…</div></div>';
+      + '<div>正在载入该来源的实时国家列表（死节点不显示）…</div></div>';
   }
 
   // 1. 独立异步读取选定节点源的地区列表
-  api('/api/regions?source=' + encodeURIComponent(src || 'all')).then(res => {
+  api('/api/regions?live=1&source=' + encodeURIComponent(src || 'all')).then(res => {
     regions = res || [];
     regionsLoaded = true;
     renderRegions();
+    // 单一来源第一次切换时后端可能正在补拉源；自动重试，不需要用户反复点。
+    if(!regions.length && src !== 'all' && wizardRegionRetry < 10){
+      wizardRegionRetry++;
+      wizardRegionRetryTimer = setTimeout(() => loadWizard(src), 1800);
+    }
   }).catch(e => {
     toast('读取地区提示: ' + e.message, true);
     renderRegions();
@@ -1552,7 +1536,14 @@ document.addEventListener('click', e => {
   if(rg){
     region = rg.dataset.rg;
     renderRegions();
-    if(wzCandidatesExpanded) loadWizardCandidates();
+    // 点国家后直接展开并加载该国家的实时节点，避免“点了没反应”。
+    if(region){
+      wzCandidatesExpanded = true;
+      const wrap = $('#wzCandidatesWrap'); if(wrap) wrap.style.display = 'block';
+      const arrow = $('#wzCandArrow'); if(arrow) arrow.textContent = '▼';
+      const status = $('#wzCandStatus'); if(status) status.textContent = '正在实测该国家节点…';
+      loadWizardCandidates();
+    }
   }
 });
 
@@ -1652,8 +1643,10 @@ $('#count').onblur = updateAvail;
 
 if($('#wzSource')){
   $('#wzSource').onchange = () => {
+    region = ''; regions = []; regionsLoaded = false; selectedWzHosts.clear();
+    wzCandidatesList = [];
+    if($('#wzCandidatesList')) $('#wzCandidatesList').innerHTML = '<div style="padding:12px;text-align:center;color:var(--dim)">正在切换来源并只筛选该来源的实时节点…</div>';
     loadWizard($('#wzSource').value);
-    if(wzCandidatesExpanded) loadWizardCandidates();
   };
 }
 
@@ -1670,10 +1663,16 @@ async function loadWizardCandidates(){
   listEl.innerHTML = '<div style="padding:12px;text-align:center;color:var(--dim);font-size:12px">正在载入候选节点并根据网络质量测速优选推荐…</div>';
 
   try{
-    const res = await api('/api/nodes?region=' + encodeURIComponent(region || '') + '&source=' + encodeURIComponent(src || 'all') + '&limit=300');
+    const res = await api('/api/nodes?live=1&region=' + encodeURIComponent(region || '') + '&source=' + encodeURIComponent(src || 'all') + '&limit=120');
     wzCandidatesList = (res && res.nodes) ? res.nodes : [];
     if(countEl) countEl.textContent = wzCandidatesList.length;
     renderWizardCandidates();
+    if(!wzCandidatesList.length && $('#wzSource') && $('#wzSource').value !== 'all' && loadWizardCandidates.retry < 8){
+      loadWizardCandidates.retry = (loadWizardCandidates.retry || 0) + 1;
+      setTimeout(loadWizardCandidates, 1600);
+    } else {
+      loadWizardCandidates.retry = 0;
+    }
   }catch(e){
     listEl.innerHTML = '<div style="padding:12px;text-align:center;color:var(--warn);font-size:12px">读取候选失败: ' + esc(e.message) + '</div>';
   }
@@ -1683,7 +1682,7 @@ function renderWizardCandidates(){
   const listEl = $('#wzCandidatesList');
   if(!listEl) return;
   if(!wzCandidatesList.length){
-    listEl.innerHTML = '<div style="padding:12px;text-align:center;color:var(--dim);font-size:12px">该地区/筛选条件下暂无空闲候选节点</div>';
+    listEl.innerHTML = '<div style="padding:12px;text-align:center;color:var(--dim);font-size:12px">该来源/国家下暂无刚刚测活通过的节点</div>';
     return;
   }
 
@@ -1692,7 +1691,7 @@ function renderWizardCandidates(){
     const flag = getFlagEmoji(n.country_code);
     const ping = n.ping || 0;
     const pingColor = ping > 0 && ping < 100 ? 'var(--ok)' : (ping > 0 && ping < 200 ? 'var(--accent)' : 'var(--warn)');
-    const pingText = ping > 0 ? ping + ' ms' : '就绪';
+    const pingText = ping > 0 ? ping + ' ms' : '—';
     const proto = (n.proto || (n.config ? 'ovpn' : 'socks5')).toUpperCase();
     const isp = n.isp || n.country || '公网节点';
     const speed = n.speed_mbps ? n.speed_mbps.toFixed(1) + ' Mbps' : '';
@@ -1708,6 +1707,7 @@ function renderWizardCandidates(){
       + '</span>'
       + (speed ? '<span style="font-size:11px;color:var(--dim)">' + speed + '</span>' : '')
       + '<span style="font-size:10px;padding:2px 6px;border-radius:3px;background:rgba(255,255,255,0.06);color:var(--dim)">' + proto + '</span>'
+      + '<span style="font-size:10px;color:var(--ok)">● 实测</span>'
       + '<span style="font-size:11px;font-weight:600;color:' + pingColor + ';min-width:55px;text-align:right">' + pingText + '</span>'
       + '</label>';
   }).join('');
@@ -1822,30 +1822,6 @@ document.addEventListener('click', async e => {
   const clearAllJobs = e.target.closest('#clearAllDoneJobs');
   if(clearAllJobs){
     try{ await api('/api/jobs/clear', {method:'POST'}); toast('已清理所有任务卡片'); }catch(err){}
-    poll();
-    return;
-  }
-  const toggleAll = e.target.closest('#toggleAllFailedBtn');
-  if(toggleAll){
-    showAllFailed = !showAllFailed;
-    poll();
-    return;
-  }
-  const toggleJob = e.target.closest('[data-togglejobfailed]');
-  if(toggleJob){
-    const wrap = $('#failed_wrap_' + toggleJob.dataset.togglejobfailed);
-    if(wrap){
-      wrap.classList.toggle('open');
-      toggleJob.textContent = wrap.classList.contains('open') ? '▲ 收起候选' : '▼ 查看候选';
-    }
-    return;
-  }
-  const cleanJob = e.target.closest('[data-cleanjobfailed]');
-  if(cleanJob){
-    try{
-      await api('/api/jobs/clean_failed?id=' + encodeURIComponent(cleanJob.dataset.cleanjobfailed), {method:'POST'});
-      toast('已清理该任务中的爆红失败项');
-    }catch(err){}
     poll();
     return;
   }

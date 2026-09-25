@@ -117,6 +117,9 @@ func apiCredToken(a *Auth) http.HandlerFunc {
 // apiSubscription 生成聚合订阅链接，支持 Base64 通用订阅与 Clash / Mihomo 配置订阅
 func apiSubscription(m *Manager, a *Auth) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// 订阅被请求时再对账一次，确保“服务器直连 · 本机”已经真实存在，
+		// 即使智能编排尚未跑完，直连节点也必须进入订阅。
+		m.reconcilePanelBindings()
 		host := publicHost(r)
 		format := strings.ToLower(r.URL.Query().Get("format"))
 		ua := strings.ToLower(r.UserAgent())

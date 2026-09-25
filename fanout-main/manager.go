@@ -104,16 +104,46 @@ func DefaultAutoOrchestrateOptions() AutoOrchestrateOptions {
 		Sources:       []string{"all"},
 		HotTarget:     3,
 		ColdTarget:    1,
-		MaxStarts:     6,
-		VerifyTimeout: 45 * time.Second,
+		MaxStarts:     12,
+		VerifyTimeout: 30 * time.Second,
+	}
+}
+
+// nodeMatchesSource 严格限定节点来源，避免“选择一个源却混入其它源”的问题。
+func nodeMatchesSource(n Node, source string) bool {
+	s := strings.ToLower(strings.TrimSpace(source))
+	if s == "" || s == "all" {
+		return true
+	}
+	switch s {
+	case "vpngate":
+		return strings.EqualFold(n.Source, "vpngate")
+	case "ipspeed", "openvpn":
+		return strings.EqualFold(n.Source, "ipspeed")
+	case "proxy":
+		return strings.EqualFold(n.Source, "proxy") || n.Proto == "socks5" || n.Proto == "http" || n.Proto == "https"
+	case "edu":
+		return strings.EqualFold(n.Source, "edu") || strings.EqualFold(n.IPType, "edu") || isEduIP(n.IP)
+	case "gov":
+		return strings.EqualFold(n.Source, "gov") || strings.EqualFold(n.IPType, "gov")
+	case "residential":
+		return strings.EqualFold(n.Source, "residential") || strings.EqualFold(n.IPType, "residential")
+	case "custom":
+		return strings.EqualFold(n.Source, "custom") || strings.HasPrefix(strings.ToLower(n.HostName), "custom_")
+	default:
+		return strings.EqualFold(n.Source, s)
 	}
 }
 
 func nodeKey(n Node) string {
-	if n.IP != "" {
-		return strings.ToLower(strings.TrimSpace(n.IP)) + ":" + fmt.Sprint(n.Port)
+	proto := strings.ToLower(strings.TrimSpace(n.Proto))
+	if proto == "" && n.Config != "" {
+		proto = "ovpn"
 	}
-	return strings.ToLower(strings.TrimSpace(n.HostName)) + ":" + fmt.Sprint(n.Port)
+	if n.IP != "" {
+		return proto + "|" + strings.ToLower(strings.TrimSpace(n.IP)) + ":" + fmt.Sprint(n.Port)
+	}
+	return proto + "|" + strings.ToLower(strings.TrimSpace(n.HostName)) + ":" + fmt.Sprint(n.Port)
 }
 
 func (m *Manager) markNodeFailed(n Node) {
@@ -190,8 +220,31 @@ func (m *Manager) RefreshNodesSource(source string) (int, error) {
 	if err != nil && len(nodes) == 0 {
 		return 0, err
 	}
+	// 刷新单一来源时只替换该来源，绝不把其它来源/自建节点整池清掉。
+	// 全量刷新才整体重建节点池。
 	m.mu.Lock()
-	m.nodes = nodes
+	if strings.EqualFold(source, "all") || strings.TrimSpace(source) == "" {
+		m.nodes = nodes
+	} else {
+		kept := make([]Node, 0, len(m.nodes)+len(nodes))
+		for _, cur := range m.nodes {
+			if !nodeMatchesSource(cur, source) {
+				kept = append(kept, cur)
+			}
+		}
+		seen := make(map[string]bool, len(kept)+len(nodes))
+		for _, cur := range kept {
+			seen[nodeKey(cur)] = true
+		}
+		for _, n := range nodes {
+			key := nodeKey(n)
+			if !seen[key] {
+				kept = append(kept, n)
+				seen[key] = true
+			}
+		}
+		m.nodes = kept
+	}
 	m.fetched = time.Now()
 	m.mu.Unlock()
 
@@ -408,6 +461,64 @@ func (m *Manager) Start(node Node) (*Tunnel, error) {
 
 	go m.bringUp(t, true)
 	return t, nil
+}
+
+// StartExact 严格启动用户已经选中的节点，不自动偷偷换成同国其它节点。
+// 选择页已经完成实时测活；这里再做一次真实隧道验证，失败就明确失败并清理。
+func (m *Manager) StartExact(node Node) (*Tunnel, error) {
+	m.mu.Lock()
+	for _, other := range m.tunnels {
+		if other.Status != "stopped" && other.Status != "failed" &&
+			(other.Node.HostName == node.HostName || (node.IP != "" && other.Node.IP == node.IP)) {
+			m.mu.Unlock()
+			return nil, fmt.Errorf("节点 %s (IP: %s) 已在运行中，请勿重复添加", node.HostName, node.IP)
+		}
+	}
+	slot, err := m.freeSlot()
+	if err != nil {
+		m.mu.Unlock()
+		return nil, err
+	}
+	taken := map[int]bool{}
+	for _, other := range m.tunnels {
+		taken[other.Port] = true
+	}
+	port, err := freeRandomPort(taken)
+	if err != nil {
+		m.mu.Unlock()
+		return nil, err
+	}
+	cred, err := newSocksCred()
+	if err != nil {
+		m.mu.Unlock()
+		return nil, err
+	}
+	t := &Tunnel{Slot: slot, Port: port, Node: node, TargetRegion: strings.ToUpper(strings.TrimSpace(node.CountryCode)), Status: "starting", Since: time.Now(), Cred: cred}
+	m.tunnels[slot] = t
+	m.mu.Unlock()
+	go m.bringUpExact(t, true)
+	return t, nil
+}
+
+func (m *Manager) bringUpExact(t *Tunnel, notify bool) {
+	if err := m.tryNode(t); err != nil {
+		t.Err = firstLine(err.Error())
+		t.stop()
+		t.Status = "failed"
+		m.markNodeFailed(t.Node)
+		if serr := m.saveState(); serr != nil {
+			log.Printf("保存状态失败: %v", serr)
+		}
+		return
+	}
+	t.Status = "up"
+	t.Err = ""
+	if serr := m.saveState(); serr != nil {
+		log.Printf("保存状态失败: %v", serr)
+	}
+	if notify {
+		m.notifyPanel()
+	}
 }
 
 // bringUp 把一条隧道拉起来。

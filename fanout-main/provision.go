@@ -123,7 +123,14 @@ func (m *Manager) runProvision(job *Job, picks []Node, templateID int) {
 	started := make([]*Tunnel, len(picks))
 
 	for i, node := range picks {
-		t, err := m.Start(node)
+		var t *Tunnel
+		var err error
+		if len(picks) > 0 {
+			// Hosts 是用户明确选择的实时节点，必须严格启动这个节点，不允许静默换节点。
+			t, err = m.StartExact(node)
+		} else {
+			t, err = m.Start(node)
+		}
 		if err != nil {
 			job.Set(i, "failed", err.Error())
 			continue
@@ -206,22 +213,8 @@ func (m *Manager) pickNodesSource(region string, source string, count int) ([]No
 		if n.Config == "" && n.Proto != "socks5" && n.Proto != "http" {
 			continue
 		}
-		if source != "" && source != "all" {
-			if strings.EqualFold(source, "gov") {
-				if n.IPType != "gov" && n.Source != "gov" {
-					continue
-				}
-			} else if strings.EqualFold(source, "edu") {
-				if n.Source != "edu" && !isEduIP(n.IP) {
-					continue
-				}
-			} else if strings.EqualFold(source, "residential") {
-				if n.IPType != "residential" {
-					continue
-				}
-			} else if !strings.EqualFold(n.Source, source) {
-				continue
-			}
+		if !nodeMatchesSource(n, source) {
+			continue
 		}
 		if region != "" && !strings.EqualFold(n.CountryCode, region) && !strings.EqualFold(n.Country, region) {
 			continue
@@ -414,29 +407,8 @@ func (m *Manager) Regions(source ...string) []RegionStat {
 		out = append(out, a.stat)
 	}
 
-	// 保证常用地区至少有展示，即使节点池刚启动未完成聚合
 	if len(out) == 0 {
-		presets := []RegionStat{
-			{Code: "GLOBAL", Name: "全球推荐 (自动优选)", Available: 50, BestSpeed: 100.0, BestPing: 45, AvgPurity: 92},
-			{Code: "JP", Name: "日本 (筑波大学官方/优质家宽)", Available: 20, BestSpeed: 95.0, BestPing: 45, AvgPurity: 98},
-			{Code: "US", Name: "美国 (原生住宅/学术网)", Available: 20, BestSpeed: 120.0, BestPing: 130, AvgPurity: 95},
-			{Code: "HK", Name: "中国香港 (低延迟专线)", Available: 15, BestSpeed: 90.0, BestPing: 30, AvgPurity: 92},
-			{Code: "TW", Name: "中国台湾 (TANet/中华电信)", Available: 12, BestSpeed: 85.0, BestPing: 38, AvgPurity: 94},
-			{Code: "SG", Name: "新加坡 (原生宽带)", Available: 12, BestSpeed: 92.0, BestPing: 60, AvgPurity: 93},
-			{Code: "KR", Name: "韩国 (KT/首尔高校网关)", Available: 12, BestSpeed: 88.0, BestPing: 55, AvgPurity: 96},
-			{Code: "GB", Name: "英国 (伦敦/学术科研网)", Available: 10, BestSpeed: 85.0, BestPing: 150, AvgPurity: 94},
-			{Code: "DE", Name: "德国 (法兰克福核心)", Available: 10, BestSpeed: 82.0, BestPing: 160, AvgPurity: 93},
-			{Code: "CA", Name: "加拿大 (多伦多/温哥华)", Available: 8, BestSpeed: 85.0, BestPing: 140, AvgPurity: 92},
-			{Code: "FR", Name: "法国 (巴黎)", Available: 8, BestSpeed: 80.0, BestPing: 165, AvgPurity: 91},
-			{Code: "AU", Name: "澳大利亚 (悉尼)", Available: 8, BestSpeed: 75.0, BestPing: 120, AvgPurity: 92},
-			{Code: "NL", Name: "荷兰 (阿姆斯特丹)", Available: 8, BestSpeed: 85.0, BestPing: 155, AvgPurity: 92},
-			{Code: "VN", Name: "越南 (河内/胡志明)", Available: 6, BestSpeed: 60.0, BestPing: 70, AvgPurity: 90},
-			{Code: "TH", Name: "泰国 (曼谷)", Available: 6, BestSpeed: 65.0, BestPing: 80, AvgPurity: 90},
-			{Code: "MY", Name: "马来西亚 (吉隆坡)", Available: 6, BestSpeed: 70.0, BestPing: 75, AvgPurity: 90},
-			{Code: "EDU", Name: "海外高校学术科研网 (不含国内)", Available: 15, BestSpeed: 75.0, BestPing: 25, AvgPurity: 99},
-			{Code: "GOV", Name: "全球政府公共机构专网", Available: 5, BestSpeed: 85.0, BestPing: 46, AvgPurity: 99},
-		}
-		return presets
+		return nil
 	}
 
 	sort.Slice(out, func(i, j int) bool {
@@ -492,7 +464,7 @@ func orchestrateSourceAllowed(n Node, sources []string) bool {
 			return true
 		}
 		switch s {
-		case "vpngate", "openvpn":
+		case "vpngate":
 			if strings.EqualFold(n.Source, "vpngate") {
 				return true
 			}
@@ -512,8 +484,8 @@ func orchestrateSourceAllowed(n Node, sources []string) bool {
 			if strings.EqualFold(n.Source, "proxy") || n.Proto == "socks5" || n.Proto == "http" {
 				return true
 			}
-		case "ipspeed":
-			if strings.EqualFold(n.Source, "ipspeed") {
+		case "ipspeed", "openvpn":
+			if strings.EqualFold(n.Source, "ipspeed") || strings.EqualFold(n.Source, "vpngate") {
 				return true
 			}
 		case "custom":
@@ -555,7 +527,7 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 		opts.MaxStarts = 20
 	}
 	if opts.VerifyTimeout <= 0 {
-		opts.VerifyTimeout = 45 * time.Second
+		opts.VerifyTimeout = 25 * time.Second
 	}
 	if len(opts.Sources) == 0 {
 		opts.Sources = []string{"all"}
@@ -751,9 +723,11 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 	// 5. 为节点池中实际存在的国家补齐配额。
 	// 关键规则：候选节点不会因为“看起来可用”就直接进入正式出口，
 	// 必须逐个启动并完成真实出网验证；失败立即停止并冷却。
+	// 5. 为节点池中实际存在的国家补齐配额。
+	// 先并发做一轮真实测活，再对通过的少量候选建立隧道。这样“测活”不再
+	// 一个节点一个节点串行等待，尤其是 VPN Gate 大量死节点时速度差异很大。
 	var verifiedStarted []*Tunnel
 	startsUsed := 0
-	attemptsUsed := 0
 	for _, cc := range sortedCountries {
 		m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
 			p.CurrentCountry = cc
@@ -787,7 +761,6 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 			continue
 		}
 
-		// 先按已有质量信息排序；真正是否加入由下面的实际隧道验证决定。
 		sort.SliceStable(cands, func(i, j int) bool {
 			typeRank := func(t string) int {
 				switch strings.ToLower(t) {
@@ -823,33 +796,55 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 			return cands[i].SpeedMbps > cands[j].SpeedMbps
 		})
 
-		for _, pick := range cands {
-			if needed <= 0 || attemptsUsed >= opts.MaxStarts {
+		probeCount := needed * 4
+		if probeCount < 8 {
+			probeCount = 8
+		}
+		if probeCount > 24 {
+			probeCount = 24
+		}
+		if len(cands) > probeCount {
+			cands = cands[:probeCount]
+		}
+		m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
+			p.CandidatesTested += len(cands)
+			p.Message = fmt.Sprintf("%s 并发实测 %d 个候选，剔除无握手/无回包节点…", cc, len(cands))
+		})
+
+		live := probeNodesLive(cands, 1200*time.Millisecond)
+		liveSet := make(map[string]bool, len(live))
+		for _, n := range live {
+			liveSet[nodeKey(n)] = true
+		}
+		for _, n := range cands {
+			if !liveSet[nodeKey(n)] {
+				m.markNodeFailed(n)
+			}
+		}
+		if len(cands) > len(live) {
+			failed := len(cands) - len(live)
+			m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
+				p.Failed += failed
+				p.LastError = fmt.Sprintf("%s：%d 个候选未通过真实测活", cc, failed)
+			})
+		}
+		m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
+			p.LivePassed += len(live)
+			p.Stage = "start"
+			p.Message = fmt.Sprintf("%s 测活通过 %d 个，开始建立正式隧道…", cc, len(live))
+		})
+
+		for _, pick := range live {
+			if needed <= 0 || startsUsed >= opts.MaxStarts {
 				break
 			}
-			attemptsUsed++
+			pick.Ping = int(pick.Ping)
 			m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
 				p.CurrentNode = pick.HostName
-				p.CandidatesTested++
-				p.Message = fmt.Sprintf("测活 %s / %s：先检查远端可达性…", cc, pick.HostName)
-			})
-			// 第一阶段快速实测：代理必须完成真实 CONNECT；OpenVPN 至少确认远端服务可达。
-			// 第二阶段 Start/tryNode 会在独立 netns 中再次验证真实出口 IP，这是最终准入门槛。
-			alive, rtt, _, probeErr := probeNodeLive(pick, 1800*time.Millisecond)
-			if !alive {
-				m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) { p.Failed++; p.LastError = firstLine(fmt.Sprint(probeErr)) })
-				m.markNodeFailed(pick)
-				log.Printf("[智能编排] 预检失败，跳过 %s (%s): %v", pick.HostName, cc, probeErr)
-				continue
-			}
-			pick.Ping = int(rtt)
-			m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
-				p.LivePassed++
 				p.Stage = "start"
 				p.Message = fmt.Sprintf("%s 测活通过，正在建立真实隧道…", pick.HostName)
 			})
-
-			t, err := m.Start(pick)
+			t, err := m.StartExact(pick)
 			if err != nil {
 				m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) { p.Failed++; p.LastError = firstLine(fmt.Sprint(err)) })
 				m.markNodeFailed(pick)
@@ -865,7 +860,7 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 
 			deadline := time.Now().Add(opts.VerifyTimeout)
 			for time.Now().Before(deadline) && t.Status == "starting" {
-				time.Sleep(500 * time.Millisecond)
+				time.Sleep(250 * time.Millisecond)
 			}
 			if t.Status != "up" || strings.TrimSpace(t.ExitIP) == "" {
 				m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
@@ -891,7 +886,7 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 				p.Added++
 				p.Message = fmt.Sprintf("%s 验证通过：%s，加入正式出口并准备绑定节点", cc, t.ExitIP)
 			})
-			log.Printf("[智能编排] %s 验证通过并加入正式出口: %s -> %s (%dms)", cc, t.Node.HostName, t.ExitIP, rtt)
+			log.Printf("[智能编排] %s 验证通过并加入正式出口: %s -> %s (%dms)", cc, t.Node.HostName, t.ExitIP, pick.Ping)
 		}
 	}
 

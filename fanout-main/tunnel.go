@@ -167,8 +167,8 @@ func (t *Tunnel) startOpenVPN(dir string) error {
 		"--auth-user-pass", authPath,
 		"--auth-nocache",
 		"--dev", "tun0",
-		"--connect-retry-max", "2",
-		"--connect-timeout", "20",
+		"--connect-retry-max", "1",
+		"--connect-timeout", "12",
 		"--data-ciphers", "AES-128-CBC:AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305",
 		"--verb", "1",
 		"--log", logPath,
@@ -180,7 +180,7 @@ func (t *Tunnel) startOpenVPN(dir string) error {
 	go cmd.Wait() // 回收子进程，避免僵尸
 
 	// openvpn 建好 tun0 前 SOCKS5 无法正常出网，这里等它就绪
-	deadline := time.Now().Add(40 * time.Second)
+	deadline := time.Now().Add(18 * time.Second)
 	for time.Now().Before(deadline) {
 		if out, err := exec.Command("ip", "netns", "exec", ns, "ip", "-4", "addr", "show", "tun0").Output(); err == nil {
 			if strings.Contains(string(out), "inet ") {
@@ -340,15 +340,9 @@ func (t *Tunnel) probeExitIP() (string, error) {
 		if err != nil && err2 != nil {
 			return "", fmt.Errorf("上游代理连通测试失败 (trace: %v, ipify: %v)", err, err2)
 		}
-		if t.Node.IP != "" && net.ParseIP(t.Node.IP) != nil {
-			return t.Node.IP, nil
-		}
-		return "", fmt.Errorf("上游代理未返回有效公网 IP")
+		return "", fmt.Errorf("上游代理未返回有效公网 IP (trace: %v, ipify: %v)", err, err2)
 	}
 
-	if t.Node.IP != "" && net.ParseIP(t.Node.IP) != nil {
-		return t.Node.IP, nil
-	}
 	return "", fmt.Errorf("无法确定出口 IP")
 }
 
