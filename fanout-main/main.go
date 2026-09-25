@@ -17,7 +17,7 @@ import (
 )
 
 // version 由构建时通过 -ldflags 注入。
-var version = "v0.3.3-enhanced"
+var version = "v3.0.0-Jesee-Mod"
 
 func main() {
 	var (
