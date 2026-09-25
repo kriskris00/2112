@@ -386,7 +386,6 @@ func (m *Manager) tryCandidates(t *Tunnel, notify bool) bool {
 			if notify {
 				m.notifyPanel()
 			}
-			go m.ReconcileInbounds()
 			return true
 		}
 		t.stop()
@@ -565,41 +564,7 @@ func (m *Manager) candidatesFor(first Node) []Node {
 	return out
 }
 
-// ReconcileInbounds 自动对齐 3x-ui 入站节点：检测到任何状态为 UP 的出口尚未创建入站，立即 1:1 自动补齐创建并绑定
-func (m *Manager) ReconcileInbounds() {
-	time.Sleep(500 * time.Millisecond)
-	p, err := openPanel()
-	if err != nil {
-		return
-	}
-	tunnels := m.Tunnels()
-	inbounds, err := p.Inbounds(nil)
-	if err != nil {
-		return
-	}
-	boundHosts := make(map[string]bool)
-	for _, ib := range inbounds {
-		if ib.BoundTo != "" {
-			boundHosts[ib.BoundTo] = true
-			boundHosts[sanitizeTag(ib.BoundTo)] = true
-		}
-	}
-	var missingHosts []string
-	for _, t := range tunnels {
-		if t.Status == "up" {
-			tag := sanitizeTag(t.Node.HostName)
-			if !boundHosts[t.Node.HostName] && !boundHosts[tag] {
-				missingHosts = append(missingHosts, t.Node.HostName)
-			}
-		}
-	}
-	if len(missingHosts) > 0 {
-		log.Printf("[3x-ui 1:1节点同步] 发现 %d 个运行中出口尚未创建入站，立即自动建立绑定...", len(missingHosts))
-		_, _ = cloneTemplateToTunnels(0, missingHosts, tunnels)
-	}
-}
-
-// Stop 停掉一条隧道并释放槽位，并彻底删除 3x-ui 中绑定的失效入站节点，保持订阅 100% 纯净。
+// Stop 停掉一条隧道并释放槽位。
 func (m *Manager) Stop(slot int) error {
 	invalidateInbounds()
 	m.mu.Lock()
@@ -611,36 +576,33 @@ func (m *Manager) Stop(slot int) error {
 	if !ok {
 		return fmt.Errorf("槽位 %d 没有运行中的隧道", slot)
 	}
-	host := t.Node.HostName
 	t.stop()
 	if err := m.saveState(); err != nil {
 		log.Printf("保存状态失败: %v", err)
 	}
-	m.notifyPanel()
 
-	// 彻底从 3x-ui 中删除该失效出口对应的入站与路由规则
-	go func(targetHost string) {
-		p, err := openPanel()
-		if err != nil {
-			return
-		}
-		inbounds, err := p.Inbounds(nil)
-		if err != nil {
-			return
-		}
-		targetTag := sanitizeTag(targetHost)
-		var toDelete []int
+	// 坏死彻底剔除：从 3x-ui 与面板中同步移除与此出口绑定的入站，绝不留任何失效死节点
+	if p, err := openPanel(); err == nil && p != nil {
+		inbounds, _ := p.Inbounds(nil)
+		var toDel []int
 		for _, ib := range inbounds {
-			if ib.BoundTo == targetHost || ib.BoundTo == targetTag {
-				toDelete = append(toDelete, ib.ID)
+			bTo := strings.TrimSpace(ib.BoundTo)
+			if bTo == "" || strings.EqualFold(bTo, "direct") || strings.EqualFold(bTo, "none") {
+				continue
+			}
+			if bTo == t.Node.HostName || sanitizeTag(bTo) == sanitizeTag(t.Node.HostName) ||
+				(t.Node.IP != "" && bTo == t.Node.IP) || (t.ExitIP != "" && bTo == t.ExitIP) ||
+				bTo == fmt.Sprintf("exit-%d", t.Slot) || bTo == fmt.Sprintf("slot-%d", t.Slot) {
+				toDel = append(toDel, ib.ID)
 			}
 		}
-		if len(toDelete) > 0 {
-			_ = p.DeleteInbounds(toDelete, m.Tunnels())
+		if len(toDel) > 0 {
+			_ = p.DeleteInbounds(toDel, m.Tunnels())
 			invalidateInbounds()
 		}
-	}(host)
+	}
 
+	m.notifyPanel()
 	return nil
 }
 

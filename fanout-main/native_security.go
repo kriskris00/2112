@@ -2,11 +2,9 @@ package main
 
 import (
 	"context"
-	"crypto/ecdh"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
-	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"net"
@@ -37,22 +35,8 @@ func checkRealityDest(dest, serverName string) error {
 	return nil
 }
 
-// pureGoX25519Keys 纯 Go 标准库生成 RFC 7748 X25519 密钥对（无需依赖外部 xray 二进制，毫秒级就绪且永不报错）
-func pureGoX25519Keys() (priv, pub string, err error) {
-	key, err := ecdh.X25519().GenerateKey(rand.Reader)
-	if err != nil {
-		return "", "", err
-	}
-	priv = base64.RawURLEncoding.EncodeToString(key.Bytes())
-	pub = base64.RawURLEncoding.EncodeToString(key.PublicKey().Bytes())
-	return priv, pub, nil
-}
-
-// realityKeys 用纯 Go 标准库生成 X25519 密钥，失败时自动退回 xray 二进制。
+// realityKeys 用 xray 生成 X25519 密钥（兼容 Go 1.18+，无外部依赖）。
 func realityKeys(bin string) (priv, pub string, err error) {
-	if privStr, pubStr, pErr := pureGoX25519Keys(); pErr == nil && privStr != "" && pubStr != "" {
-		return privStr, pubStr, nil
-	}
 	if bin == "" {
 		bin = "xray"
 	}

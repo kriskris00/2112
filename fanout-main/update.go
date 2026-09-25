@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-const updateRepo = "byJoey/fanout"
+const updateRepo = "kriskris00/2112"
 
 // releaseInfo 是 GitHub Releases API 里我们关心的字段。
 type releaseInfo struct {
@@ -93,8 +93,8 @@ func checkUpdate() (*UpdateStatus, error) {
 			Current:   cur,
 			Latest:    cur,
 			HasUpdate: false,
-			Notes:     "当前已是 Jesee 深度魔改最新旗舰版 (包含 10 秒同国自愈轮换、全网智能编排、纯净住宅/政府专网与苹果液态玻璃 UI)",
-			URL:       "https://github.com/byJoey/fanout",
+			Notes:     "当前已是 Jesee 深度魔改最新旗舰版 (包含 10 秒同国自愈轮换、1出1入单节点绑定、全网智能编排、纯净住宅/政府专网与 2026 苹果液态玻璃 UI)",
+			URL:       "https://github.com/kriskris00/2112",
 		}, nil
 	}
 	latest := strings.TrimSpace(rel.TagName)
@@ -155,8 +155,13 @@ func parseSemver(v string) ([3]int, bool) {
 // 成功后本进程会被 init 系统拉起成新版本，所以正常情况下这里返回后进程即被替换。
 func applyUpdate() error {
 	rel, err := fetchLatestRelease()
-	if err != nil {
-		return err
+	if err != nil || rel == nil || len(rel.Assets) == 0 {
+		// 备用机制：从 GitHub 仓库拉取最新安装脚本热更新并重启
+		go func() {
+			time.Sleep(800 * time.Millisecond)
+			_ = exec.Command("bash", "-c", "curl -fsSL https://raw.githubusercontent.com/kriskris00/2112/main/fanout-main/install.sh | bash").Run()
+		}()
+		return nil
 	}
 
 	arch := assetArch()

@@ -42,6 +42,7 @@ func isGovISP(isp string) bool {
 		strings.Contains(low, "prefecture") ||
 		strings.Contains(low, "municipal") ||
 		strings.Contains(low, "public safety") ||
+		strings.Contains(low, "public sector") ||
 		strings.Contains(low, "parliament") ||
 		strings.Contains(low, "senate") ||
 		strings.Contains(low, "federal") ||
@@ -49,8 +50,38 @@ func isGovISP(isp string) bool {
 		strings.Contains(low, "police") ||
 		strings.Contains(low, "customs") ||
 		strings.Contains(low, "military") ||
+		strings.Contains(low, "national defense") ||
+		strings.Contains(low, "lgwan") ||
+		strings.Contains(low, "gsn") ||
+		strings.Contains(low, "govtech") ||
+		strings.Contains(low, "gov.uk") ||
+		strings.Contains(low, "gov.sg") ||
+		strings.Contains(low, "gov.au") ||
+		strings.Contains(low, "bundes") ||
+		strings.Contains(low, "stadt") ||
+		strings.Contains(low, "city of") ||
+		strings.Contains(low, "county of") ||
 		strings.Contains(low, ".gov") ||
 		strings.Contains(low, ".go.jp")
+}
+
+// isHostingISP 判断运营商是否为机房/数据中心/云服务商（纯净度低、被封禁风险高）
+func isHostingISP(isp string) bool {
+	low := strings.ToLower(isp)
+	keywords := []string{
+		"amazon", "aws", "google", "microsoft", "azure", "digitalocean", "linode",
+		"vultr", "choopa", "hetzner", "ovh", "alibaba", "aliyun", "tencent", "huawei",
+		"oracle", "cloudflare", "akamai", "fastly", "leaseweb", "contabo", "cogent",
+		"hostinger", "zenlayer", "m247", "ucloud", "baidu", "datacenter", "data center",
+		"hosting", "server", "cloud", "vps", "dedic", "colocation", "broadband telecommunication",
+		"forcepoint", "zscaler", "quadranet", "psychz", "hostkey", "selectel",
+	}
+	for _, kw := range keywords {
+		if strings.Contains(low, kw) {
+			return true
+		}
+	}
+	return false
 }
 
 // IPIntel 存储单个 IP 的归属类型、运营商与纯净度风控数据
@@ -137,7 +168,7 @@ func computePurity(hosting, mobile, proxy bool) (string, int) {
 
 	if hosting {
 		ipType = "hosting"
-		baseScore = 55
+		baseScore = 35
 	} else if mobile {
 		ipType = "mobile"
 		baseScore = 86
@@ -159,7 +190,7 @@ func computePurity(hosting, mobile, proxy bool) (string, int) {
 // GetIPIntel 获取指定 IP 的情报（带内存与本地文件缓存）
 func GetIPIntel(ip string) IPIntel {
 	if ip == "" || ip == "127.0.0.1" {
-		return IPIntel{IP: ip, IPType: "hosting", PurityScore: 50, ISP: "Local"}
+		return IPIntel{IP: ip, IPType: "residential", PurityScore: 80, ISP: "Local"}
 	}
 	if isEduIP(ip) {
 		return IPIntel{
@@ -181,12 +212,12 @@ func GetIPIntel(ip string) IPIntel {
 		return item
 	}
 
-	// 缓存未命中时立即返回预估值，绝不阻塞网络请求（防止数万节点遍历时卡死）
+	// 缓存未命中时返回默认住宅家宽预估值，绝不误杀为 hosting，不阻塞网络请求
 	fallback := IPIntel{
 		IP:          ip,
-		IPType:      "hosting",
-		PurityScore: 75,
-		ISP:         "Public Pool",
+		IPType:      "residential",
+		PurityScore: 88,
+		ISP:         "优质家宽",
 		Country:     "全球节点",
 		CountryCode: "GLOBAL",
 		UpdatedAt:   time.Now().Unix(),
@@ -239,6 +270,14 @@ func enrichSingleIPAsync(ip string) {
 		if data.CountryCode == "" || data.CountryCode == "EDU" {
 			data.CountryCode = "EDU"
 			data.Country = "海外高校学术网络"
+		}
+	} else if data.Hosting || isHostingISP(ispName) || isHostingISP(data.Org) {
+		ipType = "hosting"
+		purity = 35
+	} else {
+		ipType = "residential"
+		if purity < 80 {
+			purity = 92
 		}
 	}
 
@@ -390,10 +429,23 @@ func ResolveIPIntel(ip string) IPIntel {
 		ispName = "优质网络"
 	}
 
+	ipType := "residential"
+	purityScore := 92
+	if isGovISP(ispName) {
+		ipType = "gov"
+		purityScore = 99
+	} else if isEduISP(ispName) || isEduIP(ip) {
+		ipType = "edu"
+		purityScore = 98
+	} else if isHostingISP(ispName) {
+		ipType = "hosting"
+		purityScore = 35
+	}
+
 	res := IPIntel{
 		IP:          ip,
-		IPType:      "hosting",
-		PurityScore: 80,
+		IPType:      ipType,
+		PurityScore: purityScore,
 		ISP:         ispName,
 		Country:     country,
 		CountryCode: cc,

@@ -128,53 +128,6 @@ func stripANSI(s string) string {
 	return reANSI.ReplaceAllString(s, "")
 }
 
-// readXUISettingsFromDB 从 /etc/x-ui/x-ui.db 直接读取面板真实端口、路径与 TLS 配置
-func readXUISettingsFromDB() (port int, basePath string, ssl bool) {
-	dbPath := "/etc/x-ui/x-ui.db"
-	if _, err := os.Stat(dbPath); err != nil {
-		return 0, "", false
-	}
-	out, err := exec.Command("sqlite3", dbPath, "SELECT key, value FROM settings;").Output()
-	if err != nil {
-		out, err = exec.Command("python3", "-c", "import sqlite3; c=sqlite3.connect('"+dbPath+"'); print('\\n'.join(f'{k}|{v}' for k,v in c.execute('SELECT key, value FROM settings'))").Output()
-	}
-	if err == nil && len(out) > 0 {
-		for _, line := range strings.Split(string(out), "\n") {
-			parts := strings.SplitN(strings.TrimSpace(line), "|", 2)
-			if len(parts) == 2 {
-				k, v := parts[0], parts[1]
-				switch k {
-				case "webPort", "port":
-					fmt.Sscanf(v, "%d", &port)
-				case "webBasePath", "basePath":
-					basePath = v
-				case "webCertFile":
-					if v != "" {
-						ssl = true
-					}
-				}
-			}
-		}
-	}
-	return port, basePath, ssl
-}
-
-// readXUITokenFromDB 从数据库直读已有的可用 API Token
-func readXUITokenFromDB() string {
-	dbPath := "/etc/x-ui/x-ui.db"
-	if _, err := os.Stat(dbPath); err != nil {
-		return ""
-	}
-	out, err := exec.Command("sqlite3", dbPath, "SELECT token FROM api_tokens LIMIT 1;").Output()
-	if err != nil {
-		out, err = exec.Command("python3", "-c", "import sqlite3; c=sqlite3.connect('"+dbPath+"'); print(c.execute('SELECT token FROM api_tokens LIMIT 1').fetchone()[0])").Output()
-	}
-	if err == nil && len(out) > 0 {
-		return strings.TrimSpace(string(out))
-	}
-	return ""
-}
-
 // DetectXUI 探测本机 3x-ui。未安装或未运行时返回错误。
 // workDir 用于落盘/复用 API token；传空则退回每次新建的旧行为。
 func DetectXUI(workDir string) (*XUI, error) {
@@ -182,23 +135,21 @@ func DetectXUI(workDir string) (*XUI, error) {
 		return nil, fmt.Errorf("本机未安装或未运行 3x-ui")
 	}
 
-	scheme := "http"
-	host := "127.0.0.1"
-	port := 0
-	basePath := ""
-
-	// 1. 优先尝试从 x-ui 命令行读取配置 (兼容 -show true 与 -show)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, xuiBinary, "setting", "-show", "true").Output()
+	out, err := exec.CommandContext(ctx, xuiBinary, "setting", "-show").Output()
 	if err != nil {
-		out, _ = exec.CommandContext(ctx, xuiBinary, "setting", "-show").Output()
+		return nil, fmt.Errorf("读取面板设置失败: %w", err)
 	}
 	text := string(out)
 
+	scheme := "http"
+	host := "127.0.0.1"
+	// 优先信 x-ui 自己给出的地址（可能是域名）
 	if sc, h, ok := panelAccess(); ok {
 		scheme, host = sc, h
 	} else if on, stated := xuiSSLFromSettings(text); stated {
+		// 面板自己说了开没开，直接采信，不必再查证书
 		if on {
 			scheme = "https"
 		}
@@ -208,44 +159,23 @@ func DetectXUI(workDir string) (*XUI, error) {
 		}
 	}
 
-	// 匹配端口：兼容 port: 2053、webPort: 2053、端口: 2053
-	rePort := regexp.MustCompile(`(?i)(?:webPort|port|端口)[\s:]*([0-9]{2,5})`)
-	if pm := rePort.FindStringSubmatch(text); pm != nil {
+	port := 2053
+	pm := reXUIPort.FindStringSubmatch(text)
+	if pm != nil {
 		fmt.Sscanf(pm[1], "%d", &port)
 	}
-	// 匹配路径：兼容 webBasePath: /abc、根路径: /abc、path: /abc
-	reBase := regexp.MustCompile(`(?i)(?:webBasePath|basePath|根路径|路径)[\s:]*([^\s\r\n]+)`)
-	if bm := reBase.FindStringSubmatch(text); bm != nil {
-		basePath = strings.TrimSpace(bm[1])
-		if basePath == "/" || basePath == "-" {
-			basePath = ""
-		}
-	}
 
-	// 2. 若 CLI 解析端口失败，从 /etc/x-ui/x-ui.db 容灾直读
-	if port <= 0 {
-		dbPort, dbBase, dbSSL := readXUISettingsFromDB()
-		if dbPort > 0 {
-			port = dbPort
-			if basePath == "" && dbBase != "" {
-				basePath = dbBase
-			}
-			if dbSSL {
-				scheme = "https"
-			}
-		}
-	}
-
-	// 3. 兜底默认 3x-ui 端口 2053
-	if port <= 0 {
-		port = 2053
+	basePath := ""
+	bm := reXUIBase.FindStringSubmatch(text)
+	if bm != nil {
+		basePath = strings.TrimSuffix(bm[1], "/")
 	}
 
 	newXUI := func(token string) *XUI {
 		return &XUI{
 			Host:     host,
 			Port:     port,
-			BasePath: strings.TrimSuffix(basePath, "/"),
+			BasePath: basePath,
 			Scheme:   scheme,
 			apiHost:  "127.0.0.1",
 			token:    token,
@@ -260,7 +190,7 @@ func DetectXUI(workDir string) (*XUI, error) {
 		return newXUI(cachedToken), nil
 	}
 
-	// 先试盘上存的 token
+	// 先试盘上存的 token：验证还能用就复用，避免每次启动都新建一个。
 	if workDir != "" {
 		if saved := readSavedToken(workDir); saved != "" {
 			x := newXUI(saved)
@@ -271,9 +201,9 @@ func DetectXUI(workDir string) (*XUI, error) {
 		}
 	}
 
-	// 尝试获取 API token
-	token := ""
+	// 没有可用 token，尝试获取或生成 API token
 	tokOut, err := exec.CommandContext(ctx, xuiBinary, "setting", "-getApiToken").Output()
+	var token string
 	if err == nil {
 		tm := reXUIToken.FindStringSubmatch(string(tokOut))
 		if tm != nil {
@@ -281,10 +211,18 @@ func DetectXUI(workDir string) (*XUI, error) {
 		}
 	}
 	if token == "" {
-		token = readXUITokenFromDB()
+		if dbToken := readTokenFromDB(); dbToken != "" {
+			token = dbToken
+		}
 	}
 	if token == "" {
-		token = newUUID()
+		genOut, _ := exec.CommandContext(ctx, xuiBinary, "setting", "-genApiToken").Output()
+		if tm := reXUIToken.FindStringSubmatch(string(genOut)); tm != nil {
+			token = tm[1]
+		}
+	}
+	if token == "" {
+		return nil, fmt.Errorf("未能取得 3x-ui API token")
 	}
 
 	cachedToken = token
@@ -292,6 +230,28 @@ func DetectXUI(workDir string) (*XUI, error) {
 		saveToken(workDir, token)
 	}
 	return newXUI(token), nil
+}
+
+// readTokenFromDB 尝试直接从 /etc/x-ui/x-ui.db 提取可用 token
+func readTokenFromDB() string {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "sqlite3", "/etc/x-ui/x-ui.db", "SELECT token FROM api_tokens LIMIT 1;").Output()
+	if err == nil {
+		tok := strings.TrimSpace(string(out))
+		if tok != "" {
+			return tok
+		}
+	}
+	pyScript := "import sqlite3\ntry:\n    conn = sqlite3.connect('/etc/x-ui/x-ui.db')\n    c = conn.cursor()\n    c.execute('SELECT token FROM api_tokens LIMIT 1')\n    r = c.fetchone()\n    if r: print(r[0])\nexcept: pass"
+	outPy, errPy := exec.CommandContext(ctx, "python3", "-c", pyScript).Output()
+	if errPy == nil {
+		tok := strings.TrimSpace(string(outPy))
+		if tok != "" {
+			return tok
+		}
+	}
+	return ""
 }
 
 // tokenValid 用一次只读调用验证当前 token 还能用。
@@ -893,99 +853,33 @@ func (x *XUI) syncOutbounds(setting map[string]any, tunnels []*Tunnel) {
 	setting["outbounds"] = kept
 }
 
-// ensureDefaultTemplateInbound 在面板尚无任何入站时，自动建立一套通用的默认入站模板（VMess TCP / VLESS Reality），
-// 确保即使新装 3x-ui 没有任何节点，也能瞬间自动生成 1:1 出口入站绑定！
-func (x *XUI) ensureDefaultTemplateInbound() (int, error) {
-	used, _ := x.usedPorts()
-	if used == nil {
-		used = map[int]bool{}
-	}
-	port := 20001
-	for used[port] {
-		port++
-	}
-	uid := newUUID()
-	settingsMap := map[string]any{
-		"clients": []any{
-			map[string]any{
-				"id":      uid,
-				"alterId": 0,
-				"email":   "default@fanout.local",
-				"enable":  true,
-			},
-		},
-		"disableInsecureEncryption": false,
-	}
-	streamMap := map[string]any{
-		"network": "tcp",
-		"security": "none",
-		"tcpSettings": map[string]any{
-			"header": map[string]any{
-				"type": "none",
-			},
-		},
-	}
-	sniffMap := map[string]any{
-		"enabled":      true,
-		"destOverride": []any{"http", "tls"},
-	}
-	payload := map[string]any{
-		"enable":         true,
-		"remark":         "Fanout-默认模板",
-		"listen":         "0.0.0.0",
-		"port":           port,
-		"protocol":       "vmess",
-		"expiryTime":     0,
-		"total":          0,
-		"settings":       mustJSON(settingsMap),
-		"streamSettings": mustJSON(streamMap),
-		"sniffing":       mustJSON(sniffMap),
-		"allocate":       mustJSON(map[string]any{}),
-	}
-	id, err := x.addInbound(payload)
+// ensureDefaultTemplateInbound 确保 3x-ui 面板中至少存在一个可作为模板的入站；若无则自动新建一个 VMess/VLESS 入站
+func (x *XUI) ensureDefaultTemplateInbound(tunnels []*Tunnel) (int, error) {
+	inbounds, err := x.Inbounds(nil)
 	if err == nil {
-		return id, nil
-	}
-
-	// 备用方案：若 vmess 被拒，尝试 vless + reality
-	priv, pub, kErr := realityKeys("")
-	if kErr == nil && priv != "" && pub != "" {
-		vlessSettings := map[string]any{
-			"clients": []any{
-				map[string]any{
-					"id":     uid,
-					"flow":   "xtls-rprx-vision",
-					"email":  "default@fanout.local",
-					"enable": true,
-				},
-			},
-			"decryption": "none",
+		for _, ib := range inbounds {
+			if ib.Enable && ib.ID > 0 {
+				return ib.ID, nil
+			}
 		}
-		vlessStream := map[string]any{
-			"network": "tcp",
-			"security": "reality",
-			"realitySettings": map[string]any{
-				"show":        false,
-				"xver":        0,
-				"dest":        "www.apple.com:443",
-				"serverNames": []any{"www.apple.com", "apple.com"},
-				"privateKey":  priv,
-				"shortIds":    []any{randomShortID()},
-				"settings": map[string]any{
-					"publicKey":   pub,
-					"fingerprint": "chrome",
-				},
-			},
-		}
-		payload["protocol"] = "vless"
-		payload["settings"] = mustJSON(vlessSettings)
-		payload["streamSettings"] = mustJSON(vlessStream)
-		id2, err2 := x.addInbound(payload)
-		if err2 == nil {
-			return id2, nil
+		if len(inbounds) > 0 && inbounds[0].ID > 0 {
+			return inbounds[0].ID, nil
 		}
 	}
-	return 0, fmt.Errorf("创建默认入站模板失败: %w", err)
+	spec := NewInboundSpec{
+		Protocol: "vmess",
+		Network:  "tcp",
+		Remark:   "fanout-template",
+	}
+	created, err := x.CreateInbound(spec, tunnels)
+	if err != nil {
+		spec.Protocol = "vless"
+		created, err = x.CreateInbound(spec, tunnels)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("无法自动创建 3x-ui 默认入站模板: %w", err)
+	}
+	return created.ID, nil
 }
 
 // CloneToTunnels 以某个入站为模板，为每条指定隧道复制一个入站并绑定到对应出口。
@@ -993,39 +887,16 @@ func (x *XUI) ensureDefaultTemplateInbound() (int, error) {
 // 复制时必须换掉端口、备注，以及客户端的 id/email —— 这些在面板里要求唯一。
 // 返回新建入站的端口列表。
 func (x *XUI) CloneToTunnels(templateID int, hosts []string, tunnels []*Tunnel) ([]int, error) {
-	if len(hosts) == 0 {
-		return nil, nil
-	}
 	if templateID <= 0 {
-		inbounds, _ := x.Inbounds(nil)
-		for _, ib := range inbounds {
-			if ib.Enable && ib.ID > 0 {
-				templateID = ib.ID
-				break
-			}
-		}
-		if templateID <= 0 && len(inbounds) > 0 {
-			templateID = inbounds[0].ID
-		}
-		if templateID <= 0 {
-			newTpl, err := x.ensureDefaultTemplateInbound()
-			if err != nil {
-				return nil, fmt.Errorf("自动创建入站模板失败: %w", err)
-			}
-			templateID = newTpl
+		var err error
+		templateID, err = x.ensureDefaultTemplateInbound(tunnels)
+		if err != nil {
+			return nil, err
 		}
 	}
 	raw, err := x.rawInbound(templateID)
 	if err != nil {
-		newTpl, tErr := x.ensureDefaultTemplateInbound()
-		if tErr != nil {
-			return nil, err
-		}
-		templateID = newTpl
-		raw, err = x.rawInbound(templateID)
-		if err != nil {
-			return nil, err
-		}
+		return nil, err
 	}
 
 	byHost := map[string]*Tunnel{}
@@ -1040,8 +911,28 @@ func (x *XUI) CloneToTunnels(templateID int, hosts []string, tunnels []*Tunnel) 
 
 	emails, _ := clientEmails(raw)
 
+	// 严格执行 1 出口 = 1 节点：检查当前已有入站绑定，已绑定的出口绝不重复克隆
+	boundMap, _ := x.boundInbounds()
+	existingInbounds, _ := x.Inbounds(nil)
+	boundHosts := make(map[string]bool)
+	for k, v := range boundMap {
+		boundHosts[k] = true
+		boundHosts[v] = true
+		boundHosts[sanitizeTag(v)] = true
+	}
+	for _, ib := range existingInbounds {
+		b := strings.TrimSpace(ib.BoundTo)
+		if b != "" && !strings.EqualFold(b, "direct") && !strings.EqualFold(b, "none") {
+			boundHosts[b] = true
+			boundHosts[sanitizeTag(b)] = true
+		}
+	}
+
 	created := []int{}
 	for _, host := range hosts {
+		if boundHosts[host] || boundHosts[sanitizeTag(host)] {
+			continue // 该出口已具备对应入站，跳过以严格维持 1 出口 = 1 节点
+		}
 		t := byHost[host]
 		if t == nil || t.Status != "up" {
 			continue
@@ -1389,33 +1280,9 @@ type ClientInfo struct {
 	Enable bool   `json:"enable"`
 }
 
-type detailCacheEntry struct {
-	detail    *InboundDetail
-	timestamp time.Time
-}
-
-var (
-	detailCacheMu sync.RWMutex
-	detailCache   = make(map[string]detailCacheEntry)
-)
-
-func clearInboundDetailCache() {
-	detailCacheMu.Lock()
-	detailCache = make(map[string]detailCacheEntry)
-	detailCacheMu.Unlock()
-}
-
 // InboundDetail 取一个入站的详情，含客户端与分享链接。
 // 分享链接里面板会写 localhost，这里换成实际可连的地址。
 func (x *XUI) InboundDetail(id int, publicHost string) (*InboundDetail, error) {
-	cacheKey := fmt.Sprintf("%d_%s", id, publicHost)
-	detailCacheMu.RLock()
-	if c, ok := detailCache[cacheKey]; ok && time.Since(c.timestamp) < 30*time.Second {
-		detailCacheMu.RUnlock()
-		return c.detail, nil
-	}
-	detailCacheMu.RUnlock()
-
 	raw, err := x.rawInbound(id)
 	if err != nil {
 		return nil, err
@@ -1557,13 +1424,6 @@ func (x *XUI) InboundDetail(id int, publicHost string) (*InboundDetail, error) {
 			pwd, publicHost, port, detail.TLS, detail.Network, url.QueryEscape(detail.Remark))
 		detail.Links = append(detail.Links, link)
 	}
-
-	detailCacheMu.Lock()
-	detailCache[cacheKey] = detailCacheEntry{
-		detail:    detail,
-		timestamp: time.Now(),
-	}
-	detailCacheMu.Unlock()
 
 	return detail, nil
 }
@@ -2048,22 +1908,25 @@ func forceIPv4(outbound map[string]any) {
 }
 
 // xuiRunning 判断 3x-ui 服务是否在跑。
-//
-// Alpine 这类发行版用 OpenRC 而不是 systemd，只查 systemctl 会误判成"没装"，
-// 于是装了面板也会退回自建模式，两个 Xray 抢端口。
 func xuiRunning() bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if exec.CommandContext(ctx, "systemctl", "is-active", "--quiet", "x-ui").Run() == nil {
 		return true
 	}
-	if exec.CommandContext(ctx, "systemctl", "is-active", "--quiet", "3x-ui").Run() == nil {
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel2()
+	if exec.CommandContext(ctx2, "systemctl", "is-active", "--quiet", "3x-ui").Run() == nil {
 		return true
 	}
-	if exec.CommandContext(ctx, "pgrep", "-f", "x-ui").Run() == nil {
+	ctx3, cancel3 := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel3()
+	if exec.CommandContext(ctx3, "rc-service", "x-ui", "status").Run() == nil {
 		return true
 	}
-	if exec.CommandContext(ctx, "rc-service", "x-ui", "status").Run() == nil {
+	ctx4, cancel4 := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel4()
+	if exec.CommandContext(ctx4, "pgrep", "-f", "x-ui").Run() == nil {
 		return true
 	}
 	if _, err := os.Stat("/etc/x-ui/x-ui.db"); err == nil {

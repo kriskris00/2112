@@ -92,7 +92,6 @@ func invalidateInbounds() {
 	ibCache.mu.Lock()
 	ibCache.at = time.Time{}
 	ibCache.mu.Unlock()
-	clearInboundDetailCache()
 }
 
 // ExitsOf 把隧道和入站 join 成界面直接可用的形态。

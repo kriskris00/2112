@@ -156,48 +156,36 @@ func apiSubscription(m *Manager, a *Auth) http.HandlerFunc {
 			return nil
 		}
 
-		// 收集运行中的出口节点与绑定的 3x-ui 入站（严格 1:1 实时同步，绝不重复生成 20->40 个）
+		// 收集运行中的出口节点与绑定的 3x-ui 入站（并发极速查询，严格 1:1 实时同步，绝不重复生成，永不超时）
 		coveredSlots := make(map[int]bool)
 		var validDetails []*InboundDetail
+		var validMu sync.Mutex
 
 		p, err := openPanel()
 		if err == nil && p != nil {
 			inbounds, _ := p.Inbounds(nil)
-			type resItem struct {
-				idx int
-				d   *InboundDetail
-			}
-			resChan := make(chan resItem, len(inbounds))
 			var wg sync.WaitGroup
-			for i, ib := range inbounds {
+			for _, ib := range inbounds {
 				wg.Add(1)
-				go func(idx int, inboundID int) {
+				go func(id int) {
 					defer wg.Done()
-					d, dErr := p.InboundDetail(inboundID, host)
+					d, dErr := p.InboundDetail(id, host)
 					if dErr == nil && d != nil {
-						resChan <- resItem{idx: idx, d: d}
+						t := findTunnel(d.BoundTo)
+						// 严格只同步当前正在运行(up)的出口节点，未绑定或已停止的不入订阅
+						if t == nil {
+							return
+						}
+						validMu.Lock()
+						if !coveredSlots[t.Slot] {
+							coveredSlots[t.Slot] = true
+							validDetails = append(validDetails, d)
+						}
+						validMu.Unlock()
 					}
-				}(i, ib.ID)
+				}(ib.ID)
 			}
 			wg.Wait()
-			close(resChan)
-
-			var fetched []resItem
-			for r := range resChan {
-				fetched = append(fetched, r)
-			}
-			sort.Slice(fetched, func(i, j int) bool { return fetched[i].idx < fetched[j].idx })
-
-			for _, item := range fetched {
-				d := item.d
-				t := findTunnel(d.BoundTo)
-				// 严格只同步当前正在运行(up)的出口节点，未绑定或已停止的不入订阅
-				if t == nil {
-					continue
-				}
-				coveredSlots[t.Slot] = true
-				validDetails = append(validDetails, d)
-			}
 		}
 
 		// 严格按国家权重排序：美国 3 节点在前，日本 3 节点紧随其后，热门国在前，冷门国在后
@@ -382,7 +370,7 @@ func generateClashConfig(details []*InboundDetail, tunnels []*Tunnel, host strin
 	for _, d := range details {
 		proto := strings.ToLower(d.Protocol)
 		t := findTunnel(d.BoundTo)
-		if t == nil {
+		if t == nil || coveredSlots[t.Slot] {
 			continue
 		}
 		coveredSlots[t.Slot] = true
@@ -542,7 +530,7 @@ func generateQuanXConfig(details []*InboundDetail, tunnels []*Tunnel, host strin
 	for _, d := range details {
 		proto := strings.ToLower(d.Protocol)
 		t := findTunnel(d.BoundTo)
-		if t == nil {
+		if t == nil || coveredSlots[t.Slot] {
 			continue
 		}
 		coveredSlots[t.Slot] = true

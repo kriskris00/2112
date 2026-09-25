@@ -161,9 +161,17 @@ func openPanel() (Panel, error) {
 		return xc, nil
 	}
 
+	// 优先接管本机已安装的 3x-ui 面板
 	if x, err := DetectXUI(panelState.workDir); err == nil {
 		panelState.current = x
 		return x, nil
+	} else if !xuiAbsent() {
+		log.Printf("[3x-ui] 检测到 3x-ui 存在但首次探测未就绪: %v，等待 1 秒重试...", err)
+		time.Sleep(1 * time.Second)
+		if x2, err2 := DetectXUI(panelState.workDir); err2 == nil {
+			panelState.current = x2
+			return x2, nil
+		}
 	}
 
 	if xc, err := DetectXCL(); err == nil {

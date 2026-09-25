@@ -83,7 +83,7 @@ func cloneTemplateToTunnels(templateID int, hosts []string, tunnels []*Tunnel) (
 	if err != nil {
 		return nil, err
 	}
-	// 如果 templateID <= 0，自动寻找第一个可用的非直连入站模板
+	// 如果 templateID <= 0，自动寻找第一个可用的非直连入站模板；若没有入站则自动创建优质模板
 	if templateID <= 0 {
 		inbounds, _ := x.Inbounds(nil)
 		for _, ib := range inbounds {
@@ -95,9 +95,21 @@ func cloneTemplateToTunnels(templateID int, hosts []string, tunnels []*Tunnel) (
 		if templateID <= 0 && len(inbounds) > 0 {
 			templateID = inbounds[0].ID
 		}
-	}
-	if templateID <= 0 {
-		return nil, nil
+		if templateID <= 0 {
+			spec := NewInboundSpec{
+				Protocol: "vmess",
+				Network:  "tcp",
+				Remark:   "fanout-template",
+			}
+			created, err := x.CreateInbound(spec, tunnels)
+			if err != nil {
+				spec.Protocol = "vless"
+				created, err = x.CreateInbound(spec, tunnels)
+			}
+			if err == nil && created != nil {
+				templateID = created.ID
+			}
+		}
 	}
 	ports, err := x.CloneToTunnels(templateID, hosts, tunnels)
 	invalidateInbounds()
@@ -131,10 +143,6 @@ func (m *Manager) runProvision(job *Job, picks []Node, templateID int) {
 		}(i, t)
 	}
 	wg.Wait()
-
-	if templateID <= 0 {
-		return
-	}
 
 	step := len(picks)
 	var hosts []string
@@ -486,9 +494,63 @@ func (m *Manager) AutoOrchestrate() {
 	}
 	defer m.orchestrateMu.Unlock()
 
-	// 1. 统计当前运行中或启动中的各国家出口数量
 	tunnels := m.Tunnels()
-	activeByCountry := make(map[string]int)
+
+	// 0. 严格执行 1 出口 = 1 节点：清理 3x-ui / native 面板中的重复入站与废弃孤儿入站
+	if p, err := openPanel(); err == nil && p != nil {
+		inbounds, _ := p.Inbounds(nil)
+		byExitInbounds := make(map[string][]int) // host -> []inboundID
+		existingTunnelHosts := make(map[string]bool)
+		for _, t := range tunnels {
+			existingTunnelHosts[t.Node.HostName] = true
+			existingTunnelHosts[sanitizeTag(t.Node.HostName)] = true
+			if t.Node.IP != "" {
+				existingTunnelHosts[t.Node.IP] = true
+			}
+			if t.ExitIP != "" {
+				existingTunnelHosts[t.ExitIP] = true
+			}
+		}
+
+		var orphanIDs []int
+		for _, ib := range inbounds {
+			bTo := strings.TrimSpace(ib.BoundTo)
+			if bTo == "" || strings.EqualFold(bTo, "direct") || strings.EqualFold(bTo, "none") {
+				continue
+			}
+			matchedHost := ""
+			for _, t := range tunnels {
+				if bTo == t.Node.HostName || sanitizeTag(bTo) == sanitizeTag(t.Node.HostName) ||
+					(t.Node.IP != "" && bTo == t.Node.IP) || (t.ExitIP != "" && bTo == t.ExitIP) ||
+					bTo == fmt.Sprintf("exit-%d", t.Slot) || bTo == fmt.Sprintf("slot-%d", t.Slot) {
+					matchedHost = t.Node.HostName
+					break
+				}
+			}
+			if matchedHost != "" {
+				byExitInbounds[matchedHost] = append(byExitInbounds[matchedHost], ib.ID)
+			} else {
+				orphanIDs = append(orphanIDs, ib.ID)
+			}
+		}
+
+		var duplicateIDs []int
+		for _, ids := range byExitInbounds {
+			if len(ids) > 1 {
+				// 严格 1:1，只保留第 1 个正常入站，多余的全部删除
+				duplicateIDs = append(duplicateIDs, ids[1:]...)
+			}
+		}
+		toDelete := append(duplicateIDs, orphanIDs...)
+		if len(toDelete) > 0 {
+			log.Printf("[1出口1节点] 正在清理面板中 %d 个冗余/孤儿入站...", len(toDelete))
+			_ = p.DeleteInbounds(toDelete, tunnels)
+			invalidateInbounds()
+		}
+	}
+
+	// 1. 统计当前运行中或启动中的各国家出口数量并收集按国家分组的隧道
+	activeTunnelsByCountry := make(map[string][]*Tunnel)
 	usedHosts := make(map[string]bool, len(tunnels))
 	usedIPs := make(map[string]bool, len(tunnels))
 	for _, t := range tunnels {
@@ -498,7 +560,7 @@ func (m *Manager) AutoOrchestrate() {
 				c = strings.ToUpper(strings.TrimSpace(t.Node.CountryCode))
 			}
 			if c != "" {
-				activeByCountry[c]++
+				activeTunnelsByCountry[c] = append(activeTunnelsByCountry[c], t)
 			}
 			usedHosts[t.Node.HostName] = true
 			if t.Node.IP != "" {
@@ -507,7 +569,34 @@ func (m *Manager) AutoOrchestrate() {
 		}
 	}
 
-	// 2. 汇集节点池中所有国家（仅限真实可用 OpenVPN 节点）
+	// 2. 超额出口自动精简：热门国家严格限制最多 3 个，冷门国家严格限制最多 1 个
+	for cc, tList := range activeTunnelsByCountry {
+		target := 1
+		if hotCountries[cc] {
+			target = 3
+		}
+		if len(tList) > target {
+			// 排序保留最优质/最稳定运行的出口，剔除超额出口
+			sort.Slice(tList, func(i, j int) bool {
+				if (tList[i].Status == "up") != (tList[j].Status == "up") {
+					return tList[i].Status == "up"
+				}
+				return tList[i].Since.Before(tList[j].Since)
+			})
+			for idx := target; idx < len(tList); idx++ {
+				excess := tList[idx]
+				log.Printf("[配额精简] 国家 %s 运行出口数 (%d) 超过目标配额 (%d)，自动移除超额出口 槽位 %d (%s)...", cc, len(tList), target, excess.Slot, excess.Node.HostName)
+				_ = m.Stop(excess.Slot)
+				delete(usedHosts, excess.Node.HostName)
+				if excess.Node.IP != "" {
+					delete(usedIPs, excess.Node.IP)
+				}
+			}
+			activeTunnelsByCountry[cc] = tList[:target]
+		}
+	}
+
+	// 3. 汇集节点池中所有国家（仅限真实可用 OpenVPN 节点）
 	m.mu.RLock()
 	allNodes := make([]Node, len(m.nodes))
 	copy(allNodes, m.nodes)
@@ -528,7 +617,7 @@ func (m *Manager) AutoOrchestrate() {
 		countryCandidates[cc] = append(countryCandidates[cc], n)
 	}
 
-	// 3. 收集并按热门程度与可用节点数排序国家列表
+	// 4. 收集并按热门程度与可用节点数排序国家列表
 	allCountries := make(map[string]bool)
 	for cc := range countryCandidates {
 		allCountries[cc] = true
@@ -556,14 +645,15 @@ func (m *Manager) AutoOrchestrate() {
 		return len(countryCandidates[sortedCountries[i]]) > len(countryCandidates[sortedCountries[j]])
 	})
 
-	// 4. 为每个国家补齐所需出口配额（热门 3 个，冷门 1 个）
+	// 5. 为每个国家补齐所需出口配额（热门各 3 个，冷门各 1 个，稳定运行绝不触动）
 	var newStarted []*Tunnel
 	for _, cc := range sortedCountries {
 		target := 1
 		if hotCountries[cc] {
 			target = 3
 		}
-		needed := target - activeByCountry[cc]
+		curCount := len(activeTunnelsByCountry[cc])
+		needed := target - curCount
 		if needed <= 0 {
 			continue
 		}
@@ -619,7 +709,7 @@ func (m *Manager) AutoOrchestrate() {
 			if pick.IP != "" {
 				usedIPs[pick.IP] = true
 			}
-			activeByCountry[cc]++
+			activeTunnelsByCountry[cc] = append(activeTunnelsByCountry[cc], t)
 			newStarted = append(newStarted, t)
 		}
 	}
@@ -642,37 +732,31 @@ func (m *Manager) AutoOrchestrate() {
 		}(newStarted)
 	}
 
-	// 5. 巡检所有当前状态为 UP 的出口：若发现有出口尚未在 3x-ui 中创建并绑定入站节点，立即自动补充建立
+	// 5. 严格确保 1 出口 = 1 节点：检测已就绪 UP 出口是否已绑定入站，若缺失立即自动补齐绑定
 	go func() {
-		time.Sleep(1 * time.Second)
 		p, err := openPanel()
-		if err != nil {
+		if err != nil || p == nil {
 			return
 		}
-		tunnels := m.Tunnels()
-		inbounds, err := p.Inbounds(nil)
-		if err != nil {
-			return
-		}
+		allTunnels := m.Tunnels()
+		var unmappedHosts []string
+		inbounds, _ := p.Inbounds(nil)
 		boundHosts := make(map[string]bool)
 		for _, ib := range inbounds {
-			if ib.BoundTo != "" {
-				boundHosts[ib.BoundTo] = true
-				boundHosts[sanitizeTag(ib.BoundTo)] = true
+			b := strings.TrimSpace(ib.BoundTo)
+			if b != "" && !strings.EqualFold(b, "direct") && !strings.EqualFold(b, "none") {
+				boundHosts[b] = true
+				boundHosts[sanitizeTag(b)] = true
 			}
 		}
-		var missingHosts []string
-		for _, t := range tunnels {
-			if t.Status == "up" {
-				tag := sanitizeTag(t.Node.HostName)
-				if !boundHosts[t.Node.HostName] && !boundHosts[tag] {
-					missingHosts = append(missingHosts, t.Node.HostName)
-				}
+		for _, t := range allTunnels {
+			if t.Status == "up" && !boundHosts[t.Node.HostName] && !boundHosts[sanitizeTag(t.Node.HostName)] {
+				unmappedHosts = append(unmappedHosts, t.Node.HostName)
 			}
 		}
-		if len(missingHosts) > 0 {
-			log.Printf("[全网智能编排] 发现 %d 个出口缺失 3x-ui 入站节点，立即自动补充创建绑定...", len(missingHosts))
-			_, _ = cloneTemplateToTunnels(0, missingHosts, tunnels)
+		if len(unmappedHosts) > 0 {
+			log.Printf("[全网智能编排] 发现 %d 个已连通出口尚未绑定 3x-ui 节点入站，立即自动克隆绑定...", len(unmappedHosts))
+			_, _ = cloneTemplateToTunnels(0, unmappedHosts, allTunnels)
 		}
 	}()
 }
@@ -696,9 +780,8 @@ func (m *Manager) WatchAutoOrchestrate() {
 			m.AutoOrchestrate()
 		case <-sourceTicker.C:
 			log.Printf("[自动拉源] 定时拉取全网最新节点源 (30 分钟周期)...")
-			if _, err := m.RefreshNodesSource("all"); err == nil {
-				m.AutoOrchestrate()
-			}
+			_, _ = m.RefreshNodesSource("all")
+			m.AutoOrchestrate()
 		}
 	}
 }

@@ -218,6 +218,19 @@ func (n *Native) CloneToTunnels(templateID int, hosts []string, tunnels []*Tunne
 
 	tpl := n.store.byID(templateID)
 	if tpl == nil {
+		for _, ib := range n.store.Inbounds {
+			if ib.Enable && ib.ID > 0 {
+				tpl = ib
+				templateID = ib.ID
+				break
+			}
+		}
+		if tpl == nil && len(n.store.Inbounds) > 0 {
+			tpl = n.store.Inbounds[0]
+			templateID = tpl.ID
+		}
+	}
+	if tpl == nil {
 		return nil, fmt.Errorf("模板入站 %d 不存在", templateID)
 	}
 
@@ -226,9 +239,21 @@ func (n *Native) CloneToTunnels(templateID int, hosts []string, tunnels []*Tunne
 		byHost[t.Node.HostName] = t
 	}
 
+	boundHosts := make(map[string]bool)
+	for _, ib := range n.store.Inbounds {
+		b := strings.TrimSpace(ib.BoundTo)
+		if b != "" && !strings.EqualFold(b, "direct") && !strings.EqualFold(b, "none") {
+			boundHosts[b] = true
+			boundHosts[sanitizeTag(b)] = true
+		}
+	}
+
 	used := n.store.usedPorts()
 	created := []int{}
 	for _, host := range hosts {
+		if boundHosts[host] || boundHosts[sanitizeTag(host)] {
+			continue // 该出口已具备对应入站，跳过以严格维持 1 出口 = 1 节点
+		}
 		t := byHost[host]
 		if t == nil || t.Status != "up" {
 			continue
