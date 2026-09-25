@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"sort"
 	"strings"
 	"time"
 )
@@ -17,52 +16,7 @@ var countryNameZH = map[string]string{
 	"TH": "泰国", "VN": "越南", "IN": "印度", "RU": "俄罗斯", "BR": "巴西",
 	"TR": "土耳其", "IT": "意大利", "ES": "西班牙", "SE": "瑞典", "CH": "瑞士",
 	"NO": "挪威", "FI": "芬兰", "PL": "波兰", "CZ": "捷克", "AT": "奥地利",
-	"GLOBAL": "全球", "EDU": "海外高校学术网", "GOV": "政府公共机构专网",
-}
-
-// subCountryRank 定义订阅导出与客户端展示的核心国家权重：
-// 热门国家在前（美国 3 节点在前，日本 3 节点紧随其后，港台新韩英德加法澳荷等依次排列），冷门国家在后。
-var subCountryRank = map[string]int{
-	"US":  1,  // 美国 (优先最前)
-	"JP":  2,  // 日本 (紧随其后)
-	"HK":  3,  // 中国香港
-	"TW":  4,  // 中国台湾
-	"SG":  5,  // 新加坡
-	"KR":  6,  // 韩国
-	"GB":  7,  // 英国
-	"DE":  8,  // 德国
-	"CA":  9,  // 加拿大
-	"FR":  10, // 法国
-	"AU":  11, // 澳大利亚
-	"NL":  12, // 荷兰
-	"GOV": 13, // 政府公共机构专网
-	"EDU": 14, // 海外高校学术网
-	"VN":  15, // 越南
-	"TH":  16, // 泰国
-	"MY":  17, // 马来西亚
-	"PH":  18, // 菲律宾
-	"ID":  19, // 印尼
-	"IN":  20, // 印度
-	"RU":  21, // 俄罗斯
-	"BR":  22, // 巴西
-	"TR":  23, // 土耳其
-	"IT":  24, // 意大利
-	"ES":  25, // 西班牙
-	"CH":  26, // 瑞士
-	"SE":  27, // 瑞典
-	"NO":  28, // 挪威
-	"FI":  29, // 芬兰
-	"PL":  30, // 波兰
-	"CZ":  31, // 捷克
-	"AT":  32, // 奥地利
-}
-
-func getSubCountryRank(cc string) int {
-	cc = strings.ToUpper(strings.TrimSpace(cc))
-	if r, ok := subCountryRank[cc]; ok {
-		return r
-	}
-	return 999
+	"GLOBAL": "全球", "EDU": "海外高校学术网",
 }
 
 // formatProxyName 构造纯净的订阅节点名称：[国旗Emoji] [企业/高校名称] (仅国旗表情，不含文字国家，不含"出口"字样，完全去除协议与端口)
@@ -158,6 +112,16 @@ func apiSubscription(m *Manager, a *Auth) http.HandlerFunc {
 		// 收集运行中的出口节点与绑定的 3x-ui 入站（严格 1:1 实时同步，绝不重复生成 20->40 个）
 		coveredSlots := make(map[int]bool)
 		var validDetails []*InboundDetail
+		var allLinks []string
+		seenLinks := make(map[string]int)
+		makeUniqueLinkName := func(raw string) string {
+			count := seenLinks[raw]
+			seenLinks[raw] = count + 1
+			if count > 0 {
+				return fmt.Sprintf("%s (%d)", raw, count+1)
+			}
+			return raw
+		}
 
 		p, err := openPanel()
 		if err == nil && p != nil {
@@ -170,81 +134,21 @@ func apiSubscription(m *Manager, a *Auth) http.HandlerFunc {
 					if t == nil {
 						continue
 					}
-					if coveredSlots[t.Slot] {
-						continue // 严格 1 出口 = 1 节点，同一出口绝不重复输出多个入站
-					}
 					coveredSlots[t.Slot] = true
 					validDetails = append(validDetails, d)
+
+					for _, rawLink := range d.Links {
+						idx := strings.LastIndex(rawLink, "#")
+						cleanName := makeUniqueLinkName(formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP))
+						if idx != -1 {
+							rawLink = rawLink[:idx] + "#" + url.QueryEscape(cleanName)
+						} else {
+							rawLink = rawLink + "#" + url.QueryEscape(cleanName)
+						}
+						allLinks = append(allLinks, rawLink)
+					}
 				}
 			}
-		}
-
-		// 严格按国家权重排序：美国 3 节点在前，日本 3 节点紧随其后，热门国在前，冷门国在后
-		sort.SliceStable(validDetails, func(i, j int) bool {
-			t1 := findTunnel(validDetails[i].BoundTo)
-			t2 := findTunnel(validDetails[j].BoundTo)
-			var c1, c2 string
-			s1, s2 := 0, 0
-			if t1 != nil {
-				c1 = strings.ToUpper(strings.TrimSpace(t1.Node.CountryCode))
-				s1 = t1.Slot
-			}
-			if t2 != nil {
-				c2 = strings.ToUpper(strings.TrimSpace(t2.Node.CountryCode))
-				s2 = t2.Slot
-			}
-			r1 := getSubCountryRank(c1)
-			r2 := getSubCountryRank(c2)
-			if r1 != r2 {
-				return r1 < r2
-			}
-			if c1 != c2 {
-				return c1 < c2
-			}
-			return s1 < s2
-		})
-
-		// 排序独立出口隧道
-		sort.SliceStable(upTunnels, func(i, j int) bool {
-			c1 := strings.ToUpper(strings.TrimSpace(upTunnels[i].Node.CountryCode))
-			c2 := strings.ToUpper(strings.TrimSpace(upTunnels[j].Node.CountryCode))
-			r1 := getSubCountryRank(c1)
-			r2 := getSubCountryRank(c2)
-			if r1 != r2 {
-				return r1 < r2
-			}
-			if c1 != c2 {
-				return c1 < c2
-			}
-			return upTunnels[i].Slot < upTunnels[j].Slot
-		})
-
-		var allLinks []string
-		seenLinks := make(map[string]int)
-		makeUniqueLinkName := func(raw string) string {
-			count := seenLinks[raw]
-			seenLinks[raw] = count + 1
-			if count > 0 {
-				return fmt.Sprintf("%s (%d)", raw, count+1)
-			}
-			return raw
-		}
-
-		// 按排好的顺序生成已绑定入站的代理链接（严格维持 1 出口 = 1 节点链接）
-		for _, d := range validDetails {
-			t := findTunnel(d.BoundTo)
-			if t == nil || len(d.Links) == 0 {
-				continue
-			}
-			rawLink := d.Links[0]
-			idx := strings.LastIndex(rawLink, "#")
-			cleanName := makeUniqueLinkName(formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP))
-			if idx != -1 {
-				rawLink = rawLink[:idx] + "#" + url.QueryEscape(cleanName)
-			} else {
-				rawLink = rawLink + "#" + url.QueryEscape(cleanName)
-			}
-			allLinks = append(allLinks, rawLink)
 		}
 
 		// 仅对尚未绑定入站的独立出口隧道补充 SOCKS5 节点（纯净 [国旗Emoji] [企业/高校]，无协议与端口）
@@ -360,65 +264,63 @@ func generateClashConfig(details []*InboundDetail, tunnels []*Tunnel, host strin
 	for _, d := range details {
 		proto := strings.ToLower(d.Protocol)
 		t := findTunnel(d.BoundTo)
-		if t == nil || coveredSlots[t.Slot] {
+		if t == nil {
 			continue
 		}
 		coveredSlots[t.Slot] = true
 
-		if len(d.Clients) == 0 {
-			continue
-		}
-		c := d.Clients[0]
-		pName := makeUniqueName(formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP))
+		for _, c := range d.Clients {
+			pName := makeUniqueName(formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP))
 
-		switch proto {
-		case "vless":
-			tlsBool := d.TLS == "tls" || d.TLS == "reality"
-			netType := d.Network
-			if netType == "" {
-				netType = "tcp"
-			}
-			py := fmt.Sprintf("  - name: %q\r\n    type: vless\r\n    server: %q\r\n    port: %d\r\n    uuid: %q\r\n    udp: true\r\n    network: %q\r\n    tls: %v\r\n",
-				pName, host, d.Port, c.ID, netType, tlsBool)
-			if netType == "ws" {
-				py += "    ws-opts:\r\n      path: \"/\"\r\n"
-			}
-			proxies = append(proxies, proxyItem{name: pName, yaml: py})
+			switch proto {
+			case "vless":
+				tlsBool := d.TLS == "tls" || d.TLS == "reality"
+				netType := d.Network
+				if netType == "" {
+					netType = "tcp"
+				}
+				py := fmt.Sprintf("  - name: %q\r\n    type: vless\r\n    server: %q\r\n    port: %d\r\n    uuid: %q\r\n    udp: true\r\n    network: %q\r\n    tls: %v\r\n",
+					pName, host, d.Port, c.ID, netType, tlsBool)
+				if netType == "ws" {
+					py += "    ws-opts:\r\n      path: \"/\"\r\n"
+				}
+				proxies = append(proxies, proxyItem{name: pName, yaml: py})
 
-		case "vmess":
-			tlsBool := d.TLS == "tls"
-			netType := d.Network
-			if netType == "" {
-				netType = "tcp"
-			}
-			py := fmt.Sprintf("  - name: %q\r\n    type: vmess\r\n    server: %q\r\n    port: %d\r\n    uuid: %q\r\n    alterId: 0\r\n    cipher: auto\r\n    udp: true\r\n    network: %q\r\n    tls: %v\r\n",
-				pName, host, d.Port, c.ID, netType, tlsBool)
-			if netType == "ws" {
-				py += "    ws-opts:\r\n      path: \"/\"\r\n"
-			}
-			proxies = append(proxies, proxyItem{name: pName, yaml: py})
+			case "vmess":
+				tlsBool := d.TLS == "tls"
+				netType := d.Network
+				if netType == "" {
+					netType = "tcp"
+				}
+				py := fmt.Sprintf("  - name: %q\r\n    type: vmess\r\n    server: %q\r\n    port: %d\r\n    uuid: %q\r\n    alterId: 0\r\n    cipher: auto\r\n    udp: true\r\n    network: %q\r\n    tls: %v\r\n",
+					pName, host, d.Port, c.ID, netType, tlsBool)
+				if netType == "ws" {
+					py += "    ws-opts:\r\n      path: \"/\"\r\n"
+				}
+				proxies = append(proxies, proxyItem{name: pName, yaml: py})
 
-		case "trojan":
-			py := fmt.Sprintf("  - name: %q\r\n    type: trojan\r\n    server: %q\r\n    port: %d\r\n    password: %q\r\n    udp: true\r\n    sni: %q\r\n",
-				pName, host, d.Port, c.ID, host)
-			proxies = append(proxies, proxyItem{name: pName, yaml: py})
+			case "trojan":
+				py := fmt.Sprintf("  - name: %q\r\n    type: trojan\r\n    server: %q\r\n    port: %d\r\n    password: %q\r\n    udp: true\r\n    sni: %q\r\n",
+					pName, host, d.Port, c.ID, host)
+				proxies = append(proxies, proxyItem{name: pName, yaml: py})
 
-		case "shadowsocks":
-			parts := strings.SplitN(c.ID, ":", 2)
-			method := "aes-256-gcm"
-			pwd := c.ID
-			if len(parts) == 2 {
-				method = strings.TrimSpace(parts[0])
-				pwd = strings.TrimSpace(parts[1])
+			case "shadowsocks":
+				parts := strings.SplitN(c.ID, ":", 2)
+				method := "aes-256-gcm"
+				pwd := c.ID
+				if len(parts) == 2 {
+					method = strings.TrimSpace(parts[0])
+					pwd = strings.TrimSpace(parts[1])
+				}
+				py := fmt.Sprintf("  - name: %q\r\n    type: ss\r\n    server: %q\r\n    port: %d\r\n    cipher: %q\r\n    password: %q\r\n    udp: true\r\n",
+					pName, host, d.Port, method, pwd)
+				proxies = append(proxies, proxyItem{name: pName, yaml: py})
+
+			case "socks":
+				py := fmt.Sprintf("  - name: %q\r\n    type: socks5\r\n    server: %q\r\n    port: %d\r\n    username: %q\r\n    password: %q\r\n    udp: true\r\n",
+					pName, host, d.Port, c.Email, c.ID)
+				proxies = append(proxies, proxyItem{name: pName, yaml: py})
 			}
-			py := fmt.Sprintf("  - name: %q\r\n    type: ss\r\n    server: %q\r\n    port: %d\r\n    cipher: %q\r\n    password: %q\r\n    udp: true\r\n",
-				pName, host, d.Port, method, pwd)
-			proxies = append(proxies, proxyItem{name: pName, yaml: py})
-
-		case "socks":
-			py := fmt.Sprintf("  - name: %q\r\n    type: socks5\r\n    server: %q\r\n    port: %d\r\n    username: %q\r\n    password: %q\r\n    udp: true\r\n",
-				pName, host, d.Port, c.Email, c.ID)
-			proxies = append(proxies, proxyItem{name: pName, yaml: py})
 		}
 	}
 
@@ -522,58 +424,56 @@ func generateQuanXConfig(details []*InboundDetail, tunnels []*Tunnel, host strin
 	for _, d := range details {
 		proto := strings.ToLower(d.Protocol)
 		t := findTunnel(d.BoundTo)
-		if t == nil || coveredSlots[t.Slot] {
+		if t == nil {
 			continue
 		}
 		coveredSlots[t.Slot] = true
 
-		if len(d.Clients) == 0 {
-			continue
-		}
-		c := d.Clients[0]
-		pName := makeUniqueName(formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP))
+		for _, c := range d.Clients {
+			pName := makeUniqueName(formatProxyName(t.Node.CountryCode, t.Node.Country, t.Node.ISP))
 
-		switch proto {
-		case "trojan":
-			sb.WriteString(fmt.Sprintf("trojan = %s:%d, password=%s, over-tls=true, tls-verification=false, fast-open=false, udp-relay=true, tag=%s\r\n",
-				host, d.Port, c.ID, pName))
+			switch proto {
+			case "trojan":
+				sb.WriteString(fmt.Sprintf("trojan = %s:%d, password=%s, over-tls=true, tls-verification=false, fast-open=false, udp-relay=true, tag=%s\r\n",
+					host, d.Port, c.ID, pName))
 
-		case "vmess":
-			netType := strings.ToLower(d.Network)
-			tlsOpt := ""
-			if d.TLS == "tls" {
-				tlsOpt = ", over-tls=true, tls-verification=false"
+			case "vmess":
+				netType := strings.ToLower(d.Network)
+				tlsOpt := ""
+				if d.TLS == "tls" {
+					tlsOpt = ", over-tls=true, tls-verification=false"
+				}
+				obfsOpt := ""
+				if netType == "ws" {
+					obfsOpt = ", obfs=ws, obfs-uri=/"
+				}
+				sb.WriteString(fmt.Sprintf("vmess = %s:%d, method=chacha20-ietf-poly1305, password=%s%s%s, fast-open=false, udp-relay=true, tag=%s\r\n",
+					host, d.Port, c.ID, obfsOpt, tlsOpt, pName))
+
+			case "shadowsocks":
+				parts := strings.SplitN(c.ID, ":", 2)
+				method := "aes-256-gcm"
+				pwd := c.ID
+				if len(parts) == 2 {
+					method = strings.TrimSpace(parts[0])
+					pwd = strings.TrimSpace(parts[1])
+				}
+				sb.WriteString(fmt.Sprintf("shadowsocks = %s:%d, method=%s, password=%s, fast-open=false, udp-relay=true, tag=%s\r\n",
+					host, d.Port, method, pwd, pName))
+
+			case "socks":
+				if c.Email != "" && c.ID != "" {
+					sb.WriteString(fmt.Sprintf("socks5 = %s:%d, username=%s, password=%s, fast-open=false, udp-relay=true, tag=%s\r\n",
+						host, d.Port, c.Email, c.ID, pName))
+				} else {
+					sb.WriteString(fmt.Sprintf("socks5 = %s:%d, fast-open=false, udp-relay=true, tag=%s\r\n",
+						host, d.Port, pName))
+				}
+
+			case "vless":
+				sb.WriteString(fmt.Sprintf("; [QuanX 不支持 VLESS] %s (端口:%d) 采用 VLESS 协议。由于 Quantumult X 官方内核不支持 VLESS，建议在 3x-ui 面板中改用 Trojan 或 VMess。\r\n",
+					pName, d.Port))
 			}
-			obfsOpt := ""
-			if netType == "ws" {
-				obfsOpt = ", obfs=ws, obfs-uri=/"
-			}
-			sb.WriteString(fmt.Sprintf("vmess = %s:%d, method=chacha20-ietf-poly1305, password=%s%s%s, fast-open=false, udp-relay=true, tag=%s\r\n",
-				host, d.Port, c.ID, obfsOpt, tlsOpt, pName))
-
-		case "shadowsocks":
-			parts := strings.SplitN(c.ID, ":", 2)
-			method := "aes-256-gcm"
-			pwd := c.ID
-			if len(parts) == 2 {
-				method = strings.TrimSpace(parts[0])
-				pwd = strings.TrimSpace(parts[1])
-			}
-			sb.WriteString(fmt.Sprintf("shadowsocks = %s:%d, method=%s, password=%s, fast-open=false, udp-relay=true, tag=%s\r\n",
-				host, d.Port, method, pwd, pName))
-
-		case "socks":
-			if c.Email != "" && c.ID != "" {
-				sb.WriteString(fmt.Sprintf("socks5 = %s:%d, username=%s, password=%s, fast-open=false, udp-relay=true, tag=%s\r\n",
-					host, d.Port, c.Email, c.ID, pName))
-			} else {
-				sb.WriteString(fmt.Sprintf("socks5 = %s:%d, fast-open=false, udp-relay=true, tag=%s\r\n",
-					host, d.Port, pName))
-			}
-
-		case "vless":
-			sb.WriteString(fmt.Sprintf("; [QuanX 不支持 VLESS] %s (端口:%d) 采用 VLESS 协议。由于 Quantumult X 官方内核不支持 VLESS，建议在 3x-ui 面板中改用 Trojan 或 VMess。\r\n",
-				pName, d.Port))
 		}
 	}
 
@@ -599,9 +499,6 @@ func generateQuanXConfig(details []*InboundDetail, tunnels []*Tunnel, host strin
 // getFlagEmoji 把两位国家码（ISO 3166-1 alpha-2）转换为对应的国旗 Emoji
 func getFlagEmoji(countryCode string) string {
 	cc := strings.ToUpper(strings.TrimSpace(countryCode))
-	if cc == "GOV" {
-		return "🏛️"
-	}
 	if cc == "EDU" {
 		return "🎓"
 	}

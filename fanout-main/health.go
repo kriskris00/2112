@@ -10,12 +10,13 @@ import (
 )
 
 const (
-	healthInterval = 5 * time.Second
-	healthFailures = 2 // 连续失败 2 次（5s * 2 = 10 秒），超过 10 秒即触发同国换节点重连
-	healthTimeout  = 4 * time.Second
+	healthInterval = 60 * time.Second
+	healthFailures = 4 // 连续失败 4 次才判定掉线，容忍偶发抖动
+	healthTimeout  = 6 * time.Second
 )
 
-// WatchHealth 周期检查每条隧道是否还能出网，失效时间超过 10 秒自动同国换节点重连，候选耗尽彻底删除。
+// WatchHealth 周期检查每条隧道是否还能出网，掉线的自动换节点重连。
+// VPN Gate 是志愿者节点，运行中掉线很常见。
 func (m *Manager) WatchHealth() {
 	fails := map[int]int{}
 
@@ -26,17 +27,21 @@ func (m *Manager) WatchHealth() {
 			}
 			if m.tunnelHealthy(t) {
 				fails[t.Slot] = 0
+				time.Sleep(300 * time.Millisecond)
 				continue
 			}
 
 			fails[t.Slot]++
 			if fails[t.Slot] < healthFailures {
+				log.Printf("隧道 %d (%s) 探测失败 %d 次", t.Slot, t.Node.HostName, fails[t.Slot])
+				time.Sleep(300 * time.Millisecond)
 				continue
 			}
 
-			log.Printf("隧道 %d (%s, 国家: %s) 失效超过 10 秒，立即自动同国轮换", t.Slot, t.Node.HostName, t.Node.CountryCode)
+			log.Printf("隧道 %d (%s) 已掉线，正在换节点重连", t.Slot, t.Node.HostName)
 			fails[t.Slot] = 0
 			m.reconnect(t, t.Node.HostName)
+			time.Sleep(500 * time.Millisecond)
 		}
 	}
 }
@@ -126,8 +131,6 @@ func (m *Manager) reconnect(t *Tunnel, oldHost string) {
 		// 提前重建配置会因为入站还指着旧节点名而丢掉路由规则
 		m.bringUpPersist(t, false, true)
 		if t.Status != "up" {
-			log.Printf("[自愈系统] 槽位 %d (%s) 同国候选节点已耗尽且无法连通，自动清理失效出口与 3x-ui 对应入站...", t.Slot, oldHost)
-			_ = m.Stop(t.Slot)
 			return
 		}
 		// 出站 tag 跟着节点名走，换了节点就要把原来指向它的入站重新绑过去，

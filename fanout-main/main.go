@@ -17,12 +17,12 @@ import (
 )
 
 // version 由构建时通过 -ldflags 注入。
-var version = "v3.0.0-Jesee-Mod"
+var version = "v0.3.3-enhanced"
 
 func main() {
 	var (
 		webPort  = flag.Int("web", 8899, "Web 管理端口")
-		maxSlots = flag.Int("max", 150, "最多同时运行的隧道数")
+		maxSlots = flag.Int("max", 20, "最多同时运行的隧道数")
 		workDir  = flag.String("dir", "/var/lib/fanout", "工作目录")
 	)
 	panelMode := flag.String("panel", "", "节点链接后端: 留空按界面设置/自动探测, 3x-ui, native, xray-cf-lite")
@@ -71,8 +71,6 @@ func main() {
 		} else {
 			log.Printf("全网节点池已聚合扩展至 %d 个节点", n)
 		}
-		// 节点池拉取完毕后立即触发全网自动编排（热门国家各3节点，冷门国家各1节点）
-		mgr.AutoOrchestrate()
 	}()
 
 	if n, err := mgr.restoreState(); err != nil {
@@ -85,7 +83,6 @@ func main() {
 	}
 
 	go mgr.WatchHealth()
-	go mgr.WatchAutoOrchestrate()
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
@@ -114,7 +111,6 @@ func main() {
 	mux.HandleFunc("/api/sources/refresh", apiSourcesRefresh(mgr))
 	mux.HandleFunc("/api/sources/scan", apiSourcesScan(mgr))
 	mux.HandleFunc("/api/regions", apiRegions(mgr))
-	mux.HandleFunc("/api/auto/orchestrate", apiAutoOrchestrate(mgr))
 	mux.HandleFunc("/api/provision", apiProvision(mgr))
 	mux.HandleFunc("/api/jobs", apiJobs(mgr))
 	mux.HandleFunc("/api/jobs/dismiss", apiJobDismiss(mgr))
@@ -209,26 +205,14 @@ func apiNodes(m *Manager) http.HandlerFunc {
 
 		var filtered []Node
 		for _, n := range allNodes {
-			// 仅展示具备有效 OpenVPN 配置的高质量真实节点，过滤失效及不可用代理
-			if strings.TrimSpace(n.Config) == "" {
-				continue
-			}
 			if region != "" && region != "ALL" {
 				if strings.ToUpper(n.CountryCode) != region && !strings.Contains(strings.ToUpper(n.Country), region) {
 					continue
 				}
 			}
 			if source != "" && source != "all" {
-				if source == "gov" {
-					if n.Source != "gov" && !strings.EqualFold(n.IPType, "gov") {
-						continue
-					}
-				} else if source == "edu" {
-					if n.Source != "edu" && !isEduIP(n.IP) && !strings.EqualFold(n.IPType, "edu") {
-						continue
-					}
-				} else if source == "residential" {
-					if !strings.EqualFold(n.IPType, "residential") {
+				if source == "edu" {
+					if n.Source != "edu" && !isEduIP(n.IP) {
 						continue
 					}
 				} else if !strings.EqualFold(n.Source, source) {
@@ -244,29 +228,8 @@ func apiNodes(m *Manager) http.HandlerFunc {
 			filtered = append(filtered, n)
 		}
 
-		// 排序优选推荐：学术/家宽纯净度优先，低延迟高带宽优先
+		// 排序优选推荐：网络最好的排在最前面 (Ping 低优先，Speed 高优先)
 		sort.Slice(filtered, func(i, j int) bool {
-			typeRank := func(t string) int {
-				switch strings.ToLower(t) {
-				case "gov":
-					return 4
-				case "edu":
-					return 3
-				case "residential":
-					return 2
-				case "mobile":
-					return 1
-				default:
-					return 0
-				}
-			}
-			r1, r2 := typeRank(filtered[i].IPType), typeRank(filtered[j].IPType)
-			if r1 != r2 {
-				return r1 > r2
-			}
-			if filtered[i].PurityScore != filtered[j].PurityScore {
-				return filtered[i].PurityScore > filtered[j].PurityScore
-			}
 			pi := filtered[i].Ping
 			pj := filtered[j].Ping
 			if pi <= 0 {
@@ -309,16 +272,6 @@ func apiNodes(m *Manager) http.HandlerFunc {
 func apiTunnels(m *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, m.Tunnels())
-	}
-}
-
-func apiAutoOrchestrate(m *Manager) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		go m.AutoOrchestrate()
-		writeJSON(w, http.StatusOK, map[string]string{
-			"status":  "ok",
-			"message": "已触发全网出口智能编排（热门国家各3节点/冷门国家各1节点）",
-		})
 	}
 }
 

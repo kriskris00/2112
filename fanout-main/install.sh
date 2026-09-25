@@ -47,26 +47,9 @@ svc_install() {
   if [[ "$INIT_SYS" == systemd ]]; then
     # 端口不写进服务文件：它由 ${WORK_DIR}/settings.json 决定（见 seed_settings），
     # 两处都写会互相拽回旧值——界面改完重启失效，或 f 改完被配置覆盖。
-    cat > /etc/systemd/system/fanout.service <<SVCEOF
-[Unit]
-Description=fanout - VPN Gate 出口扇出网关 (Jesee 魔改旗舰版)
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-ExecStart=${BIN} -dir ${WORK_DIR}
-Restart=on-failure
-RestartSec=5
-MemoryHigh=320M
-MemoryMax=450M
-LimitNOFILE=65535
-TimeoutStopSec=30
-KillMode=mixed
-
-[Install]
-WantedBy=multi-user.target
-SVCEOF
+    # 老版本模板里可能还带 -web，一并去掉。
+    sed "s#-web [0-9]* ##; s#-dir /var/lib/fanout#-dir ${WORK_DIR}#" fanout.service \
+      > /etc/systemd/system/fanout.service
     systemctl daemon-reload
   else
     # OpenRC 没有 systemd 那套单元文件，直接写 init script。
@@ -123,7 +106,6 @@ pkg_for() {
     tar)      echo tar ;;
     ip)       case "$mgr" in apk) echo iproute2 ;; pacman) echo iproute2 ;; *) echo iproute ;; esac ;;
     iptables) echo iptables ;;
-    sqlite3)  echo sqlite3 ;;
     unzip)    echo unzip ;;
   esac
 }
@@ -155,7 +137,7 @@ MGR=$(detect_mgr)
 [[ "$MGR" == "apt-get" ]] && iproute_pkg=iproute2 || iproute_pkg=iproute
 
 need_cmd=()
-for c in openvpn curl openssl tar iptables sqlite3; do
+for c in openvpn curl openssl tar iptables; do
   command -v "$c" >/dev/null || need_cmd+=("$c")
 done
 command -v ip >/dev/null || need_cmd+=(ip)
@@ -221,28 +203,17 @@ else
   rm -rf "$TMP"
 fi
 
-echo "[3/6] 准备 3x-ui 面板联动与 Xray 内核"
+echo "[3/6] 准备 Xray"
+# 没有现成面板接管时 fanout 自己跑 Xray，需要一份二进制。
+# 装到 WORK_DIR/bin 下而不是 /usr/local/bin，避免和机器上别人的 xray 抢版本。
 mkdir -p "${WORK_DIR}/bin"
-HAS_3XUI=0
-if command -v /usr/local/x-ui/x-ui >/dev/null 2>&1 || [[ -x /usr/bin/x-ui ]] || [[ -f /etc/x-ui/x-ui.db ]]; then
-  echo "      检测到本机已安装 3x-ui，将自动无缝接管联动！"
-  HAS_3XUI=1
-else
-  echo "      未检测到 3x-ui 面板，正在一键联动安装官方 3x-ui..."
-  if bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh) y 2>/dev/null; then
-    echo "      3x-ui 面板安装完成并成功联动！"
-    HAS_3XUI=1
-    sleep 2
-  else
-    echo "      提示: 3x-ui 官方脚本联网超时或受限，将准备自建 Xray 模式作为双重保障..."
-  fi
-fi
-
-if [[ -d /etc/xray-cf-lite && -f /usr/local/etc/xray/config.json ]]; then
-  echo "      检测到 xray-cf-lite，入站交给它管，跳过下载"
+if command -v /usr/local/x-ui/x-ui >/dev/null 2>&1 || [[ -x /usr/bin/x-ui ]]; then
+  echo "      检测到 3x-ui，入站交给面板管，跳过"
+elif [[ -d /etc/xray-cf-lite && -f /usr/local/etc/xray/config.json ]]; then
+  echo "      检测到 xray-cf-lite，入站交给它管，跳过"
 elif [[ -x "${WORK_DIR}/bin/xray" ]]; then
   echo "      已有 $("${WORK_DIR}/bin/xray" version 2>/dev/null | head -1)"
-elif [[ $HAS_3XUI -eq 0 ]]; then
+else
   case "$GOARCH" in
     amd64) XRAY_ASSET=Xray-linux-64.zip ;;
     arm64) XRAY_ASSET=Xray-linux-arm64-v8a.zip ;;
@@ -251,6 +222,7 @@ elif [[ $HAS_3XUI -eq 0 ]]; then
   XT=$(mktemp -d)
   XURL="https://github.com/XTLS/Xray-core/releases/latest/download/${XRAY_ASSET}"
   if curl -fsSL "$XURL" -o "$XT/x.zip"; then
+    # 只为解一个 zip 装 unzip 有点重，busybox 环境常自带
     if command -v unzip >/dev/null; then
       unzip -qo "$XT/x.zip" -d "$XT"
     elif command -v busybox >/dev/null && busybox unzip -h >/dev/null 2>&1; then
@@ -322,9 +294,6 @@ ACTUAL_PORT=$(sed -n 's/.*"port"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' \
 echo
 echo "  管理界面  http://${IP}:${WEB_PORT}/${BP}/"
 echo "  访问口令  $(cat "${WORK_DIR}/password" 2>/dev/null || echo "见 ${WORK_DIR}/password")"
-if [[ ${HAS_3XUI:-0} -eq 1 ]]; then
-  echo "  3x-ui联动 已启用 (全自动 1:1 出口同步，实时入站生成与路由编排)"
-fi
 echo
 echo "  路径和口令都是随机生成的，也可以随时查看："
 echo "    cat ${WORK_DIR}/basepath"

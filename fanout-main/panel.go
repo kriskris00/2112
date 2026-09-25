@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -162,25 +161,23 @@ func openPanel() (Panel, error) {
 		return xc, nil
 	}
 
+	if xc, err := DetectXCL(); err == nil {
+		panelState.current = xc
+		return xc, nil
+	}
+
 	if x, err := DetectXUI(panelState.workDir); err == nil {
-		log.Printf("[面板联动] 成功接入 3x-ui 面板 (%s:%d)...", x.Host, x.Port)
 		panelState.current = x
 		return x, nil
 	} else if !xuiAbsent() {
-		log.Printf("[面板联动] 提示: 检测到本机安装了 3x-ui，尝试直连但返回: %v", err)
-	}
-
-	if xc, err := DetectXCL(); err == nil {
-		log.Printf("[面板联动] 成功接入 xray-cf-lite...")
-		panelState.current = xc
-		return xc, nil
+		// 面板装了却读不出配置，这时自建模式会和它抢端口，宁可报错让用户看见
+		return nil, fmt.Errorf("检测到 3x-ui 但读取配置失败: %w", err)
 	}
 
 	n, err := openNative(panelState.workDir)
 	if err != nil {
 		return nil, err
 	}
-	log.Printf("[面板联动] 启动自建 Xray 原生模式...")
 	panelState.current = n
 	return n, nil
 }
@@ -202,17 +199,17 @@ func currentPanelMode() string {
 func availablePanelModes(workDir string) []map[string]any {
 	modes := []map[string]any{}
 
-	xuiOK, xuiReason := true, ""
-	if _, err := DetectXUI(workDir); err != nil {
-		xuiOK, xuiReason = false, err.Error()
-	}
-	modes = append(modes, map[string]any{"mode": "3x-ui", "label": "3x-ui 面板", "available": xuiOK, "reason": xuiReason})
-
 	xcOK, xcReason := true, ""
 	if _, err := DetectXCL(); err != nil {
 		xcOK, xcReason = false, err.Error()
 	}
 	modes = append(modes, map[string]any{"mode": "xray-cf-lite", "label": "xray-cf-lite", "available": xcOK, "reason": xcReason})
+
+	xuiOK, xuiReason := true, ""
+	if _, err := DetectXUI(workDir); err != nil {
+		xuiOK, xuiReason = false, err.Error()
+	}
+	modes = append(modes, map[string]any{"mode": "3x-ui", "label": "3x-ui 面板", "available": xuiOK, "reason": xuiReason})
 
 	// 自建模式总是可用（fanout 自己跑 Xray），前提是能找到 xray 二进制，这里不预判，交给切换时报错。
 	modes = append(modes, map[string]any{"mode": "native", "label": "自建 Xray", "available": true, "reason": ""})
@@ -261,18 +258,10 @@ func switchPanelMode(mode string) (Panel, error) {
 
 // xuiAbsent 判断本机是否根本没装 3x-ui。
 func xuiAbsent() bool {
-	candidates := []string{
-		"/usr/local/x-ui/x-ui",
-		"/usr/bin/x-ui",
-		"/usr/local/bin/x-ui",
-		"/etc/x-ui/x-ui.db",
+	if _, err := os.Stat(xuiBinary); err == nil {
+		return false
 	}
-	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			return false
-		}
-	}
-	if _, err := exec.LookPath("x-ui"); err == nil {
+	if _, err := os.Stat(xuiMenu); err == nil {
 		return false
 	}
 	return true

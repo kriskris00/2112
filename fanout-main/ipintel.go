@@ -30,41 +30,6 @@ func isEduISP(isp string) bool {
 		strings.Contains(low, "tsukuba")
 }
 
-// isGovISP 判断运营商是否为政府机构、公共事务或市政网络专网（不含国内）
-func isGovISP(isp string) bool {
-	low := strings.ToLower(isp)
-	if strings.Contains(low, "china") || strings.Contains(low, ".cn") {
-		return false
-	}
-	return strings.Contains(low, "government") ||
-		strings.Contains(low, "ministry") ||
-		strings.Contains(low, "department of") ||
-		strings.Contains(low, "prefecture") ||
-		strings.Contains(low, "municipal") ||
-		strings.Contains(low, "public safety") ||
-		strings.Contains(low, "public sector") ||
-		strings.Contains(low, "parliament") ||
-		strings.Contains(low, "senate") ||
-		strings.Contains(low, "federal") ||
-		strings.Contains(low, "state of") ||
-		strings.Contains(low, "police") ||
-		strings.Contains(low, "customs") ||
-		strings.Contains(low, "military") ||
-		strings.Contains(low, "national defense") ||
-		strings.Contains(low, "lgwan") ||
-		strings.Contains(low, "gsn") ||
-		strings.Contains(low, "govtech") ||
-		strings.Contains(low, "gov.uk") ||
-		strings.Contains(low, "gov.sg") ||
-		strings.Contains(low, "gov.au") ||
-		strings.Contains(low, "bundes") ||
-		strings.Contains(low, "stadt") ||
-		strings.Contains(low, "city of") ||
-		strings.Contains(low, "county of") ||
-		strings.Contains(low, ".gov") ||
-		strings.Contains(low, ".go.jp")
-}
-
 // IPIntel 存储单个 IP 的归属类型、运营商与纯净度风控数据
 type IPIntel struct {
 	IP          string `json:"ip"`
@@ -242,10 +207,7 @@ func enrichSingleIPAsync(ip string) {
 	if ispName == "" {
 		ispName = data.Org
 	}
-	if isGovISP(ispName) && data.CountryCode != "CN" && !strings.Contains(strings.ToLower(data.Country), "china") {
-		ipType = "gov"
-		purity = 99
-	} else if (isEduISP(ispName) || isEduIP(ip)) && data.CountryCode != "CN" && !strings.Contains(strings.ToLower(data.Country), "china") {
+	if (isEduISP(ispName) || isEduIP(ip)) && data.CountryCode != "CN" && !strings.Contains(strings.ToLower(data.Country), "china") {
 		ipType = "edu"
 		purity = 98
 		if data.CountryCode == "" || data.CountryCode == "EDU" {
@@ -333,9 +295,8 @@ func ResolveIPIntel(ip string) IPIntel {
 	client := &http.Client{Timeout: 1800 * time.Millisecond}
 
 	var cc, country, ispName string
-	var hosting, mobile, proxy bool
 	// 尝试 ip-api.com
-	url1 := fmt.Sprintf("http://ip-api.com/json/%s?fields=status,country,countryCode,isp,org,mobile,proxy,hosting", ip)
+	url1 := fmt.Sprintf("http://ip-api.com/json/%s?fields=status,country,countryCode,isp,org", ip)
 	resp1, err1 := client.Get(url1)
 	if err1 == nil && resp1.StatusCode == http.StatusOK {
 		var d1 struct {
@@ -344,9 +305,6 @@ func ResolveIPIntel(ip string) IPIntel {
 			CountryCode string `json:"countryCode"`
 			ISP         string `json:"isp"`
 			Org         string `json:"org"`
-			Mobile      bool   `json:"mobile"`
-			Proxy       bool   `json:"proxy"`
-			Hosting     bool   `json:"hosting"`
 		}
 		if json.NewDecoder(resp1.Body).Decode(&d1) == nil && d1.Status == "success" {
 			cc = strings.ToUpper(strings.TrimSpace(d1.CountryCode))
@@ -355,9 +313,6 @@ func ResolveIPIntel(ip string) IPIntel {
 				ispName = strings.TrimSpace(d1.Org)
 			}
 			country = strings.TrimSpace(d1.Country)
-			hosting = d1.Hosting
-			mobile = d1.Mobile
-			proxy = d1.Proxy
 		}
 		resp1.Body.Close()
 	}
@@ -375,12 +330,6 @@ func ResolveIPIntel(ip string) IPIntel {
 					ISP string `json:"isp"`
 					Org string `json:"org"`
 				} `json:"connection"`
-				Security struct {
-					VPN     bool `json:"vpn"`
-					Proxy   bool `json:"proxy"`
-					Tor     bool `json:"tor"`
-					Hosting bool `json:"hosting"`
-				} `json:"security"`
 			}
 			if json.NewDecoder(resp2.Body).Decode(&d2) == nil && d2.Success {
 				if cc == "" {
@@ -395,8 +344,6 @@ func ResolveIPIntel(ip string) IPIntel {
 						ispName = strings.TrimSpace(d2.Connection.Org)
 					}
 				}
-				hosting = d2.Security.Hosting
-				proxy = d2.Security.Proxy || d2.Security.VPN || d2.Security.Tor
 			}
 			resp2.Body.Close()
 		}
@@ -417,19 +364,10 @@ func ResolveIPIntel(ip string) IPIntel {
 		ispName = "优质网络"
 	}
 
-	ipType, purity := computePurity(hosting, mobile, proxy)
-	if isGovISP(ispName) && cc != "CN" {
-		ipType = "gov"
-		purity = 99
-	} else if (isEduISP(ispName) || isEduIP(ip)) && cc != "CN" {
-		ipType = "edu"
-		purity = 98
-	}
-
 	res := IPIntel{
 		IP:          ip,
-		IPType:      ipType,
-		PurityScore: purity,
+		IPType:      "hosting",
+		PurityScore: 80,
 		ISP:         ispName,
 		Country:     country,
 		CountryCode: cc,
@@ -537,10 +475,7 @@ func BatchEnrichNodes(nodes []Node) {
 		}
 		country := item.Country
 		countryCode := item.CountryCode
-		if isGovISP(isp) && item.CountryCode != "CN" && !strings.Contains(strings.ToLower(item.Country), "china") {
-			ipType = "gov"
-			purity = 99
-		} else if (isEduISP(isp) || isEduIP(item.Query)) && item.CountryCode != "CN" && !strings.Contains(strings.ToLower(item.Country), "china") {
+		if (isEduISP(isp) || isEduIP(item.Query)) && item.CountryCode != "CN" && !strings.Contains(strings.ToLower(item.Country), "china") {
 			ipType = "edu"
 			purity = 98
 			if countryCode == "" || countryCode == "EDU" {
