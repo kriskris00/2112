@@ -180,7 +180,7 @@ button, a, input, select, textarea, [data-rg], [data-close], [data-detail], [dat
 button:hover:not(:disabled){background:#ffffff;border-color:rgba(2, 132, 199, 0.4);
   color:var(--accent);transform:translateY(-1px);box-shadow:0 4px 16px rgba(0,0,0,0.08)}
 button:active:not(:disabled){transform:translateY(0);background:rgba(255,255,255,0.85)}
-button:disabled{opacity:.55;cursor:default}
+button:disabled{opacity:.4;cursor:default}
 button.primary{background:linear-gradient(135deg, #0284c7 0%, #2563eb 100%);
   border-color:rgba(255,255,255,0.4);color:#ffffff;font-weight:600;
   box-shadow:0 4px 16px rgba(2, 132, 199, 0.35), inset 0 1px 1px rgba(255,255,255,0.4)}
@@ -884,17 +884,17 @@ textarea:focus{outline:none;border-color:var(--accent)}
       </button>
     </div>
     <div class="body" style="padding:14px">
-      <div style="font-size:12px;color:var(--dim);margin-bottom:12px;line-height:1.6;background:rgba(255,255,255,.62);border:1px solid rgba(255,255,255,.88);border-radius:10px;padding:10px 12px;box-shadow:var(--glass-shadow)">
+      <div style="font-size:12px;color:var(--text);margin-bottom:12px;line-height:1.6;background:rgba(2,132,199,0.08);border:1px solid rgba(2,132,199,0.22);border-radius:6px;padding:10px 12px;backdrop-filter:blur(10px)">
         ⚡ <b>真实出网验证标准</b>：直接从本机 VPS 发起真实 TCP+SOCKS5/OpenVPN 握手并向 <code>1.1.1.1/cdn-cgi/trace</code> 校验出口，<b>只有母机实测 100% 能连通、有回包的节点才会列出</b>！杜绝任何失效死节点与假节点。
       </div>
 
       <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px;background:var(--panel);border:1px solid var(--line);padding:10px;border-radius:6px">
         <div style="display:flex;flex-direction:column;gap:4px">
           <span style="font-size:11px;color:var(--dim)">扫描来源</span>
-          <select id="lsSource" style="padding:6px 8px;font-size:12px;min-width:140px;background:rgba(255,255,255,.72);border:1px solid rgba(255,255,255,.88);color:var(--text);border-radius:8px">
-            <option value="all" selected>🌐 全部优质源（筑波 + 预验证代理 + 学术网）</option>
+          <select id="lsSource" style="padding:6px 8px;font-size:12px;min-width:140px;background:rgba(255,255,255,0.7);border:1px solid var(--line);color:var(--text);border-radius:4px">
+            <option value="all">🌐 全部优质源 (全量并发实测)</option>
             <option value="gov">🏛️ 全球政府公共机构网 (政务专网)</option>
-            <option value="edu">🎓 海外高校学术网 (日本筑波/韩国/台湾/欧美)</option>
+            <option value="edu" selected>🎓 海外高校学术网 (日本筑波/韩国/台湾/欧美)</option>
             <option value="vpngate">🇯🇵 日本筑波大学 (VPN Gate)</option>
             <option value="residential">🏡 住宅家宽原生节点</option>
             <option value="custom">📁 本地自定义节点</option>
@@ -903,7 +903,7 @@ textarea:focus{outline:none;border-color:var(--accent)}
 
         <div style="display:flex;flex-direction:column;gap:4px">
           <span style="font-size:11px;color:var(--dim)">筛选国家/地区</span>
-          <select id="lsRegion" style="padding:6px 8px;font-size:12px;min-width:110px;background:rgba(255,255,255,.72);border:1px solid rgba(255,255,255,.88);color:var(--text);border-radius:8px">
+          <select id="lsRegion" style="padding:6px 8px;font-size:12px;min-width:110px;background:rgba(255,255,255,0.7);border:1px solid var(--line);color:var(--text);border-radius:4px">
             <option value="all">全部国家/地区</option>
             <option value="JP">🇯🇵 日本 (筑波大学等)</option>
             <option value="US">🇺🇸 美国 (名校/骨干)</option>
@@ -919,7 +919,7 @@ textarea:focus{outline:none;border-color:var(--accent)}
 
         <div style="display:flex;flex-direction:column;gap:4px">
           <span style="font-size:11px;color:var(--dim)">测活数量</span>
-          <select id="lsMax" style="padding:6px 8px;font-size:12px;min-width:125px;background:rgba(255,255,255,.72);border:1px solid rgba(255,255,255,.88);color:var(--text);border-radius:8px;font-weight:600">
+          <select id="lsMax" style="padding:6px 8px;font-size:12px;min-width:125px;background:rgba(255,255,255,0.7);border:1px solid var(--line);color:var(--text);border-radius:4px;font-weight:600">
             <option value="0" selected>⚡ 全部拉满 (全量测活)</option>
             <option value="5000">超大池 (5,000 个)</option>
             <option value="2000">深度池 (2,000 个)</option>
@@ -930,12 +930,12 @@ textarea:focus{outline:none;border-color:var(--accent)}
 
         <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:160px">
           <span style="font-size:11px;color:var(--dim)">关键词过滤 (IP/学校/运营商)</span>
-          <input type="search" id="lsSearch" placeholder="如 tsukuba、edu、sinet、150.40..." style="font-size:12px;padding:6px 8px;background:rgba(255,255,255,.72);border:1px solid rgba(255,255,255,.88);color:var(--text);border-radius:8px">
+          <input type="search" id="lsSearch" placeholder="如 tsukuba、edu、sinet、150.40..." style="font-size:12px;padding:6px 8px;background:rgba(255,255,255,0.7);border:1px solid var(--line);color:var(--text);border-radius:4px">
         </div>
 
         <div style="display:flex;flex-direction:column;gap:4px">
           <span style="font-size:11px;color:var(--dim)">对接节点链接 (与新建出口一致)</span>
-          <select id="lsTpl" style="padding:6px 8px;font-size:12px;min-width:160px;background:rgba(255,255,255,.72);border:1px solid rgba(255,255,255,.88);color:var(--text);border-radius:8px">
+          <select id="lsTpl" style="padding:6px 8px;font-size:12px;min-width:160px;background:rgba(255,255,255,0.7);border:1px solid var(--line);color:var(--text);border-radius:4px">
             <option value="0">自动匹配活跃节点链接</option>
           </select>
         </div>
@@ -951,19 +951,19 @@ textarea:focus{outline:none;border-color:var(--accent)}
         </div>
       </div>
 
-      <div id="lsStatusBox" style="margin-bottom:12px;display:flex;align-items:center;gap:12px;font-size:12px;color:var(--dim);background:#0e1116;border:1px solid var(--line);border-radius:4px;padding:7px 12px">
-        <span id="lsScanIndicator" style="display:inline-flex;align-items:center;gap:6px">
-          <span class="dot" id="lsDot"></span>
-          <span id="lsStatusText">准备就绪，点击上方按钮从 VPS 本机探测</span>
+      <div id="lsStatusBox" style="margin-bottom:12px;display:flex;align-items:center;gap:12px;font-size:12px;color:var(--text);background:rgba(255,255,255,0.65);border:1px solid var(--line);border-radius:6px;padding:9px 14px;box-shadow:0 2px 8px rgba(0,0,0,0.03);backdrop-filter:blur(10px)">
+        <span id="lsScanIndicator" style="display:inline-flex;align-items:center;gap:8px">
+          <span class="dot up" id="lsDot" style="box-shadow:0 0 10px rgba(5,150,105,0.6)"></span>
+          <span id="lsStatusText" style="font-weight:500">准备就绪，点击上方按钮从 VPS 本机并发探测</span>
         </span>
         <span class="spacer"></span>
-        <span>实测有效：<b id="lsVerifiedCount" style="color:var(--ok)">0</b> 个</span>
-        <span id="lsLastScanTime" style="margin-left:8px"></span>
+        <span>实测有效：<b id="lsVerifiedCount" style="color:var(--ok);font-size:13px">0</b> 个</span>
+        <span id="lsLastScanTime" style="margin-left:8px;color:var(--dim)"></span>
       </div>
 
       <div style="max-height:420px;overflow-y:auto;border:1px solid var(--line);border-radius:6px;background:var(--panel)">
         <table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left">
-          <thead style="position:sticky;top:0;background:rgba(248,250,252,.94);border-bottom:1px solid var(--line);z-index:2">
+          <thead style="position:sticky;top:0;background:rgba(248,250,252,0.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);z-index:2">
             <tr>
               <th style="padding:8px 10px;width:36px"><input type="checkbox" id="lsSelectAll" title="全选所有可用"></th>
               <th style="padding:8px 10px;width:80px">地区</th>
@@ -2628,7 +2628,7 @@ async function triggerStartLiveScan(){
   const startBtn = $('#lsStartScanBtn');
   if(startBtn) startBtn.disabled = true;
 
-  toast('正在启动母机并发真实测活（自适应并发，避免把 VPS 打满）...');
+  toast('正在启动母机并发真实测活 (100协程并发拉满)...');
   try{
     await api('/api/nodes/live_scan?source=' + encodeURIComponent(source) + '&region=' + encodeURIComponent(region) + '&max=' + encodeURIComponent(max), {
       method: 'POST'

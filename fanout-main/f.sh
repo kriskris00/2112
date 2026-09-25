@@ -272,44 +272,73 @@ migrate_port_to_settings() {
 do_update() {
   local tmp
   echo -e "\n  当前版本: $("$BIN" -version 2>/dev/null || echo '-')"
-  echo -e "  ${B}正在从您的 GitHub 仓库 (kriskris00/2112) 拉取最新源码并自动编译更新...${N}"
+  echo -e "  ${B}正在从您的 GitHub 仓库 (${REPO}) 同步最新代码并平滑更新...${N}"
   tmp=$(mktemp -d)
 
-  # 优先通过 git clone，降级通过 tar.gz 源码包拉取
+  # 多重镜像与代理加速拉取
   local cloned=0
-  if git clone --depth 1 https://github.com/kriskris00/2112.git "$tmp/2112" 2>/dev/null; then
+  if git clone --depth 1 "https://github.com/${REPO}.git" "$tmp/2112" 2>/dev/null; then
     cloned=1
-  elif curl -fsSL https://github.com/kriskris00/2112/archive/refs/heads/main.tar.gz -o "$tmp/repo.tar.gz" 2>/dev/null; then
-    if tar xzf "$tmp/repo.tar.gz" -C "$tmp" 2>/dev/null; then
-      mv "$tmp"/2112-main "$tmp/2112" 2>/dev/null && cloned=1
+  elif git clone --depth 1 "https://ghfast.top/https://github.com/${REPO}.git" "$tmp/2112" 2>/dev/null; then
+    cloned=1
+  elif git clone --depth 1 "https://mirror.ghproxy.com/https://github.com/${REPO}.git" "$tmp/2112" 2>/dev/null; then
+    cloned=1
+  else
+    local tar_urls=(
+      "https://github.com/${REPO}/archive/refs/heads/main.tar.gz"
+      "https://ghfast.top/https://github.com/${REPO}/archive/refs/heads/main.tar.gz"
+    )
+    for u in "${tar_urls[@]}"; do
+      if curl -fsSL --connect-timeout 8 "$u" -o "$tmp/repo.tar.gz" 2>/dev/null; then
+        if tar xzf "$tmp/repo.tar.gz" -C "$tmp" 2>/dev/null; then
+          local edir
+          edir=$(find "$tmp" -maxdepth 1 -type d -name "2112*" | head -1)
+          if [[ -n "$edir" ]]; then
+            mv "$edir" "$tmp/2112" && cloned=1
+            break
+          fi
+        fi
+      fi
+    done
+  fi
+
+  local src_dir=""
+  if [[ $cloned -eq 1 ]]; then
+    if [[ -d "$tmp/2112/fanout-main" ]]; then
+      src_dir="$tmp/2112/fanout-main"
+    elif [[ -f "$tmp/2112/main.go" ]]; then
+      src_dir="$tmp/2112"
     fi
   fi
 
-  if [[ $cloned -eq 1 && -d "$tmp/2112/fanout-main" ]]; then
+  if [[ -n "$src_dir" && -f "$src_dir/main.go" ]]; then
     if ! command -v go >/dev/null 2>&1; then
       echo "  未检测到 Go 编译器，正在尝试自动安装 golang..."
       if command -v apt-get >/dev/null 2>&1; then
-        apt-get update -qq && apt-get install -y -qq golang
+        apt-get update -qq && (apt-get install -y -qq golang-go 2>/dev/null || apt-get install -y -qq golang 2>/dev/null || true)
       elif command -v yum >/dev/null 2>&1; then
-        yum install -y -q golang
+        yum install -y -q golang 2>/dev/null || true
       elif command -v apk >/dev/null 2>&1; then
-        apk add --no-cache go
+        apk add --no-cache go 2>/dev/null || true
       fi
     fi
 
     if command -v go >/dev/null 2>&1; then
-      cd "$tmp/2112/fanout-main"
+      cd "$src_dir"
       echo "  正在整理依赖并编译新版 fanout (已优化 1C1G 内存、多镜像容灾与全协议支持)..."
       export GOPROXY="https://goproxy.cn,https://proxy.golang.org,direct"
+      export GOCACHE="/tmp/fanout_gocache"
+      mkdir -p "$GOCACHE"
       go mod tidy 2>/dev/null || true
-      if go build -trimpath -ldflags "-s -w" -o "$tmp/fanout" .; then
+      if go build -p 1 -trimpath -ldflags "-s -w" -o "$tmp/fanout" .; then
         svc_stop
         install -m 755 "$tmp/fanout" "$BIN"
-        install -m 755 "$tmp/2112/fanout-main/f.sh" /usr/local/bin/f
+        [[ -f "$src_dir/f.sh" ]] && install -m 755 "$src_dir/f.sh" /usr/local/bin/f
         migrate_port_to_settings
         svc_start
         echo -e "  ${G}更新完成！当前运行版本: $("$BIN" -version 2>/dev/null)${N}"
         rm -rf "$tmp"
+        rm -rf /tmp/fanout_gocache 2>/dev/null || true
         return
       else
         echo -e "  ${R}编译失败，请检查编译环境${N}"
@@ -318,10 +347,11 @@ do_update() {
       echo -e "  ${R}缺少 Go 编译器，请先运行: apt install -y golang 或 yum install -y golang${N}"
     fi
   else
-    echo -e "  ${R}拉取 GitHub 仓库失败，请检查网络或确认仓库 https://github.com/kriskris00/2112 是否正常${N}"
+    echo -e "  ${R}拉取 GitHub 仓库失败，请检查网络或确认仓库 https://github.com/${REPO} 是否正常${N}"
   fi
 
   rm -rf "$tmp"
+  rm -rf /tmp/fanout_gocache 2>/dev/null || true
 }
 
 do_uninstall() {
