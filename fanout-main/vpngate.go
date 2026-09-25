@@ -86,38 +86,46 @@ var proxyListSources = []struct {
 	// ===== vakhov/fresh-proxy-list =====
 	{URL: "https://raw.githubusercontent.com/vakhov/fresh-proxy-list/master/socks5.txt", Proto: "socks5"},
 	{URL: "https://raw.githubusercontent.com/vakhov/fresh-proxy-list/master/http.txt", Proto: "http"},
+
+	// ===== 预验证聚合源：优先使用已经做过真实请求检测的列表，减少“能握手但一上网就断”的死节点 =====
+	{URL: "https://raw.githubusercontent.com/proxio-io/proxy-list/main/socks5.txt", Proto: "socks5"},
+	{URL: "https://raw.githubusercontent.com/proxio-io/proxy-list/main/http.txt", Proto: "http"},
+	{URL: "https://raw.githubusercontent.com/proxmint/free-proxy-list/main/proxies/socks5.txt", Proto: "socks5"},
+	{URL: "https://raw.githubusercontent.com/proxmint/free-proxy-list/main/proxies/http.txt", Proto: "http"},
+	{URL: "https://cdn.jsdelivr.net/gh/proxyscrape/free-proxy-list@main/proxies/protocols/socks5/data.txt", Proto: "socks5"},
+	{URL: "https://cdn.jsdelivr.net/gh/proxyscrape/free-proxy-list@main/proxies/protocols/http/data.txt", Proto: "http"},
 }
 
 var englishCountryToCode = map[string]string{
 	"united states": "US", "usa": "US",
-	"japan": "JP",
-	"hong kong": "HK",
-	"taiwan": "TW",
-	"singapore": "SG",
+	"japan":       "JP",
+	"hong kong":   "HK",
+	"taiwan":      "TW",
+	"singapore":   "SG",
 	"south korea": "KR", "korea": "KR",
 	"united kingdom": "GB", "great britain": "GB", "england": "GB", "uk": "GB",
 	"germany": "DE", "deutschland": "DE",
-	"canada": "CA",
-	"france": "FR",
-	"australia": "AU",
+	"canada":      "CA",
+	"france":      "FR",
+	"australia":   "AU",
 	"netherlands": "NL", "holland": "NL",
 	"russia": "RU", "russian federation": "RU",
-	"brazil": "BR",
-	"india": "IN",
-	"indonesia": "ID",
-	"vietnam": "VN",
-	"thailand": "TH",
-	"malaysia": "MY",
+	"brazil":      "BR",
+	"india":       "IN",
+	"indonesia":   "ID",
+	"vietnam":     "VN",
+	"thailand":    "TH",
+	"malaysia":    "MY",
 	"philippines": "PH",
-	"turkey": "TR", "turkiye": "TR",
-	"italy": "IT",
-	"spain": "ES",
-	"sweden": "SE",
+	"turkey":      "TR", "turkiye": "TR",
+	"italy":       "IT",
+	"spain":       "ES",
+	"sweden":      "SE",
 	"switzerland": "CH",
-	"norway": "NO",
-	"finland": "FI",
-	"poland": "PL",
-	"czechia": "CZ", "czech republic": "CZ",
+	"norway":      "NO",
+	"finland":     "FI",
+	"poland":      "PL",
+	"czechia":     "CZ", "czech republic": "CZ",
 	"austria": "AT",
 }
 
@@ -325,7 +333,7 @@ type Node struct {
 	Ping        int     `json:"ping"`
 	SpeedMbps   float64 `json:"speed_mbps"`
 	Sessions    int     `json:"sessions"`
-	Config      string  `json:"-"` // 解码后的 .ovpn 内容
+	Config      string  `json:"-"`                      // 解码后的 .ovpn 内容
 	IPType      string  `json:"ip_type,omitempty"`      // residential / hosting / mobile / edu
 	PurityScore int     `json:"purity_score,omitempty"` // 0-100
 	ISP         string  `json:"isp,omitempty"`
@@ -714,21 +722,10 @@ var builtinSeedNodes = []Node{
 
 // loadInitialNodes 快速启动读取底池（合并内建全量热门种子与本地持久化缓存，保障 12 大热门国家与发现国家秒级就绪）
 func loadInitialNodes(workDir string) []Node {
-	for i := range builtinSeedNodes {
-		if builtinSeedNodes[i].Config == "" {
-			port := builtinSeedNodes[i].Port
-			if port <= 0 {
-				port = 1194
-			}
-			builtinSeedNodes[i].Config = buildVPNGateConfig(builtinSeedNodes[i].IP, port, builtinSeedNodes[i].Proto)
-		}
-	}
+	// 不再把硬编码的历史“种子 IP”当成真实节点。VPN Gate 节点变化很快，
+	// 静态种子会制造“列表里显示可用、实际永远连不上”的假阳性。
+	// 初始池只信任上一轮真实拉取后落盘的缓存。
 	nodeMap := make(map[string]Node)
-	for _, n := range builtinSeedNodes {
-		if n.IP != "" {
-			nodeMap[n.IP] = n
-		}
-	}
 	if workDir != "" {
 		cachePath := filepath.Join(workDir, "cached_nodes.csv")
 		if data, err := os.ReadFile(cachePath); err == nil && len(data) > 0 {
@@ -766,9 +763,11 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 	}
 	cachedCount := len(nodeMap)
 
-	// 2. 收集待抓取的日本筑波大学及镜像源地址
+	// 2. 收集待抓取的日本筑波大学及镜像源地址。
+	// 筑波大学/VPN Gate 是强制基础源：无论用户选择 all/proxy/edu/custom 等哪种视图，
+	// 都会并行拉取一次，避免换源后把最重要的筑波源丢掉。
 	var targets []string
-	if sourceFilter == "" || sourceFilter == "all" || sourceFilter == "vpngate" || sourceFilter == "edu" || sourceFilter == "gov" || sourceFilter == "residential" {
+	{
 		sourceInfoMu.RLock()
 		customURLText := globalSourceInfo.CustomURL
 		sourceInfoMu.RUnlock()
@@ -791,6 +790,9 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 			targets = append(targets, discovered...)
 		}
 	}
+
+	// 去重镜像 URL，避免官方源/动态发现重复请求。
+	targets = uniqueStrings(targets)
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -992,6 +994,23 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 	return nodes, nil
 }
 
+func uniqueStrings(in []string) []string {
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
+}
+
 // fetchNodesWith 把直连地址拆成参数，方便单元测试。
 func fetchNodesWith(direct string, timeout time.Duration) ([]Node, error) {
 	if direct != "" {
@@ -1185,8 +1204,7 @@ func parseNodeCSV(body string) ([]Node, error) {
 			strings.Contains(strings.ToLower(get("Operator")), "university") ||
 			strings.Contains(strings.ToLower(get("Message")), "university"))
 
-		isGov := !isChina && (
-			strings.Contains(hostLower, ".go.jp") ||
+		isGov := !isChina && (strings.Contains(hostLower, ".go.jp") ||
 			strings.Contains(hostLower, ".gov") ||
 			strings.Contains(hostLower, ".mil") ||
 			strings.Contains(hostLower, ".gov.uk") ||
@@ -1527,5 +1545,3 @@ verb 2
 	}
 	return nodes, nil
 }
-
-

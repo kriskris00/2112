@@ -14,14 +14,14 @@ import (
 
 // Manager 维护所有隧道，负责分配槽位与端口。
 type Manager struct {
-	mu       sync.RWMutex
-	tunnels  map[int]*Tunnel
-	nodes    []Node
-	fetched  time.Time
-	workDir     string
-	maxSlots    int
-	jobs        JobStore
-	refreshing  bool
+	mu            sync.RWMutex
+	tunnels       map[int]*Tunnel
+	nodes         []Node
+	fetched       time.Time
+	workDir       string
+	maxSlots      int
+	jobs          JobStore
+	refreshing    bool
 	orchestrateMu sync.Mutex
 }
 
@@ -197,7 +197,6 @@ func (m *Manager) PruneFailed() int {
 	return len(slots)
 }
 
-
 func (m *Manager) Nodes() ([]Node, time.Time) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -330,27 +329,45 @@ const (
 // 一直循环到连上或这条隧道被用户停掉。VPN Gate 死节点多，"当前都不可用"往往只是
 // 这一批候选恰好都挂了，过一会儿就有新节点，不该让出口永久躺死。
 func (m *Manager) bringUpPersist(t *Tunnel, notify bool, persist bool) {
-	if m.tryCandidates(t, notify) {
-		return
-	}
-	if persist {
-		// 再尝试一次短暂延时重试，避免瞬时网络抖动
-		time.Sleep(3 * time.Second)
-		if !m.tunnelActive(t) {
-			return
-		}
+	if !persist {
 		if m.tryCandidates(t, notify) {
 			return
 		}
-		// 同国所有候选节点皆不可用，严格遵循用户策略：删除该失效节点，保持订阅及面板 100% 纯净可用！
-		log.Printf("隧道 %d (国家: %s) 同国候选均不可用，已自动删除此失效出口", t.Slot, t.TargetRegion)
-		_ = m.Stop(t.Slot)
+		t.Status = "failed"
+		if serr := m.saveState(); serr != nil {
+			log.Printf("保存状态失败: %v", serr)
+		}
 		return
 	}
 
-	t.Status = "failed"
-	if serr := m.saveState(); serr != nil {
-		log.Printf("保存状态失败: %v", serr)
+	// 自动恢复不再“失败两次就删除”。公网/VPN Gate 节点本身有明显的瞬时波动，
+	// 原实现会在一次抖动后直接删掉出口，造成端口/订阅断掉。
+	// 现在持续重试 + 周期刷新节点池，直到用户主动 Stop。
+	backoff := reconnectBackoffMin
+	for m.tunnelActive(t) {
+		if m.tryCandidates(t, notify) {
+			return
+		}
+		if !m.tunnelActive(t) {
+			return
+		}
+		log.Printf("隧道 %d (国家: %s) 当前候选全部失败，%s 后刷新节点池并继续恢复",
+			t.Slot, t.TargetRegion, backoff)
+		t.Status = "starting"
+		t.Err = fmt.Sprintf("当前节点池不可用，%s 后自动重试", backoff)
+		t.ExitIP = ""
+		time.Sleep(backoff)
+		if !m.tunnelActive(t) {
+			return
+		}
+		// 每轮失败后刷新一次，获取 VPN Gate 新节点与最新预验证代理。
+		if _, err := m.RefreshNodes(); err != nil {
+			log.Printf("隧道 %d 刷新节点池失败: %v", t.Slot, err)
+		}
+		backoff *= 2
+		if backoff > reconnectBackoffMax {
+			backoff = reconnectBackoffMax
+		}
 	}
 }
 

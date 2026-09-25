@@ -1,7 +1,9 @@
 package main
 
 import (
+	"io"
 	"log"
+	"net"
 	"net/http"
 	"os/exec"
 	"strconv"
@@ -11,8 +13,8 @@ import (
 
 const (
 	healthInterval = 5 * time.Second
-	healthFailures = 2 // 连续失败 2 次（5s * 2 = 10 秒），超过 10 秒即触发同国换节点重连
-	healthTimeout  = 4 * time.Second
+	healthFailures = 3 // 连续失败 3 次（约 15 秒）再切换，避免短暂抖动导致频繁换 IP
+	healthTimeout  = 6 * time.Second
 )
 
 // WatchHealth 周期检查每条隧道是否还能出网，失效时间超过 10 秒自动同国换节点重连，候选耗尽彻底删除。
@@ -47,30 +49,23 @@ func (m *Manager) WatchHealth() {
 // openvpn 死掉后照样能出网，只是出口变回了母机 IP。
 // 所以要比对出口 IP 是否仍是建立隧道时拿到的那个。
 func (m *Manager) tunnelHealthy(t *Tunnel) bool {
-	// 1. 上游公开代理（无 netns，通过 dialer 探测连通性）
+	// 1. 上游公开代理（无 netns）。
+	// 关键修复：以前只要代理返回 HTTP 200 就算健康，即使出口已经悄悄回落到母机
+	// 或换了 IP 也不会触发重连。现在必须拿到真实出口 IP，并在已知 ExitIP 时进行比较。
 	if t.Node.Proto == "socks5" || t.Node.Proto == "http" || t.Node.Config == "" {
-		if t.dialer == nil {
+		dial := t.getDialer()
+		if dial == nil {
 			return false
 		}
 		client := &http.Client{
-			Transport: &http.Transport{Dial: t.dialer},
+			Transport: &http.Transport{Dial: dial},
 			Timeout:   healthTimeout,
 		}
-		resp, err := client.Get("http://1.1.1.1/cdn-cgi/trace")
-		if err == nil && resp.StatusCode == http.StatusOK {
-			resp.Body.Close()
-			return true
-		}
-		if resp != nil {
-			resp.Body.Close()
-		}
-		resp2, err2 := client.Get("http://api.ipify.org")
-		if err2 == nil && resp2.StatusCode == http.StatusOK {
-			resp2.Body.Close()
-			return true
-		}
-		if resp2 != nil {
-			resp2.Body.Close()
+		if ip := proxyExitIP(client); ip != "" {
+			if t.ExitIP == "" || ip == t.ExitIP {
+				return true
+			}
+			log.Printf("隧道 %d 出口 IP 变化: %s -> %s", t.Slot, t.ExitIP, ip)
 		}
 		return false
 	}
@@ -102,6 +97,36 @@ func (m *Manager) tunnelHealthy(t *Tunnel) bool {
 		}
 	}
 	return false
+}
+
+func proxyExitIP(client *http.Client) string {
+	for _, endpoint := range []string{"http://1.1.1.1/cdn-cgi/trace", "http://api.ipify.org"} {
+		resp, err := client.Get(endpoint)
+		if err != nil {
+			continue
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			continue
+		}
+		if strings.Contains(endpoint, "cdn-cgi") {
+			for _, line := range strings.Split(string(body), "\n") {
+				if strings.HasPrefix(strings.TrimSpace(line), "ip=") {
+					ip := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "ip="))
+					if net.ParseIP(ip) != nil {
+						return ip
+					}
+				}
+			}
+		} else {
+			ip := strings.TrimSpace(string(body))
+			if net.ParseIP(ip) != nil {
+				return ip
+			}
+		}
+	}
+	return ""
 }
 
 // reconnect 就地把一条隧道换到别的节点上，保持槽位与端口不变，
