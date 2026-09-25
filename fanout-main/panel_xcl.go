@@ -196,28 +196,60 @@ func (x *XCL) boundInbounds(cfg map[string]any) map[string]string {
 	return bound
 }
 
-// syncOutbounds 让 config 里 fanout- 出站与当前连通的隧道一致，保留 xray-cf-lite 的 direct/block。
+// syncOutbounds 让 config 里 fanout- 出站与当前连通的隧道一致，严格保证所有出站 tag 全局唯一。
 func (x *XCL) syncOutbounds(cfg map[string]any, tunnels []*Tunnel) {
 	outbounds, _ := cfg["outbounds"].([]any)
 	kept := make([]any, 0, len(outbounds))
+	seenTags := make(map[string]bool)
+
+	// 1. 保留所有非 fanout 用户出站（如 direct, block, 其它自定义），彻底排重
 	for _, ob := range outbounds {
 		m, ok := ob.(map[string]any)
 		if !ok {
 			kept = append(kept, ob)
 			continue
 		}
-		tag, _ := m["tag"].(string)
-		if !strings.HasPrefix(tag, xuiTagPrefix) {
-			forceIPv4(m)
-			kept = append(kept, ob)
+		rawTag, _ := m["tag"].(string)
+		tag := strings.TrimSpace(rawTag)
+		if strings.HasPrefix(strings.ToLower(tag), strings.ToLower(xuiTagPrefix)) {
+			continue
 		}
+		if tag != "" {
+			if seenTags[tag] {
+				continue
+			}
+			seenTags[tag] = true
+		}
+		forceIPv4(m)
+		kept = append(kept, ob)
 	}
+
+	// 2. 为当前已连通的隧道添加出站，保证 tag 绝对全局唯一！
 	for _, t := range tunnels {
 		if t.Status != "up" {
 			continue
 		}
+		baseTag := tunnelTag(t)
+		tag := baseTag
+		if seenTags[tag] {
+			tag = fmt.Sprintf("%s-slot%d", baseTag, t.Slot)
+		}
+		if seenTags[tag] {
+			for i := 1; i <= 100; i++ {
+				cand := fmt.Sprintf("%s-%d", tag, i)
+				if !seenTags[cand] {
+					tag = cand
+					break
+				}
+			}
+		}
+		if seenTags[tag] {
+			continue
+		}
+		seenTags[tag] = true
+
 		kept = append(kept, map[string]any{
-			"tag":      tunnelTag(t),
+			"tag":      tag,
 			"protocol": "socks",
 			"settings": map[string]any{
 				"servers": []any{socksServerJSON(t)},

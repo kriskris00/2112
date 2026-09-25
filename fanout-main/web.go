@@ -19,161 +19,248 @@ const indexHTML = `<!DOCTYPE html>
 <title>fanout</title>
 <style>
 :root{
-  --bg:#12151a; --panel:#181c23; --line:#262c36; --text:#dde3ec;
-  --dim:#8b95a5; --accent:#4a9eda; --ok:#3fa66b; --warn:#c9903a; --bad:#c25450;
+  --bg:#07151e;
+  --panel:rgba(10, 28, 38, 0.62);
+  --line:rgba(255, 255, 255, 0.12);
+  --text:#f0fdf4;
+  --dim:#8ecae6;
+  --accent:#06b6d4;
+  --accent-glow:0 0 20px rgba(6, 182, 212, 0.45);
+  --ok:#10b981;
+  --warn:#f59e0b;
+  --bad:#f43f5e;
+  --cyan:#06b6d4;
+  --mint:#34d399;
+  --azure:#38bdf8;
+  --lavender:#a78bfa;
+  --glass-shadow:0 12px 36px -4px rgba(0, 20, 30, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.10);
+  --glass-blur:blur(28px) saturate(190%);
+  --apple-font:-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --mono-font:ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);
-  font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-header{display:flex;align-items:center;gap:16px;padding:10px 16px;
-  border-bottom:1px solid var(--line);background:var(--panel)}
-h1{font-size:13px;font-weight:600;margin:0;letter-spacing:0}
+body{
+  margin:0;color:var(--text);font:13px/1.55 var(--apple-font);-webkit-font-smoothing:antialiased;min-height:100vh;
+  background: radial-gradient(circle at 18% 22%, rgba(6, 182, 212, 0.18), transparent 45%),
+              radial-gradient(circle at 82% 18%, rgba(52, 211, 153, 0.17), transparent 45%),
+              radial-gradient(circle at 50% 82%, rgba(56, 189, 248, 0.16), transparent 50%),
+              radial-gradient(circle at 20% 75%, rgba(167, 139, 250, 0.14), transparent 48%),
+              linear-gradient(135deg, #05141c 0%, #08212c 50%, #061822 100%);
+  background-size: 180% 180%;
+  animation: freshAuroraFlow 24s ease-in-out infinite alternate;
+  background-attachment: fixed;
+}
+@keyframes freshAuroraFlow {
+  0% {
+    background-position: 0% 0%, 100% 10%, 50% 100%, 0% 50%, 0% 0%;
+  }
+  50% {
+    background-position: 50% 70%, 50% 90%, 20% 30%, 60% 80%, 100% 100%;
+  }
+  100% {
+    background-position: 80% 20%, 10% 40%, 80% 50%, 100% 20%, 0% 0%;
+  }
+}
+header{display:flex;align-items:center;gap:14px;padding:12px 20px;
+  position:sticky;top:0;z-index:40;
+  border-bottom:1px solid var(--line);background:rgba(8, 26, 36, 0.78);
+  backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);
+  box-shadow:0 4px 24px rgba(0,20,30,0.35)}
+.brand-wrap{display:flex;align-items:center;gap:8px}
+h1{font-size:16px;font-weight:700;margin:0;letter-spacing:-0.3px;
+  background:linear-gradient(135deg, #ffffff 0%, #a7f3d0 60%, #67e8f9 100%);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.badge-jesee{font-size:11px;font-weight:600;padding:2px 8px;border-radius:9999px;
+  background:linear-gradient(135deg, rgba(6,182,212,0.24), rgba(52,211,153,0.24));
+  color:#67e8f9;border:1px solid rgba(6,182,212,0.45);
+  box-shadow:0 0 14px rgba(6,182,212,0.25);letter-spacing:0.3px}
+.author-banner{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--dim);
+  padding:3px 10px;border-radius:9999px;background:rgba(255,255,255,0.06);
+  border:1px solid rgba(255,255,255,0.12);backdrop-filter:blur(10px)}
+.author-banner a{color:var(--text);text-decoration:none;font-weight:600}
+.author-banner a:hover{color:var(--accent)}
+.dot-sep{opacity:0.3}
 .spacer{flex:1}
-button{font:inherit;color:var(--text);background:#222833;border:1px solid var(--line);
-  border-radius:4px;padding:4px 10px;cursor:pointer;display:inline-flex;
-  align-items:center;gap:5px;white-space:nowrap;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+button{font:inherit;color:var(--text);background:rgba(255, 255, 255, 0.08);
+  border:1px solid rgba(255, 255, 255, 0.14);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  border-radius:9999px;padding:5px 12px;cursor:pointer;display:inline-flex;
+  align-items:center;gap:6px;white-space:nowrap;touch-action:manipulation;
+  box-shadow:0 2px 6px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.14);
+  transition:all .18s cubic-bezier(0.16, 1, 0.3, 1)}
 button, a, input, select, textarea, [data-rg], [data-close], [data-detail], [data-cred],
 [data-stop], [data-swap], [data-job], [data-del], [data-delone], [data-delclient],
 [data-resetclient], [data-togglejobfailed], [data-cleanjobfailed], .chip, .rg, .step, .btn-xs {
   cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
-button:hover:not(:disabled){border-color:var(--accent)}
-button:disabled{opacity:.45;cursor:default}
-button.primary{background:var(--accent);border-color:var(--accent);color:#0b0e12;font-weight:600}
-button.icon{padding:3px 6px;background:transparent;border-color:transparent;color:var(--dim)}
-button.icon:hover:not(:disabled){color:var(--accent);border-color:var(--line)}
-button.icon.danger:hover:not(:disabled){color:var(--bad);border-color:rgba(194,84,80,.35)}
+button:hover:not(:disabled){background:rgba(255, 255, 255, 0.15);border-color:rgba(255, 255, 255, 0.28);
+  color:#fff;transform:translateY(-1px);box-shadow:0 4px 14px rgba(0,0,0,0.25)}
+button:active:not(:disabled){transform:translateY(0);background:rgba(255,255,255,0.06)}
+button:disabled{opacity:.4;cursor:default}
+button.primary{background:linear-gradient(135deg, #06b6d4 0%, #059669 100%);
+  border-color:rgba(255,255,255,0.25);color:#ffffff;font-weight:600;
+  box-shadow:0 4px 18px rgba(6,182,212,0.42), inset 0 1px 0 rgba(255,255,255,0.35)}
+button.primary:hover:not(:disabled){background:linear-gradient(135deg, #22d3ee 0%, #10b981 100%);
+  box-shadow:0 6px 24px rgba(6,182,212,0.6);border-color:rgba(255,255,255,0.4)}
+button.icon{padding:5px 8px;background:rgba(255,255,255,0.05);border-color:transparent;color:var(--dim)}
+button.icon:hover:not(:disabled){color:#fff;background:rgba(255,255,255,0.12);border-color:rgba(255,255,255,0.18)}
+button.icon.danger:hover:not(:disabled){color:var(--bad);background:rgba(244,63,94,0.15);border-color:rgba(244,63,94,0.3)}
 svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.8;
   stroke-linecap:round;stroke-linejoin:round;flex:none}
-main{padding:14px 16px 40px;max-width:1180px;margin:0 auto}
-.bar{display:flex;align-items:center;gap:10px;margin-bottom:12px}
-.bar h2{font-size:12px;margin:0;font-weight:600;color:var(--dim)}
-.exit{border:1px solid var(--line);border-radius:6px;margin-bottom:8px;
-  background:var(--panel);overflow:hidden}
-.exit>.row{display:grid;gap:6px 12px;align-items:center;padding:9px 12px;
+main{padding:18px 20px 48px;max-width:1200px;margin:0 auto}
+.bar{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.bar h2{font-size:13px;margin:0;font-weight:600;color:var(--dim);letter-spacing:0.2px}
+.exit{border:1px solid rgba(255, 255, 255, 0.12);border-top:1px solid rgba(255, 255, 255, 0.28);
+  border-radius:14px;margin-bottom:10px;background:rgba(9, 28, 38, 0.58);
+  backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);
+  box-shadow:var(--glass-shadow);overflow:hidden;
+  transition:all .2s cubic-bezier(0.16, 1, 0.3, 1)}
+.exit:hover{transform:translateY(-1px);border-color:rgba(6, 182, 212, 0.4);
+  box-shadow:0 18px 40px -4px rgba(0, 20, 30, 0.65), inset 0 1px 1px rgba(255, 255, 255, 0.25)}
+.exit>.row{display:grid;gap:8px 14px;align-items:center;padding:11px 16px;
   grid-template-columns:14px auto 1fr auto auto auto;
   grid-template-areas:"dot ip meta chips socks acts"}
 .exit .dot{grid-area:dot}
-.exit .ip{grid-area:ip;display:flex;align-items:center;flex-wrap:wrap;gap:4px}
+.exit .ip{grid-area:ip;display:flex;align-items:center;flex-wrap:wrap;gap:6px}
 .exit .meta{grid-area:meta}
 .exit .chips{grid-area:chips}
 .exit .socks{grid-area:socks}
 .exit .acts{grid-area:acts}
-.tag-res{background:rgba(63,166,107,.18);color:#3fa66b;border:1px solid rgba(63,166,107,.4);border-radius:3px;padding:1px 5px;font-size:11px;font-weight:600}
-.tag-host{background:rgba(74,158,218,.18);color:#4a9eda;border:1px solid rgba(74,158,218,.4);border-radius:3px;padding:1px 5px;font-size:11px;font-weight:600}
-.tag-mob{background:rgba(201,144,58,.18);color:#c9903a;border:1px solid rgba(201,144,58,.4);border-radius:3px;padding:1px 5px;font-size:11px;font-weight:600}
-.tag-purity{font-size:11px;font-weight:600;padding:1px 5px;border-radius:3px;background:#0e1116;border:1px solid var(--line)}
-.stats-summary{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
-.stat-pill{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:3px 9px;font-size:12px;color:var(--dim)}
-.stat-pill b{color:var(--text);margin-left:4px}
-.dot{width:8px;height:8px;border-radius:50%;background:var(--dim);justify-self:center}
-.dot.up{background:var(--ok)}
-.dot.starting{background:var(--warn);animation:pulse 1.2s ease-in-out infinite}
-.dot.failed{background:var(--bad)}
+.tag-res{background:linear-gradient(135deg,rgba(48,209,88,0.18),rgba(52,199,89,0.18));color:#30d158;
+  border:1px solid rgba(48,209,88,0.45);border-radius:9999px;padding:2px 7px;font-size:11px;font-weight:600;
+  box-shadow:0 0 10px rgba(48,209,88,0.15)}
+.tag-host{background:linear-gradient(135deg,rgba(10,132,255,0.18),rgba(0,122,255,0.18));color:#70b8ff;
+  border:1px solid rgba(10,132,255,0.45);border-radius:9999px;padding:2px 7px;font-size:11px;font-weight:600}
+.tag-purity{font-size:11px;font-weight:600;padding:2px 7px;border-radius:9999px;
+  background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12)}
+.tag-gov{background:linear-gradient(135deg,rgba(255,214,10,0.18),rgba(255,159,10,0.18));color:#ffd60a;
+  border:1px solid rgba(255,214,10,0.45);border-radius:9999px;padding:2px 7px;font-size:11px;font-weight:600;
+  box-shadow:0 0 12px rgba(255,214,10,0.18)}
+.tag-edu{background:linear-gradient(135deg,rgba(191,90,242,0.18),rgba(175,82,222,0.18));color:#d075ff;
+  border:1px solid rgba(191,90,242,0.45);border-radius:9999px;padding:2px 7px;font-size:11px;font-weight:600;
+  box-shadow:0 0 12px rgba(191,90,242,0.18)}
+.stats-summary{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.stat-pill{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.09);
+  border-radius:9999px;padding:4px 12px;font-size:12px;color:var(--dim);
+  backdrop-filter:blur(10px);box-shadow:0 2px 8px rgba(0,0,0,0.18)}
+.stat-pill b{color:var(--text);margin-left:5px}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--dim);justify-self:center;box-shadow:0 0 6px currentColor}
+.dot.up{background:var(--ok);color:var(--ok);box-shadow:0 0 10px rgba(48,209,88,0.6)}
+.dot.starting{background:var(--warn);color:var(--warn);box-shadow:0 0 10px rgba(255,214,10,0.6);animation:pulse 1.2s ease-in-out infinite}
+.dot.failed{background:var(--bad);color:var(--bad);box-shadow:0 0 10px rgba(255,69,58,0.6)}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
-.ip{font-weight:600;font-variant-numeric:tabular-nums}
+.ip{font-weight:600;font-variant-numeric:tabular-nums;font-family:var(--mono-font);letter-spacing:-0.2px}
 .meta{color:var(--dim);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chips{display:flex;gap:6px;flex-wrap:wrap}
-.chip{border:1px solid var(--line);border-radius:3px;padding:1px 7px;font-size:11px;
-  color:var(--dim);cursor:pointer;background:#0e1116}
-.chip:hover{border-color:var(--accent);color:var(--text)}
-.chip-item{display:inline-flex;align-items:center;background:#202632;border:1px solid var(--line);border-radius:4px;overflow:hidden}
-.chip-item .chip{border:none;border-radius:0;background:transparent;padding:1px 6px}
-.chip-item .chip:hover{background:#2a3242}
-.chip-item .chip-select{border:none;border-left:1px solid var(--line);background:#161a22;color:var(--dim);font-size:11px;padding:2px 5px;cursor:pointer;outline:none}
-.chip-item .chip-select:hover{color:var(--text);background:#222834}
+.chip{border:1px solid rgba(255,255,255,0.12);border-radius:9999px;padding:2px 8px;font-size:11px;
+  color:var(--dim);cursor:pointer;background:rgba(255,255,255,0.04);backdrop-filter:blur(6px);
+  transition:all .15s ease}
+.chip:hover{border-color:var(--accent);color:#fff;background:rgba(10,132,255,0.15)}
+.chip-item{display:inline-flex;align-items:center;background:rgba(255,255,255,0.06);
+  border:1px solid rgba(255,255,255,0.12);border-radius:9999px;overflow:hidden}
+.chip-item .chip{border:none;border-radius:0;background:transparent;padding:2px 7px}
+.chip-item .chip:hover{background:rgba(255,255,255,0.1)}
+.chip-item .chip-select{border:none;border-left:1px solid rgba(255,255,255,0.1);background:transparent;
+  color:var(--dim);font-size:11px;padding:2px 6px;cursor:pointer;outline:none}
+.chip-item .chip-select:hover{color:#fff;background:rgba(255,255,255,0.12)}
 .chip.none{border-style:dashed;cursor:default}
 .chip.none:hover{border-color:var(--line);color:var(--dim)}
-.orphan{margin-top:18px;border:1px solid var(--line);border-radius:6px;
-  background:var(--panel);padding:10px 12px}
+.orphan{margin-top:20px;border:1px solid rgba(255,255,255,0.10);border-radius:14px;
+  background:rgba(22, 29, 44, 0.55);padding:12px 16px;backdrop-filter:var(--glass-blur)}
 .orphan .top{display:flex;align-items:center;gap:10px;margin-bottom:8px}
 .orphan .top h3{font-size:12px;margin:0;font-weight:600;color:var(--dim)}
-.socks{color:var(--dim);font-size:12px;font-variant-numeric:tabular-nums}
+.socks{color:var(--dim);font-size:12px;font-variant-numeric:tabular-nums;font-family:var(--mono-font)}
 .socks button{background:transparent;border-color:transparent;color:var(--dim);
-  font-size:12px;padding:2px 6px;font-variant-numeric:tabular-nums}
-.socks button:hover:not(:disabled){color:var(--accent);border-color:var(--line)}
+  font-size:12px;padding:3px 8px;font-variant-numeric:tabular-nums;box-shadow:none}
+.socks button:hover:not(:disabled){color:#fff;background:rgba(255,255,255,0.08);border-color:rgba(255,255,255,0.15)}
 .socks button .lock{width:11px;height:11px;stroke-width:2}
-.acts{display:flex;gap:2px;justify-self:end}
-.errline{padding:0 12px 9px 38px;color:var(--bad);font-size:11px;
+.acts{display:flex;gap:4px;justify-self:end}
+.errline{padding:0 16px 10px 42px;color:var(--bad);font-size:11px;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.empty{border:1px dashed var(--line);border-radius:6px;padding:40px 20px;
-  text-align:center;color:var(--dim)}
-.empty button{margin-top:14px}
-.jobs{margin-bottom:12px}
-.job{border:1px solid var(--line);border-radius:6px;background:var(--panel);
-  padding:10px 12px;margin-bottom:8px}
+.empty{border:1px dashed rgba(255,255,255,0.15);border-radius:14px;padding:48px 24px;
+  text-align:center;color:var(--dim);background:rgba(255,255,255,0.02)}
+.empty button{margin-top:16px}
+.jobs{margin-bottom:14px}
+.job{border:1px solid rgba(255,255,255,0.10);border-radius:12px;background:rgba(22, 29, 44, 0.55);
+  padding:12px 14px;margin-bottom:10px;backdrop-filter:var(--glass-blur)}
 .job .top{display:flex;align-items:center;gap:10px;margin-bottom:8px}
 .job .top strong{font-weight:600;font-size:12px}
 .steps{display:flex;flex-wrap:wrap;gap:6px}
 .step{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--dim);
-  border:1px solid var(--line);border-radius:3px;padding:2px 7px;background:#0e1116}
-.step.ok{color:var(--ok);border-color:rgba(63,166,107,.35)}
-.step.failed{color:var(--bad);border-color:rgba(194,84,80,.35)}
-.step.running{color:var(--warn);border-color:rgba(201,144,58,.35)}
+  border:1px solid rgba(255,255,255,0.1);border-radius:9999px;padding:3px 8px;background:rgba(255,255,255,0.04)}
+.step.ok{color:var(--ok);border-color:rgba(48,209,88,.4);background:rgba(48,209,88,.1)}
+.step.failed{color:var(--bad);border-color:rgba(255,69,58,.4);background:rgba(255,69,58,.1)}
+.step.running{color:var(--warn);border-color:rgba(255,214,10,.4);background:rgba(255,214,10,.1)}
 .spin{animation:rot 1s linear infinite;transform-origin:center}
 @keyframes rot{to{transform:rotate(360deg)}}
 .jobs-bar{display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:12px;color:var(--dim)}
-.btn-xs{font-size:11px;padding:3px 8px;border-radius:4px;background:#141820;border:1px solid var(--line);color:var(--dim);cursor:pointer;display:inline-flex;align-items:center;gap:4px}
-.btn-xs:hover{color:var(--text);border-color:var(--accent)}
+.btn-xs{font-size:11px;padding:3px 9px;border-radius:9999px;background:rgba(255,255,255,0.05);
+  border:1px solid rgba(255,255,255,0.1);color:var(--dim);cursor:pointer;display:inline-flex;align-items:center;gap:4px}
+.btn-xs:hover{color:#fff;border-color:rgba(255,255,255,0.25);background:rgba(255,255,255,0.1)}
 .btn-xs.danger{color:var(--bad)}
-.btn-xs.danger:hover{border-color:var(--bad)}
+.btn-xs.danger:hover{border-color:var(--bad);background:rgba(255,69,58,0.15)}
 .step.failed-summary{cursor:pointer;border-style:dashed}
-.step.failed-summary:hover{background:rgba(194,84,80,.1)}
-.failed-steps-wrap{width:100%;margin-top:6px;padding-top:6px;border-top:1px dashed var(--line);display:none}
+.step.failed-summary:hover{background:rgba(255,69,58,.15)}
+.failed-steps-wrap{width:100%;margin-top:8px;padding-top:8px;border-top:1px dashed rgba(255,255,255,0.1);display:none}
 .failed-steps-wrap.open{display:flex;flex-wrap:wrap;gap:6px}
 .links{display:flex;gap:14px;margin-right:4px}
-.links a{color:var(--dim);text-decoration:none;font-size:12px}
+.links a{color:var(--dim);text-decoration:none;font-size:12px;transition:color .15s}
 .links a:hover{color:var(--accent)}
-@media(max-width:820px){.links{display:none}
-  main{padding:12px 12px 40px}
+@media(max-width:860px){.links, .author-banner{display:none}
+  main{padding:12px 14px 40px}
   .exit>.row{grid-template-columns:14px 1fr auto;
     grid-template-areas:"dot ip acts" ". meta meta" ". socks socks" ". chips chips"}
   .exit .chips{margin-top:2px}
   .bar{flex-wrap:wrap}}
-.modal{position:fixed;inset:0;background:rgba(8,10,14,.72);display:none;
-  align-items:center;justify-content:center;z-index:50;padding:20px}
+.modal{position:fixed;inset:0;background:rgba(5, 7, 12, 0.65);
+  backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);
+  display:none;align-items:center;justify-content:center;z-index:50;padding:20px}
 .modal.open{display:flex}
-.sheet{background:var(--bg);border:1px solid var(--line);border-radius:6px;
-  width:min(680px,100%);max-height:86vh;display:flex;flex-direction:column}
-.sheet .head{display:flex;align-items:center;gap:10px;padding:10px 14px;
-  border-bottom:1px solid var(--line);background:var(--panel);border-radius:6px 6px 0 0}
-.sheet .head h2{font-size:12px;margin:0;font-weight:600}
-.sheet .body{overflow:auto;padding:14px}
-.sheet .foot{display:flex;align-items:center;gap:10px;padding:10px 14px;
-  border-top:1px solid var(--line);background:var(--panel);border-radius:0 0 6px 6px}
+.sheet{background:rgba(8, 25, 36, 0.90);
+  backdrop-filter:blur(36px) saturate(200%);-webkit-backdrop-filter:blur(36px) saturate(200%);
+  border:1px solid rgba(255, 255, 255, 0.16);border-top:1px solid rgba(255, 255, 255, 0.35);
+  border-radius:20px;width:min(700px,100%);max-height:86vh;display:flex;flex-direction:column;
+  box-shadow:0 32px 70px rgba(0,20,30,0.7), inset 0 1px 1px rgba(255,255,255,0.22);
+  animation:popIn .2s cubic-bezier(0.16, 1, 0.3, 1)}
+@keyframes popIn{from{opacity:0;transform:scale(0.96) translateY(8px)}to{opacity:1;transform:scale(1) translateY(0)}}
+.sheet .head{display:flex;align-items:center;gap:10px;padding:14px 18px;
+  border-bottom:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.03);border-radius:20px 20px 0 0}
+.sheet .head h2{font-size:13px;margin:0;font-weight:600}
+.sheet .body{overflow:auto;padding:16px 18px}
+.sheet .foot{display:flex;align-items:center;gap:10px;padding:12px 18px;
+  border-top:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.02);border-radius:0 0 20px 20px}
 .count{color:var(--dim);font-size:11px}
 label.f{display:block;margin-bottom:16px}
 label.f[hidden]{display:none}
 label.f>span{display:block;color:var(--dim);font-size:11px;margin-bottom:6px}
 .regions{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));
-  gap:6px;max-height:224px;overflow:auto}
-.rg{border:1px solid var(--line);background:#0e1116;border-radius:4px;padding:7px 9px;
-  cursor:pointer;text-align:left;display:block;width:100%}
-.rg:hover{border-color:var(--accent)}
-.rg.sel{border-color:var(--accent);background:rgba(74,158,218,.1)}
+  gap:8px;max-height:230px;overflow:auto}
+.rg{border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);border-radius:10px;padding:8px 10px;
+  cursor:pointer;text-align:left;display:block;width:100%;transition:all .15s ease}
+.rg:hover{border-color:rgba(255,255,255,0.25);background:rgba(255,255,255,0.08)}
+.rg.sel{border-color:var(--accent);background:rgba(10,132,255,0.15);box-shadow:0 0 12px rgba(10,132,255,0.25)}
 .rg b{font-weight:600;font-size:12px;display:block;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap}
-.rg em{display:block;font-style:normal;color:var(--dim);font-size:11px;margin-top:2px}
+.rg em{display:block;font-style:normal;color:var(--dim);font-size:11px;margin-top:3px}
 .stepper{display:flex;align-items:center;gap:0;width:fit-content;
-  border:1px solid var(--line);border-radius:4px;overflow:hidden;background:#0e1116}
-.stepper button{border:0;border-radius:0;background:transparent;padding:5px 11px}
-select,input[type=search],input[type=text],input[type=password],textarea{font:inherit;background:#0e1116;
-  border:1px solid var(--line);color:var(--text);-webkit-text-fill-color:var(--text);opacity:1;border-radius:4px;
-  padding:5px 8px;width:100%}
-select:focus,input[type=search]:focus,input[type=text]:focus,input[type=password]:focus,textarea:focus{outline:none;border-color:var(--accent)}
+  border:1px solid rgba(255,255,255,0.12);border-radius:9999px;overflow:hidden;background:rgba(255,255,255,0.04)}
+.stepper button{border:0;border-radius:0;background:transparent;padding:6px 12px;box-shadow:none}
+select,input[type=search],input[type=text],input[type=password],textarea{font:inherit;background:rgba(12, 16, 24, 0.65);
+  border:1px solid rgba(255,255,255,0.12);color:var(--text);-webkit-text-fill-color:var(--text);opacity:1;border-radius:10px;
+  padding:7px 10px;width:100%;backdrop-filter:blur(8px);transition:border-color .15s}
+select:focus,input[type=search]:focus,input[type=text]:focus,input[type=password]:focus,textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(10,132,255,0.25)}
 .stepper input[type=text]{width:56px;text-align:center;font:inherit;background:transparent;
-  border:0;border-left:1px solid var(--line);border-right:1px solid var(--line);
+  border:0;border-left:1px solid rgba(255,255,255,0.1);border-right:1px solid rgba(255,255,255,0.1);
   color:var(--text);-webkit-text-fill-color:var(--text);opacity:1;padding:5px 0;font-variant-numeric:tabular-nums}
-.stepper input:focus{outline:none}
+.stepper input:focus{outline:none;box-shadow:none}
 .hint{color:var(--dim);font-size:11px;margin-top:6px}
 .setrow{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px}
 .setrow input,.setrow select{width:100%}
-.updsec{margin-top:18px;padding-top:14px;border-top:1px solid var(--line)}
+.updsec{margin-top:18px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.1)}
 .updrow{display:flex;align-items:center;gap:10px}
 .updver{font-size:12px;color:var(--text)}
 .updver b{font-weight:600}
 .updver span{color:var(--dim);margin-left:8px}
-.updnotes{margin-top:10px;padding:10px;background:#0e1116;border:1px solid var(--line);
-  border-radius:4px;font-size:12px;line-height:1.6;color:var(--dim);white-space:pre-wrap;
+.updnotes{margin-top:10px;padding:12px;background:rgba(10,14,22,0.6);border:1px solid rgba(255,255,255,0.1);
+  border-radius:10px;font-size:12px;line-height:1.6;color:var(--dim);white-space:pre-wrap;
   max-height:180px;overflow:auto}
 label.chk{display:flex;align-items:center;gap:7px;color:var(--text);font-size:12px;
   cursor:pointer;margin:0}
@@ -182,19 +269,19 @@ label.chk input{margin:0}
 .kv{display:grid;grid-template-columns:76px 1fr;gap:5px 12px;margin:0 0 14px}
 .kv dt{color:var(--dim)}
 .kv dd{margin:0;word-break:break-all}
-.share{padding:10px;background:#0e1116;border:1px solid var(--line);
-  border-radius:4px;word-break:break-all;font-size:12px;line-height:1.7;margin-bottom:8px}
+.share{padding:12px;background:rgba(10,14,22,0.65);border:1px solid rgba(255,255,255,0.1);
+  border-radius:10px;word-break:break-all;font-size:12px;line-height:1.7;margin-bottom:8px}
 .editbar{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;
-  padding:12px 0;border-top:1px solid var(--line);margin-top:4px}
+  padding:12px 0;border-top:1px solid rgba(255,255,255,0.1);margin-top:4px}
 .ef{display:block}
 .ef>span{display:block;color:var(--dim);font-size:11px;margin-bottom:4px}
 .ef input{width:150px}
 .credrow{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-bottom:10px}
 .credrow .ef input{width:190px}
 .chead{display:flex;align-items:center;gap:10px;margin:14px 0 8px;
-  padding-top:12px;border-top:1px solid var(--line)}
+  padding-top:12px;border-top:1px solid rgba(255,255,255,0.1)}
 .chead h3{font-size:12px;margin:0;font-weight:600;color:var(--dim)}
-.client{border:1px solid var(--line);border-radius:4px;padding:8px 10px;margin-bottom:8px}
+.client{border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:10px 12px;margin-bottom:8px;background:rgba(255,255,255,0.03)}
 .orow{display:flex;align-items:center;gap:10px;padding:6px 0}
 .orow select{width:200px}
 .crow{display:flex;align-items:center;gap:10px}
@@ -203,31 +290,40 @@ label.chk input{margin:0}
   white-space:nowrap;max-width:280px}
 .client .share{margin:8px 0 0}
 .share button{margin-top:8px}
-textarea{width:100%;min-height:300px;background:#0e1116;border:1px solid var(--line);
-  color:var(--text);border-radius:4px;
-  font:12px/1.8 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+textarea{width:100%;min-height:300px;background:rgba(10,14,22,0.65);border:1px solid rgba(255,255,255,0.12);
+  color:var(--text);border-radius:10px;
+  font:12px/1.8 var(--mono-font);
   padding:10px 12px;resize:vertical}
 textarea:focus{outline:none;border-color:var(--accent)}
-.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);
-  background:var(--panel);border:1px solid var(--line);border-radius:4px;
-  padding:8px 14px;font-size:12px;z-index:80;opacity:0;pointer-events:none;
-  transition:opacity .18s}
-.toast.show{opacity:1}
-.toast.bad{border-color:rgba(194,84,80,.5);color:var(--bad)}
+.toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);
+  background:rgba(20,27,40,0.92);border:1px solid rgba(255,255,255,0.16);border-radius:9999px;
+  backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);box-shadow:0 12px 32px rgba(0,0,0,0.5);
+  padding:9px 18px;font-size:12px;z-index:80;opacity:0;pointer-events:none;
+  transition:all .2s cubic-bezier(0.16, 1, 0.3, 1)}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(-4px)}
+.toast.bad{border-color:rgba(255,69,58,.5);color:var(--bad)}
 </style>
 </head>
 <body>
 <header>
-  <h1>fanout</h1>
+  <div class="brand-wrap">
+    <h1>fanout</h1>
+    <span class="badge-jesee">Jesee 魔改旗舰版</span>
+  </div>
   <span class="count" id="panel"></span>
   <span class="spacer"></span>
+  <div class="author-banner">
+    <span>原作者: <a href="https://github.com/byJoey/fanout" target="_blank" rel="noopener">Joey</a></span>
+    <span class="dot-sep">·</span>
+    <span style="color:#70b8ff">魔改升级: Jesee</span>
+  </div>
   <button class="icon" id="settingsBtn" title="设置">
     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
   </button>
   <nav class="links">
     <a href="https://t.me/+ft-zI76oovgwNmRh" target="_blank" rel="noopener">交流群</a>
-    <a href="https://youtube.com/@joeyblog" target="_blank" rel="noopener">油管</a>
-    <a href="https://joeyblog.net" target="_blank" rel="noopener">博客</a>
+    <a href="https://youtube.com/@joeyblog" target="_blank" rel="noopener">Joey油管</a>
+    <a href="https://joeyblog.net" target="_blank" rel="noopener">Joey博客</a>
     <a href="https://github.com/byJoey/fanout" target="_blank" rel="noopener">GitHub</a>
   </nav>
 </header>
@@ -267,6 +363,10 @@ textarea:focus{outline:none;border-color:var(--accent)}
       <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><path d="M11 8v6M8 11h6"/></svg>
       测活扫节点
     </button>
+    <button class="primary" id="autoOrchestrateBtn" title="全网智能编排：热门国家各维持 3 个健康出口，冷门国家各维持 1 个，自动发现、失效同国轮换与自愈" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);border-color:#818cf8;color:#fff;font-weight:600">
+      <svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+      智能编排
+    </button>
     <button class="primary" id="newexit">
       <svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
       新建出口
@@ -294,10 +394,11 @@ textarea:focus{outline:none;border-color:var(--accent)}
           <span style="font-size:12px;color:var(--dim)">自由选择单独源或全部聚合</span>
         </div>
         <select id="wzSource" style="padding:8px 10px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--text);font-size:13px;width:100%">
-          <option value="all">🌐 全部聚合源 (全网数万节点 · 智能优选)</option>
-          <option value="vpngate">🇯🇵 日本筑波大学 (VPN Gate 官方与镜像源)</option>
-          <option value="edu">🎓 海外高校学术科研网 (日本筑波/韩国/台湾/欧美名校 · 不含国内)</option>
-          <option value="proxy">🌍 全网公网开源代理池 (数十万全球开源代理)</option>
+          <option value="all">🌐 官方与镜像优质节点 (全量家宽/高校/政府 · 自动优选)</option>
+          <option value="vpngate">🇯🇵 日本筑波大学 (官方与高防镜像源)</option>
+          <option value="gov">🏛️ 全球政府公共机构网 (政府自治体/公共政务专网)</option>
+          <option value="edu">🎓 海外高校学术科研网 (日本筑波/韩国/台湾/欧美名校)</option>
+          <option value="residential">🏡 住宅家宽原生节点 (纯净高分 · 极速防封)</option>
           <option value="custom">📁 本地导入与自定义节点 (.ovpn / 自建)</option>
         </select>
       </label>
@@ -553,6 +654,11 @@ textarea:focus{outline:none;border-color:var(--accent)}
           <button id="updCheck">检查更新</button>
           <button class="primary" id="updApply" hidden>更新到 <span id="updApplyVer"></span></button>
         </div>
+        <div style="margin-top:12px;padding:12px 14px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:12px;font-size:12px;color:var(--dim);line-height:1.6">
+          <div style="font-weight:600;color:var(--text);margin-bottom:4px">🌟 项目致谢与开发信息</div>
+          <div>原版架构与作者：<b>Joey</b>（<a href="https://youtube.com/@joeyblog" target="_blank" rel="noopener" style="color:var(--accent)">@joeyblog</a> / <a href="https://github.com/byJoey/fanout" target="_blank" rel="noopener" style="color:var(--accent)">GitHub</a>）</div>
+          <div>深度魔改升级版：<b style="color:#70b8ff">Jesee</b>（独家：10秒同国自愈轮换、全网智能编排、纯净住宅/政府专网原生支持、苹果液态玻璃 UI）</div>
+        </div>
         <div class="updnotes" id="updNotes" hidden></div>
       </div>
     </div>
@@ -598,18 +704,18 @@ textarea:focus{outline:none;border-color:var(--accent)}
       </div>
 
       <div style="margin-bottom:16px">
-        <h3 style="margin-bottom:8px;font-size:14px">全网多源节点池（全网数十万节点 + 日本筑波大学 + 海外高校学术网）</h3>
+        <h3 style="margin-bottom:8px;font-size:14px">优质节点池（日本筑波大学官方/镜像 + 海外高校学术科研网 + 住宅家宽原生）</h3>
         <div style="font-size:12px;color:var(--dim);line-height:1.6;background:var(--card-bg);padding:10px;border-radius:6px;border:1px solid var(--border);margin-bottom:8px">
-          <div>• <b>日本筑波大学官方及全量容灾镜像池</b>：150.40.105.19 / 119.195.163.98 等 15+ 镜像并发聚合</div>
-          <div>• <b>全网开源公开代理库 (200,000+ 节点)</b>：30+ 全球高质量开源代理源与 API 极速聚合</div>
-          <div>• <b>海外高校学术科研网专项</b>：日本 (SINET/筑波) / 韩国 (KOREN) / 台湾 (TANet) / 欧美等名校学术专网（不含国内）</div>
+          <div>• <b>日本筑波大学官方及全量高防镜像池</b>：150.40.105.19 / 119.195.163.98 等多镜像并发聚合</div>
+          <div>• <b>海外高校学术科研网专项</b>：日本 (SINET/筑波) / 韩国 (KOREN) / 台湾 (TANet) / 欧美名校学术专网（不含国内）</div>
+          <div>• <b>住宅家宽原生优质 IP</b>：纯净家庭宽带与移动网络原生节点，低风控、极速防封</div>
           <div>• <b>全自动容灾与并发测速</b>：自动并发拉取、剔除不可用死节点、按纯净度与网络速度降序排序</div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="primary" id="refreshMirrors" data-src="all">🔄 刷新全部源 (全网海量节点)</button>
+          <button class="primary" id="refreshMirrors" data-src="all">🔄 刷新全部优质源</button>
           <button id="refreshVpnGate" data-src="vpngate">🇯🇵 仅拉取筑波大学源</button>
           <button id="refreshEdu" data-src="edu">🎓 仅拉取海外学术网</button>
-          <button id="refreshProxy" data-src="proxy">🌍 仅拉取全网代理池</button>
+          <button id="refreshResidential" data-src="residential">🏡 仅拉取住宅家宽源</button>
         </div>
       </div>
 
@@ -722,10 +828,11 @@ textarea:focus{outline:none;border-color:var(--accent)}
         <div style="display:flex;flex-direction:column;gap:4px">
           <span style="font-size:11px;color:var(--dim)">扫描来源</span>
           <select id="lsSource" style="padding:6px 8px;font-size:12px;min-width:140px;background:#0e1116;border:1px solid var(--line);color:var(--text);border-radius:4px">
-            <option value="all">🌐 全部候选源 (全网并发实测)</option>
-            <option value="edu" selected>🎓 海外高校学术网 (日本筑波/韩国/台湾/欧美 · 不含国内)</option>
+            <option value="all">🌐 全部优质源 (全量并发实测)</option>
+            <option value="gov">🏛️ 全球政府公共机构网 (政务专网)</option>
+            <option value="edu" selected>🎓 海外高校学术网 (日本筑波/韩国/台湾/欧美)</option>
             <option value="vpngate">🇯🇵 日本筑波大学 (VPN Gate)</option>
-            <option value="proxy">🌍 全网公网代理池 (数十万源)</option>
+            <option value="residential">🏡 住宅家宽原生节点</option>
             <option value="custom">📁 本地自定义节点</option>
           </select>
         </div>
@@ -923,6 +1030,7 @@ const STATUS = {up:'已连通', starting:'连接中', failed:'失败', stopped:'
 function getFlagEmoji(countryCode) {
   if (!countryCode) return '🌐';
   const code = countryCode.toUpperCase();
+  if (code === 'GOV') return '🏛️';
   if (code === 'EDU') return '🎓';
   if (code === 'CUSTOM' || code === 'GLOBAL') return '🌐';
   if (code.length !== 2) return '🌐';
@@ -935,19 +1043,37 @@ function getFlagEmoji(countryCode) {
 }
 
 const COUNTRY_ZH = {
-  EDU: '海外高校学术网络', GLOBAL: '全球公网',
-  JP: '日本', KR: '韩国', US: '美国', RU: '俄罗斯', VN: '越南',
-  IN: '印度', MV: '马尔代夫', TH: '泰国', HK: '中国香港', TW: '中国台湾',
-  SG: '新加坡', GB: '英国', DE: '德国', FR: '法国', CA: '加拿大',
-  AU: '澳大利亚', NL: '荷兰', MY: '马来西亚', PH: '菲律宾', ID: '印尼',
-  UA: '乌克兰', BR: '巴西', TR: '土耳其', PL: '波兰', SE: '瑞典',
-  NO: '挪威', FI: '芬兰', ES: '西班牙', IT: '意大利', CH: '瑞士',
-  RO: '罗马尼亚', BG: '保加利亚', CZ: '捷克', HU: '匈牙利', AT: '奥地利',
-  CUSTOM: '自定义'
+  GOV: '政府公共网络', EDU: '海外高校学术网络', GLOBAL: '全球公网', CUSTOM: '自定义',
+  // 亚太地区
+  JP: '日本', KR: '韩国', HK: '中国香港', TW: '中国台湾', SG: '新加坡',
+  MY: '马来西亚', TH: '泰国', VN: '越南', PH: '菲律宾', ID: '印尼',
+  IN: '印度', AU: '澳大利亚', NZ: '新西兰', MO: '中国澳门', KH: '柬埔寨',
+  LA: '老挝', MM: '缅甸', BD: '孟加拉', PK: '巴基斯坦', LK: '斯里兰卡',
+  NP: '尼泊尔', MV: '马尔代夫', MN: '蒙古',
+  // 美洲地区
+  US: '美国', CA: '加拿大', BR: '巴西', MX: '墨西哥', AR: '阿根廷',
+  CL: '智利', CO: '哥伦比亚', PE: '秘鲁', CR: '哥斯达黎加', PA: '巴拿马',
+  UY: '乌拉圭', EC: '厄瓜多尔', VE: '委内瑞拉', BO: '玻利维亚', PY: '巴拉圭',
+  DO: '多米尼加', JM: '牙买加', TT: '特立尼达和多巴哥', BS: '巴哈马',
+  // 欧洲地区
+  GB: '英国', DE: '德国', FR: '法国', NL: '荷兰', IT: '意大利',
+  ES: '西班牙', CH: '瑞士', SE: '瑞典', NO: '挪威', FI: '芬兰',
+  DK: '丹麦', IE: '爱尔兰', BE: '比利时', AT: '奥地利', PL: '波兰',
+  CZ: '捷克', HU: '匈牙利', PT: '葡萄牙', GR: '希腊', RO: '罗马尼亚',
+  BG: '保加利亚', UA: '乌克兰', RU: '俄罗斯', TR: '土耳其', IS: '冰岛',
+  LU: '卢森堡', EE: '爱沙尼亚', LV: '拉脱维亚', LT: '立陶宛', HR: '克罗地亚',
+  RS: '塞尔维亚', SI: '斯洛文尼亚', SK: '斯洛伐克', CY: '塞浦路斯', MT: '马耳他',
+  MD: '摩尔多瓦', BY: '白俄罗斯', GE: '格鲁吉亚', AM: '亚美尼亚', AZ: '阿塞拜疆',
+  // 中东与中亚
+  AE: '阿联酋', SA: '沙特阿拉伯', IL: '以色列', KZ: '哈萨克斯坦', UZ: '乌兹别克斯坦',
+  // 非洲地区
+  ZA: '南非', EG: '埃及', MA: '摩洛哥', DZ: '阿尔及利亚', TN: '突尼斯',
+  NG: '尼日利亚', KE: '肯尼亚', GH: '加纳'
 };
 
 function formatCountry(code, name) {
   if (!code || code === 'CUSTOM') return '🌐 ' + (name || '自定义');
+  if (code === 'GOV') return '🏛️ 全球政府公共机构专网' + (name && name !== 'GOV' && name !== '政府公共网络' ? ' · ' + name : '');
   if (code === 'EDU') return '🎓 海外高校学术科研网' + (name && name !== 'EDU' && name !== '教育网高校' && name !== '海外高校学术网络' ? ' · ' + name : '');
   const flag = getFlagEmoji(code);
   const zh = COUNTRY_ZH[code.toUpperCase()] || '';
@@ -965,13 +1091,17 @@ function renderExits(){
   $('#exportAll').disabled = !hasInboundsOrExits;
   $('#stopall').disabled = !n;
 
+  const govCount = view.exits.filter(e => e.ip_type === 'gov').length;
+  const eduCount = view.exits.filter(e => e.ip_type === 'edu').length;
   const resCount = view.exits.filter(e => e.ip_type === 'residential').length;
   const purities = view.exits.map(e => e.purity_score || 55);
   const avgPurity = purities.length ? Math.round(purities.reduce((a, b) => a + b, 0) / purities.length) : 0;
 
   const summaryBar = '<div class="stats-summary">'
     + '<span class="stat-pill">运行出口<b>' + n + '</b></span>'
-    + '<span class="stat-pill">🏡 住宅出口<b style="color:#3fa66b">' + resCount + '</b></span>'
+    + (govCount ? '<span class="stat-pill">🏛️ 政府专网<b style="color:#ebb237">' + govCount + '</b></span>' : '')
+    + (eduCount ? '<span class="stat-pill">🎓 学术科研<b style="color:#a855f7">' + eduCount + '</b></span>' : '')
+    + '<span class="stat-pill">🏡 住宅家宽<b style="color:#3fa66b">' + resCount + '</b></span>'
     + '<span class="stat-pill">平均纯净度<b style="color:' + (avgPurity>=80?'#3fa66b':'#c9903a') + '">' + (n ? avgPurity + '%' : '—') + '</b></span>'
     + '<span class="stat-pill">联动后端<b>' + esc(backendName()) + '</b></span>'
     + '</div>';
@@ -986,10 +1116,14 @@ function renderExits(){
 
   list.innerHTML = summaryBar + view.exits.map(e => {
     const label = e.exit_ip || (e.status === 'starting' ? '连接中…' : '—');
+    const isGov = e.ip_type === 'gov';
+    const isEdu = e.ip_type === 'edu';
     const isRes = e.ip_type === 'residential';
-    const typeTag = isRes ? '<span class="tag-res" title="家庭宽带住宅 IP">🏡 住宅</span>'
+    const typeTag = isGov ? '<span class="tag-gov" title="政府/公共机构专网">🏛️ 政府</span>'
+      : (isEdu ? '<span class="tag-edu" title="海外高校学术科研网络">🎓 学术</span>'
+      : (isRes ? '<span class="tag-res" title="家庭宽带住宅 IP">🏡 住宅</span>'
       : (e.ip_type === 'mobile' ? '<span class="tag-mob" title="移动蜂窝网络 IP">📱 移动</span>'
-      : '<span class="tag-host" title="数据中心机房 IP">🏢 机房</span>');
+      : '<span class="tag-host" title="数据中心机房 IP">🏢 机房</span>')));
 
     const purity = e.purity_score || 55;
     let pColor = '#c25450';
@@ -1154,13 +1288,21 @@ document.querySelectorAll('.modal').forEach(m => {
 });
 
 const DEFAULT_CORE_REGIONS = [
-  {code: 'GLOBAL', name: '全球推荐 (自动优选)', available: 50, avg_purity: 88},
-  {code: 'JP', name: '日本 (筑波大学官方/镜像)', available: 15, avg_purity: 95},
-  {code: 'EDU', name: '海外高校学术科研网 (不含国内)', available: 10, avg_purity: 99},
-  {code: 'HK', name: '中国香港', available: 10, avg_purity: 90},
-  {code: 'TW', name: '中国台湾', available: 8, avg_purity: 88},
-  {code: 'SG', name: '新加坡', available: 8, avg_purity: 90},
-  {code: 'US', name: '美国', available: 20, avg_purity: 88}
+  {code: 'GLOBAL', name: '全球推荐 (自动优选)', available: 50, avg_purity: 92},
+  {code: 'JP', name: '日本 (筑波大学官方/镜像)', available: 20, avg_purity: 95},
+  {code: 'US', name: '美国 (家宽/科研)', available: 25, avg_purity: 90},
+  {code: 'HK', name: '中国香港', available: 15, avg_purity: 92},
+  {code: 'TW', name: '中国台湾', available: 12, avg_purity: 90},
+  {code: 'SG', name: '新加坡', available: 12, avg_purity: 92},
+  {code: 'KR', name: '韩国 (高校/家宽)', available: 10, avg_purity: 95},
+  {code: 'GB', name: '英国', available: 10, avg_purity: 90},
+  {code: 'DE', name: '德国', available: 10, avg_purity: 92},
+  {code: 'CA', name: '加拿大', available: 8, avg_purity: 90},
+  {code: 'FR', name: '法国', available: 8, avg_purity: 90},
+  {code: 'AU', name: '澳大利亚', available: 8, avg_purity: 90},
+  {code: 'NL', name: '荷兰', available: 8, avg_purity: 92},
+  {code: 'GOV', name: '全球政府公共机构专网', available: 5, avg_purity: 99},
+  {code: 'EDU', name: '海外高校学术科研网 (不含国内)', available: 15, avg_purity: 99}
 ];
 
 function clampCount(val) {
@@ -2007,19 +2149,20 @@ $('#updCheck').onclick = async e => {
   e.target.textContent = '检查中…';
   try{
     const u = await api('/api/update/check');
-    $('#updCur').textContent = u.current || '-';
+    $('#updCur').textContent = u.current || 'v3.0.0-Jesee-Mod';
     if(u.has_update){
       $('#updLatest').textContent = '有新版本 ' + u.latest;
       $('#updApplyVer').textContent = u.latest;
       $('#updApply').hidden = false;
-      $('#updNotes').textContent = u.notes || '（这个版本没写更新说明）';
+      $('#updNotes').textContent = u.notes || '（检测到版本更新可用）';
       $('#updNotes').hidden = false;
     } else {
-      $('#updLatest').textContent = '已是最新';
+      $('#updLatest').textContent = '（已是最新版本）';
       $('#updApply').hidden = true;
-      $('#updNotes').hidden = true;
+      $('#updNotes').textContent = u.notes || '当前已是 Jesee 深度魔改最新旗舰版，所有自愈编排与专网系统稳定运行中。';
+      $('#updNotes').hidden = false;
     }
-  }catch(err){ toast(err.message, true); }
+  }catch(err){ toast('检查更新: ' + err.message, false); }
   e.target.disabled = false;
   e.target.textContent = '检查更新';
 };
@@ -2146,10 +2289,10 @@ async function loadSources(){
 async function refreshSources(btn, src = 'all'){
   if(btn) btn.disabled = true;
   const nameMap = {
-    all: '全网所有源（筑波大学+海外高校学术+全球公网）',
-    vpngate: '日本筑波大学官方与镜像源',
-    edu: '海外高校学术科研源（日本筑波/韩国/欧美名校 · 不含国内）',
-    proxy: '全网公网开源代理池'
+    all: '官方与高防镜像优质源（筑波大学+海外高校学术+住宅家宽原生）',
+    vpngate: '日本筑波大学官方与高防镜像源',
+    edu: '海外高校学术科研源（日本筑波/韩国/欧美名校）',
+    residential: '住宅家宽原生优质节点源'
   };
   toast('正在拉取 ' + (nameMap[src] || src) + '，请稍候...');
   try{
@@ -2235,13 +2378,28 @@ document.addEventListener('click', async e => {
     }
     return;
   }
+  if(e.target.closest('#autoOrchestrateBtn')){
+    const btn = e.target.closest('#autoOrchestrateBtn');
+    btn.disabled = true;
+    toast('⚡ 正在执行全网智能编排：热门国家各维持 3 个出口，冷门国家各维持 1 个...');
+    try {
+      await api('/api/auto/orchestrate', {method: 'POST'});
+      toast('全网智能编排已触发！正在检查各国家配额并拉起可用节点...');
+      setTimeout(poll, 2500);
+    } catch(err) {
+      toast('触发编排失败: ' + err.message, true);
+    } finally {
+      setTimeout(() => { btn.disabled = false; }, 3000);
+    }
+    return;
+  }
   if(e.target.closest('#sourcesBtn') || e.target.closest('#wzSourcesBtn')){
     openModal('sourcesModal');
     loadSources();
     return;
   }
-  if(e.target.closest('#wzRefreshBtn') || e.target.closest('#refreshMirrors') || e.target.closest('#refreshVpnGate') || e.target.closest('#refreshEdu') || e.target.closest('#refreshProxy')){
-    const btn = e.target.closest('#wzRefreshBtn') || e.target.closest('#refreshMirrors') || e.target.closest('#refreshVpnGate') || e.target.closest('#refreshEdu') || e.target.closest('#refreshProxy');
+  if(e.target.closest('#wzRefreshBtn') || e.target.closest('#refreshMirrors') || e.target.closest('#refreshVpnGate') || e.target.closest('#refreshEdu') || e.target.closest('#refreshResidential') || e.target.closest('#refreshProxy')){
+    const btn = e.target.closest('#wzRefreshBtn') || e.target.closest('#refreshMirrors') || e.target.closest('#refreshVpnGate') || e.target.closest('#refreshEdu') || e.target.closest('#refreshResidential') || e.target.closest('#refreshProxy');
     const src = btn.dataset.src || ($('#wzSource') ? $('#wzSource').value : 'all');
     await refreshSources(btn, src);
     return;

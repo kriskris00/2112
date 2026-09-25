@@ -26,10 +26,11 @@ type SocksCred struct {
 
 // Tunnel 是一条运行中的隧道：一个 netns + 一个 openvpn 进程 + 一个本地 SOCKS5 端口。
 type Tunnel struct {
-	Slot   int       `json:"slot"`
-	Port   int       `json:"port"`
-	Node   Node      `json:"node"`
-	Status string    `json:"status"` // starting | up | failed | stopped
+	Slot         int       `json:"slot"`
+	Port         int       `json:"port"`
+	Node         Node      `json:"node"`
+	TargetRegion string    `json:"target_region,omitempty"` // 锁定目标国家代码，故障时优先重连同国节点
+	Status       string    `json:"status"`                  // starting | up | failed | stopped
 	ExitIP string    `json:"exit_ip"`
 	Err    string    `json:"err,omitempty"`
 	Since  time.Time `json:"since"`
@@ -160,6 +161,7 @@ func (t *Tunnel) startOpenVPN(dir string) error {
 	}
 
 	logPath := filepath.Join(dir, ns+".log")
+	_ = os.Remove(logPath)
 	cmd := exec.Command("ip", "netns", "exec", ns, "openvpn",
 		"--config", cfgPath,
 		"--auth-user-pass", authPath,
@@ -168,7 +170,7 @@ func (t *Tunnel) startOpenVPN(dir string) error {
 		"--connect-retry-max", "2",
 		"--connect-timeout", "20",
 		"--data-ciphers", "AES-128-CBC:AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305",
-		"--verb", "3",
+		"--verb", "1",
 		"--log", logPath,
 	)
 	if err := cmd.Start(); err != nil {

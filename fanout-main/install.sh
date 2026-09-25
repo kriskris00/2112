@@ -47,9 +47,26 @@ svc_install() {
   if [[ "$INIT_SYS" == systemd ]]; then
     # 端口不写进服务文件：它由 ${WORK_DIR}/settings.json 决定（见 seed_settings），
     # 两处都写会互相拽回旧值——界面改完重启失效，或 f 改完被配置覆盖。
-    # 老版本模板里可能还带 -web，一并去掉。
-    sed "s#-web [0-9]* ##; s#-dir /var/lib/fanout#-dir ${WORK_DIR}#" fanout.service \
-      > /etc/systemd/system/fanout.service
+    cat > /etc/systemd/system/fanout.service <<SVCEOF
+[Unit]
+Description=fanout - VPN Gate 出口扇出网关 (Jesee 魔改旗舰版)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=${BIN} -dir ${WORK_DIR}
+Restart=on-failure
+RestartSec=5
+MemoryHigh=320M
+MemoryMax=450M
+LimitNOFILE=65535
+TimeoutStopSec=30
+KillMode=mixed
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
     systemctl daemon-reload
   else
     # OpenRC 没有 systemd 那套单元文件，直接写 init script。
