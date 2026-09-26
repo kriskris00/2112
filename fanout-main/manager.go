@@ -101,10 +101,10 @@ type AutoOrchestrateOptions struct {
 
 func DefaultAutoOrchestrateOptions() AutoOrchestrateOptions {
 	return AutoOrchestrateOptions{
-		Sources:       []string{"all"},
+		Sources:       []string{"vpngate", "ipspeed", "edu", "custom"},
 		HotTarget:     3,
 		ColdTarget:    1,
-		MaxStarts:     12,
+		MaxStarts:     8,
 		VerifyTimeout: 30 * time.Second,
 	}
 }
@@ -136,14 +136,10 @@ func nodeMatchesSource(n Node, source string) bool {
 }
 
 func nodeKey(n Node) string {
-	proto := strings.ToLower(strings.TrimSpace(n.Proto))
-	if proto == "" && n.Config != "" {
-		proto = "ovpn"
-	}
 	if n.IP != "" {
-		return proto + "|" + strings.ToLower(strings.TrimSpace(n.IP)) + ":" + fmt.Sprint(n.Port)
+		return strings.ToLower(strings.TrimSpace(n.IP)) + ":" + fmt.Sprint(n.Port)
 	}
-	return proto + "|" + strings.ToLower(strings.TrimSpace(n.HostName)) + ":" + fmt.Sprint(n.Port)
+	return strings.ToLower(strings.TrimSpace(n.HostName)) + ":" + fmt.Sprint(n.Port)
 }
 
 func (m *Manager) markNodeFailed(n Node) {
@@ -220,31 +216,8 @@ func (m *Manager) RefreshNodesSource(source string) (int, error) {
 	if err != nil && len(nodes) == 0 {
 		return 0, err
 	}
-	// 刷新单一来源时只替换该来源，绝不把其它来源/自建节点整池清掉。
-	// 全量刷新才整体重建节点池。
 	m.mu.Lock()
-	if strings.EqualFold(source, "all") || strings.TrimSpace(source) == "" {
-		m.nodes = nodes
-	} else {
-		kept := make([]Node, 0, len(m.nodes)+len(nodes))
-		for _, cur := range m.nodes {
-			if !nodeMatchesSource(cur, source) {
-				kept = append(kept, cur)
-			}
-		}
-		seen := make(map[string]bool, len(kept)+len(nodes))
-		for _, cur := range kept {
-			seen[nodeKey(cur)] = true
-		}
-		for _, n := range nodes {
-			key := nodeKey(n)
-			if !seen[key] {
-				kept = append(kept, n)
-				seen[key] = true
-			}
-		}
-		m.nodes = kept
-	}
+	m.nodes = nodes
 	m.fetched = time.Now()
 	m.mu.Unlock()
 
@@ -640,6 +613,10 @@ func (m *Manager) tryNode(t *Tunnel) error {
 			return err
 		}
 		t.ExitIP = ip
+		if err := enforceCleanExitIP(ip); err != nil {
+			return err
+		}
+		enrichNodeFromPing0(&t.Node, ip)
 		if t.Node.IP == "" {
 			t.Node.IP = ip
 		}
@@ -663,6 +640,10 @@ func (m *Manager) tryNode(t *Tunnel) error {
 		return err
 	}
 	t.ExitIP = ip
+	if err := enforceCleanExitIP(ip); err != nil {
+		return err
+	}
+	enrichNodeFromPing0(&t.Node, ip)
 	if t.Node.IP == "" {
 		t.Node.IP = ip
 	}

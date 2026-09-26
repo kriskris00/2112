@@ -1,0 +1,27 @@
+fanout · Ping0 严格 IP 准入
+
+1) Ping0 官方详细 IP API 需要 API Key。
+2) 在服务器上配置：
+   export FANOUT_PING0_API_KEY='你的Key'
+   export FANOUT_PING0_MAX_RISK='40'
+   export FANOUT_PING0_STRICT='1'
+
+systemd 推荐写到：
+   /etc/systemd/system/fanout.service.d/ping0.conf
+内容：
+   [Service]
+   Environment=FANOUT_PING0_API_KEY=你的Key
+   Environment=FANOUT_PING0_MAX_RISK=40
+   Environment=FANOUT_PING0_STRICT=1
+
+然后：
+   systemctl daemon-reload
+   systemctl restart fanout
+
+严格准入规则：真实出口 IP 经 Ping0 查询后，必须：
+- 风控值 <= 40
+- 不是 IDC 机房 IP
+- 是原生 IP
+否则该出口不会进入 UP 状态，会被自动淘汰/换节点。
+
+没有 API Key 时，程序不会冒充“已经通过 Ping0”，只使用本地已有的基础质量过滤与真实出网验证。

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -84,7 +85,12 @@ func (m *Manager) restoreState() (int, error) {
 		known[n.HostName] = n
 	}
 
-	for _, p := range st.Tunnels {
+	maxRestore := len(st.Tunnels)
+	if maxRestore > m.maxSlots {
+		maxRestore = m.maxSlots
+		log.Printf("状态文件里有 %d 条旧隧道，只恢复前 %d 条，避免重启瞬间拉起大量旧出口", len(st.Tunnels), maxRestore)
+	}
+	for _, p := range st.Tunnels[:maxRestore] {
 		node, ok := known[p.HostName]
 		if !ok {
 			// 节点已从 VPN Gate 列表消失，用存盘的信息重建

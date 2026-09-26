@@ -117,9 +117,9 @@ func initIPIntel(workDir string) {
 }
 
 var (
-	intelDirty     bool
-	intelDirtyMu   sync.Mutex
-	intelSaveOnce  sync.Once
+	intelDirty    bool
+	intelDirtyMu  sync.Mutex
+	intelSaveOnce sync.Once
 )
 
 func markIPIntelDirty() {

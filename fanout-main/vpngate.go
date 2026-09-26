@@ -21,93 +21,20 @@ import (
 
 const vpngateAPI = "https://www.vpngate.net/api/iphone/"
 
-// vpngateMirror 是直连拿不到节点列表时的兜底（Cloudflare Worker 反代）。
-// 用 FANOUT_VPNGATE_MIRROR 可以换成自己的地址，设成空字符串就只走直连。
-const vpngateMirror = "https://p.xy.kg/vpngate"
-
-// mirrorKey 只是让反代不被爬虫和端口扫描白嫖，不是安全边界。
-const mirrorKey = "8rhIFzFKRJMFAe-xP5OQPclDEvSjKlHo"
-
-// defaultMirrors 日本筑波大学 VPN Gate 官方活跃公网 IP 镜像与直连候选池
+// 只保留 VPN Gate / 筑波大学学术项目官方域名。
+// VPN Gate 的中继服务器由全球志愿者运行，并非全部托管在筑波大学；
+// 这里的“筑波大学源”指官方 VPN Gate 学术项目数据源，不再使用第三方反代/IP 镜像。
 var defaultMirrors = []string{
-	"https://www.vpngate.net/api/iphone/",      // 官方 HTTPS 直连
-	"http://www.vpngate.net/api/iphone/",       // 官方 HTTP 直连
-	"http://150.40.105.19:35399/api/iphone/",   // 筑波大学 IP 镜像 1 (克罗地亚)
-	"http://119.195.163.98:23340/api/iphone/",  // 筑波大学 IP 镜像 2 (韩国)
-	"http://150.40.105.6:11803/api/iphone/",    // 筑波大学 IP 镜像 3 (克罗地亚)
-	"http://150.40.105.23:64629/api/iphone/",   // 筑波大学 IP 镜像 4 (克罗地亚)
-	"http://103.172.220.133:3946/api/iphone/",  // 筑波大学 IP 镜像 5 (印度)
-	"http://194.156.89.134:47774/api/iphone/",  // 筑波大学 IP 镜像 6 (德国)
-	"http://219.100.37.234:25500/api/iphone/",  // 筑波大学 IP 镜像 7 (日本)
-	"http://153.125.233.158:19641/api/iphone/", // 筑波大学 IP 镜像 8 (日本)
-	"http://130.158.75.33:14631/api/iphone/",   // 筑波大学 IP 镜像 9 (日本筑波大学本部)
-	"http://219.100.37.238:52158/api/iphone/",  // 筑波大学 IP 镜像 10 (日本)
-	"http://219.100.37.244:11075/api/iphone/",  // 筑波大学 IP 镜像 11 (日本)
-	"http://103.201.129.246:44837/api/iphone/", // 筑波大学亚太镜像
-	"http://185.220.101.4:1194/api/iphone/",    // 筑波大学欧洲镜像
-	"http://www.vpngate.net/api/iphone/",       // 官方 HTTP 直连
+	"https://www.vpngate.net/api/iphone/",
+	"https://download.vpngate.jp/api/iphone/",
 }
 
-// proxyListSources 全网高质量公网住宅与电信代理聚合池（涵盖美日韩港台新英德法加等数千节点）
+// 公共 SOCKS/HTTP 免费代理源质量波动很大，且无法提供与 VPN Gate/高校源同等级的可验证性。
+// 默认完全关闭这些来源；如需使用，只允许用户通过“自定义源”显式加入。
 var proxyListSources = []struct {
-	// ===== ProxyScrape live API / GitHub mirror（公开聚合源；只作为候选，仍需本机实测） =====
 	URL   string
-	Proto string // "socks5", "http"
-}{
-	{URL: "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=protocolipport&format=text&protocol=socks5", Proto: "socks5"},
-	{URL: "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=protocolipport&format=text&protocol=http", Proto: "http"},
-
-	// ===== proxifly (全球两万多节点，且自带精准国家代码和协议) =====
-	{URL: "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/all/data.csv", Proto: "socks5"},
-	{URL: "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/socks5/data.txt", Proto: "socks5"},
-	{URL: "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/http/data.txt", Proto: "http"},
-
-	// ===== monosans/proxy-list (每小时重验，响应极速) =====
-	{URL: "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt", Proto: "socks5"},
-	{URL: "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt", Proto: "http"},
-
-	// ===== TheSpeedX/PROXY-List (老牌大规模聚合器 3000-5000+) =====
-	{URL: "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt", Proto: "socks5"},
-	{URL: "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt", Proto: "http"},
-
-	// ===== hookzof/socks5_list (极高质量 20,000+ SOCKS5) =====
-	{URL: "https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt", Proto: "socks5"},
-
-	// ===== zloi-user/hideip.me (带国家名) =====
-	{URL: "https://raw.githubusercontent.com/zloi-user/hideip.me/master/socks5.txt", Proto: "socks5"},
-	{URL: "https://raw.githubusercontent.com/zloi-user/hideip.me/master/http.txt", Proto: "http"},
-
-	// ===== spys.me (带国家代码) =====
-	{URL: "https://spys.me/socks.txt", Proto: "socks5"},
-	{URL: "https://spys.me/proxy.txt", Proto: "http"},
-
-	// ===== clarketm/proxy-list (带国家代码) =====
-	{URL: "https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list.txt", Proto: "http"},
-
-	// ===== proxmint/free-proxy-list =====
-	{URL: "https://raw.githubusercontent.com/proxmint/free-proxy-list/main/proxies/socks5.txt", Proto: "socks5"},
-	{URL: "https://raw.githubusercontent.com/proxmint/free-proxy-list/main/proxies/http.txt", Proto: "http"},
-
-	// ===== vakhov/fresh-proxy-list =====
-	{URL: "https://raw.githubusercontent.com/vakhov/fresh-proxy-list/master/socks5.txt", Proto: "socks5"},
-	{URL: "https://raw.githubusercontent.com/vakhov/fresh-proxy-list/master/http.txt", Proto: "http"},
-
-	// ===== HProxy：持续实测、去重、带国家/延迟/存活率；这里只拉 live 候选，仍由本机最终复测 =====
-	{URL: "https://raw.githubusercontent.com/hproxy-com/free-proxy-list/main/socks5.txt", Proto: "socks5"},
-	{URL: "https://raw.githubusercontent.com/hproxy-com/free-proxy-list/main/http.txt", Proto: "http"},
-
-	// ===== Proxio：约 20 分钟更新的实测公共代理镜像 =====
-	{URL: "https://raw.githubusercontent.com/proxio-io/proxy-list/main/socks5.txt", Proto: "socks5"},
-	{URL: "https://raw.githubusercontent.com/proxio-io/proxy-list/main/http.txt", Proto: "http"},
-
-	// ===== Databay：约 5 分钟发布一次的已验证代理列表 =====
-	{URL: "https://raw.githubusercontent.com/databay-labs/free-proxy-list/master/socks5.txt", Proto: "socks5"},
-	{URL: "https://raw.githubusercontent.com/databay-labs/free-proxy-list/master/http.txt", Proto: "http"},
-
-	// ===== Tianndev：多源聚合、约 30 分钟刷新；只作为候选源 =====
-	{URL: "https://raw.githubusercontent.com/Tianndev/free-proxy/main/proxy/socks5.txt", Proto: "socks5"},
-	{URL: "https://raw.githubusercontent.com/Tianndev/free-proxy/main/proxy/http.txt", Proto: "http"},
-}
+	Proto string
+}{}
 
 var englishCountryToCode = map[string]string{
 	"united states": "US", "usa": "US",
@@ -251,42 +178,8 @@ func isEduIP(ipStr string) bool {
 	return false
 }
 
-// discoverMirrors 动态抓取筑波大学官方每天轮换推荐的全球公网镜像列表
-func discoverMirrors(timeout time.Duration) []string {
-	client := &http.Client{Timeout: timeout}
-	urls := []string{
-		"http://www.vpngate.net/en/sites.aspx",
-		"https://www.vpngate.net/en/sites.aspx",
-		"http://150.40.105.19:35399/en/sites.aspx",
-	}
-	re := regexp.MustCompile(`http://\d+\.\d+\.\d+\.\d+:\d+/`)
-	var found []string
-	seen := map[string]bool{}
-
-	for _, u := range urls {
-		resp, err := client.Get(u)
-		if err != nil {
-			continue
-		}
-		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			continue
-		}
-		matches := re.FindAllString(string(body), -1)
-		for _, m := range matches {
-			apiUrl := strings.TrimRight(m, "/") + "/api/iphone/"
-			if !seen[apiUrl] {
-				seen[apiUrl] = true
-				found = append(found, apiUrl)
-			}
-		}
-		if len(found) > 0 {
-			break
-		}
-	}
-	return found
-}
+// discoverMirrors 已禁用第三方镜像；只使用 VPN Gate 官方域名。
+func discoverMirrors(timeout time.Duration) []string { return nil }
 
 // SourceInfo 描述节点源状态
 type SourceInfo struct {
@@ -322,17 +215,18 @@ func SetCustomSourceURL(url string) {
 }
 
 func mirrorURL() string {
+	// 默认不使用任何第三方反代；只有管理员显式设置环境变量时才允许自定义兜底地址。
 	if v, ok := os.LookupEnv("FANOUT_VPNGATE_MIRROR"); ok {
 		return strings.TrimSpace(v)
 	}
-	return vpngateMirror
+	return ""
 }
 
 func mirrorAccessKey() string {
 	if v, ok := os.LookupEnv("FANOUT_VPNGATE_MIRROR_KEY"); ok {
 		return strings.TrimSpace(v)
 	}
-	return mirrorKey
+	return ""
 }
 
 // Node 是一个 VPN Gate 或全网公开节点。
@@ -685,7 +579,7 @@ func loadInitialNodes(workDir string) []Node {
 	nodeMap := make(map[string]Node)
 	for _, n := range builtinSeedNodes {
 		if n.IP != "" {
-			nodeMap[nodeKey(n)] = n
+			nodeMap[n.IP] = n
 		}
 	}
 	if workDir != "" {
@@ -694,7 +588,7 @@ func loadInitialNodes(workDir string) []Node {
 			if list, pErr := parseNodeCSV(string(data)); pErr == nil {
 				for _, node := range list {
 					if node.IP != "" && !isFakeDummyNode(node) {
-						nodeMap[nodeKey(node)] = node
+						nodeMap[node.IP] = node
 					}
 				}
 			}
@@ -811,6 +705,7 @@ func fetchIPSpeedNodes(timeout time.Duration) []Node {
 // sourceFilter 支持: "all" (全部), "vpngate" (仅筑波大学官方/镜像), "edu" (仅海外高校学术网), "proxy" (仅全网公网代理池)
 func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]Node, error) {
 	nodeMap := make(map[string]Node)
+	freshKeys := make(map[string]bool)
 
 	// 1. 先读历史离线缓存或内建种子底池（保留之前有效积累的节点，绝不给空列表）
 	for _, n := range loadInitialNodes(workDir) {
@@ -819,7 +714,7 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 				if sourceFilter == "edu" && (strings.EqualFold(n.CountryCode, "CN") || strings.Contains(strings.ToLower(n.Country), "china") || strings.HasSuffix(strings.ToLower(n.HostName), ".cn")) {
 					continue
 				}
-				nodeMap[nodeKey(n)] = n
+				nodeMap[n.IP] = n
 			}
 		}
 	}
@@ -848,9 +743,6 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 		// 选择 IPSpeed / 公共代理 / 自定义时绝不混入其它来源。
 		if sf == "" || sf == "all" || sf == "vpngate" || sf == "edu" || sf == "residential" || sf == "gov" {
 			targets = append(targets, defaultMirrors...)
-			if discovered := discoverMirrors(4 * time.Second); len(discovered) > 0 {
-				targets = append(targets, discovered...)
-			}
 		}
 	}
 
@@ -895,7 +787,7 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 					if sourceFilter == "gov" && n.IPType != "gov" && n.Source != "gov" {
 						continue
 					}
-					nodeMap[nodeKey(n)] = n
+					nodeMap[n.IP] = n
 				}
 			}
 			mu.Unlock()
@@ -951,10 +843,12 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 							continue
 						}
 						// 如果已有带 OpenVPN 配置的节点，优先保留
-						if existing, ok := nodeMap[nodeKey(n)]; ok && existing.Config != "" {
+						if existing, ok := nodeMap[n.IP]; ok && existing.Config != "" {
+							freshKeys[n.IP] = true
 							continue
 						}
-						nodeMap[nodeKey(n)] = n
+						nodeMap[n.IP] = n
+						freshKeys[n.IP] = true
 					}
 				}
 				mu.Unlock()
@@ -977,9 +871,10 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 				}
 				mu.Lock()
 				if len(nodeMap) < 25000 {
-					key := nodeKey(n)
+					key := n.IP + ":" + strconv.Itoa(n.Port)
 					if _, exists := nodeMap[key]; !exists {
 						nodeMap[key] = n
+						freshKeys[key] = true
 						successCount++
 					}
 				}

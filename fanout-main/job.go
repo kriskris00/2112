@@ -167,4 +167,3 @@ func (s *JobStore) ClearFailedSteps(id string) {
 		}
 	}
 }
-

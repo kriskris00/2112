@@ -30,7 +30,7 @@ const indexHTML = `<!DOCTYPE html>
   --warn:#d97706;
   --bad:#dc2626;
   --glass-shadow:0 16px 40px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.03), inset 0 1px 2px rgba(255, 255, 255, 0.98), inset 0 -1px 2px rgba(255, 255, 255, 0.45);
-  --glass-blur:blur(36px) saturate(220%) brightness(108%);
+  --glass-blur:blur(10px);
   --apple-font:-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   --mono-font:ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
@@ -40,112 +40,50 @@ body{
   background:radial-gradient(circle at 50% 50%, #f8fafc 0%, #e2e8f0 100%);position:relative;overflow-x:hidden;
 }
 
-/* 2026 Apple Liquid Aura: 5 个高动态流体能量球，色彩鲜艳互不干涉，高速流动交融 */
+/* 轻量流动背景：只做 transform 动画，不对整页做 filter/blur，避免移动端 GPU 长时间满载 */
 .fluid-aura-container{
   position:fixed;inset:0;width:100vw;height:100vh;overflow:hidden;pointer-events:none;z-index:0;
-  background:radial-gradient(circle at 50% 50%, #f8fafc 0%, #e2e8f0 100%);filter:blur(48px);-webkit-filter:blur(48px);transform:translateZ(0);
+  background:linear-gradient(135deg,#f8fafc 0%,#e0f2fe 48%,#f1f5f9 100%);
+  contain:strict;
 }
 .aura-blob{
-  position:absolute;border-radius:45% 55% 65% 35% / 40% 50% 60% 50%;
-  opacity:0.96;will-change:transform, background;
+  position:absolute;border-radius:50%;opacity:.52;will-change:transform;
+  transform:translate3d(0,0,0);mix-blend-mode:multiply;
 }
-.blob-1{
-  width:70vw;height:70vw;top:-12%;left:-8%;
-  animation:fluidOrbit1 11s ease-in-out infinite alternate, colorCycleBlob1 22s ease-in-out infinite;
+.blob-1{width:62vw;height:62vw;top:-18%;left:-10%;
+  background:radial-gradient(circle at 40% 40%,rgba(56,189,248,.72) 0%,rgba(14,165,233,.34) 38%,rgba(14,165,233,0) 72%);
+  animation:auraMove1 34s ease-in-out infinite alternate;
 }
-.blob-2{
-  width:68vw;height:68vw;bottom:-12%;right:-8%;
-  animation:fluidOrbit2 13s ease-in-out infinite alternate, colorCycleBlob2 22s ease-in-out infinite;
+.blob-2{width:58vw;height:58vw;right:-12%;bottom:-18%;
+  background:radial-gradient(circle at 55% 45%,rgba(244,114,182,.58) 0%,rgba(251,113,133,.28) 40%,rgba(251,113,133,0) 72%);
+  animation:auraMove2 42s ease-in-out infinite alternate;
 }
-.blob-3{
-  width:62vw;height:62vw;top:18%;left:22%;
-  animation:fluidOrbit3 9s ease-in-out infinite alternate, colorCycleBlob3 22s ease-in-out infinite;
+.blob-3{width:52vw;height:52vw;left:25%;top:22%;
+  background:radial-gradient(circle at 50% 50%,rgba(52,211,153,.42) 0%,rgba(167,243,208,.18) 42%,rgba(167,243,208,0) 72%);
+  animation:auraMove3 48s ease-in-out infinite alternate;
 }
-.blob-4{
-  width:58vw;height:58vw;bottom:8%;left:-4%;
-  animation:fluidOrbit4 12s ease-in-out infinite alternate, colorCycleBlob4 22s ease-in-out infinite;
+.blob-4,.blob-5{display:none}
+@keyframes auraMove1{
+  0%{transform:translate3d(-3vw,-2vh,0) scale(.96) rotate(0deg)}
+  50%{transform:translate3d(12vw,9vh,0) scale(1.06) rotate(8deg)}
+  100%{transform:translate3d(4vw,18vh,0) scale(1) rotate(-5deg)}
 }
-.blob-5{
-  width:54vw;height:54vw;top:8%;right:-4%;
-  animation:fluidOrbit5 10s ease-in-out infinite alternate, colorCycleBlob5 22s ease-in-out infinite;
+@keyframes auraMove2{
+  0%{transform:translate3d(3vw,2vh,0) scale(1) rotate(0deg)}
+  50%{transform:translate3d(-10vw,-9vh,0) scale(1.08) rotate(-8deg)}
+  100%{transform:translate3d(-2vw,-15vh,0) scale(.96) rotate(5deg)}
 }
-
-@keyframes fluidOrbit1{
-  0%{transform:translate(-8%, -12%) rotate(0deg) scale(1);}
-  33%{transform:translate(32%, 18%) rotate(120deg) scale(1.18);}
-  66%{transform:translate(18%, 38%) rotate(240deg) scale(0.90);}
-  100%{transform:translate(-18%, 22%) rotate(360deg) scale(1.10);}
+@keyframes auraMove3{
+  0%{transform:translate3d(-5vw,2vh,0) scale(.94)}
+  50%{transform:translate3d(7vw,-8vh,0) scale(1.08)}
+  100%{transform:translate3d(-3vw,10vh,0) scale(1)}
 }
-@keyframes fluidOrbit2{
-  0%{transform:translate(12%, 18%) rotate(0deg) scale(1.12);}
-  33%{transform:translate(-28%, -12%) rotate(-120deg) scale(0.92);}
-  66%{transform:translate(-12%, -32%) rotate(-240deg) scale(1.20);}
-  100%{transform:translate(28%, -18%) rotate(-360deg) scale(1);}
-}
-@keyframes fluidOrbit3{
-  0%{transform:translate(0%, 0%) scale(0.92) rotate(0deg);}
-  50%{transform:translate(-24%, 28%) scale(1.25) rotate(180deg);}
-  100%{transform:translate(28%, -18%) scale(1.08) rotate(360deg);}
-}
-@keyframes fluidOrbit4{
-  0%{transform:translate(18%, -18%) scale(1.08) rotate(0deg);}
-  50%{transform:translate(-22%, 24%) scale(1.22) rotate(180deg);}
-  100%{transform:translate(22%, 8%) scale(0.90) rotate(360deg);}
-}
-@keyframes fluidOrbit5{
-  0%{transform:translate(-12%, 12%) scale(1);}
-  50%{transform:translate(18%, -24%) scale(1.28);}
-  100%{transform:translate(-8%, 18%) scale(1.08);}
-}
-
-/* 6 大色系高速互流，无任何黑灰色，全部为明朗高亮纯净色与纯白晶莹高光 */
-@keyframes colorCycleBlob1{
-  0%, 100%{background:#38bdf8;}
-  16.66%{background:#0284c7;}
-  33.33%{background:#a3e635;}
-  50.00%{background:#0ea5e9;}
-  66.66%{background:#34d399;}
-  83.33%{background:#67e8f9;}
-}
-@keyframes colorCycleBlob2{
-  0%, 100%{background:#f472b6;}
-  16.66%{background:#fb7185;}
-  33.33%{background:#f43f5e;}
-  50.00%{background:#ec4899;}
-  66.66%{background:#fb923c;}
-  83.33%{background:#fda4af;}
-}
-@keyframes colorCycleBlob3{
-  0%, 100%{background:#ffffff;}
-  16.66%{background:#f0fdf4;}
-  33.33%{background:#ffffff;}
-  50.00%{background:#e0f2fe;}
-  66.66%{background:#ffffff;}
-  83.33%{background:#fdf4ff;}
-}
-@keyframes colorCycleBlob4{
-  0%, 100%{background:#fde047;}
-  16.66%{background:#fb923c;}
-  33.33%{background:#f43f5e;}
-  50.00%{background:#fbbf24;}
-  66.66%{background:#fef08a;}
-  83.33%{background:#fed7aa;}
-}
-@keyframes colorCycleBlob5{
-  0%, 100%{background:#e879f9;}
-  16.66%{background:#ffffff;}
-  33.33%{background:#38bdf8;}
-  50.00%{background:#ffffff;}
-  66.66%{background:#4ade80;}
-  83.33%{background:#c084fc;}
-}
-
-/* 细腻磨砂颗粒触感 */
+@media(prefers-reduced-motion:reduce){.aura-blob{animation:none!important}}
+/* 静态细纹，避免 SVG feTurbulence 持续占用 CPU */
 .noise-overlay{
-  position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:2;opacity:0.18;
-  mix-blend-mode:hard-light;
-  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 0.85 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
-  background-repeat:repeat;
+  position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:2;opacity:.045;
+  background-image:radial-gradient(rgba(15,23,42,.35) .45px,transparent .55px);
+  background-size:5px 5px;
 }
 
 header{display:flex;align-items:center;gap:10px;padding:10px 16px;min-width:0;
@@ -168,14 +106,14 @@ h1{font-size:16px;font-weight:700;margin:0;letter-spacing:-0.3px;
 .dot-sep{opacity:0.3}
 .spacer{flex:1}
 button{font:inherit;color:var(--text);background:rgba(255, 255, 255, 0.65);
-  border:1px solid rgba(255, 255, 255, 0.95);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+  border:1px solid rgba(255, 255, 255, 0.95);backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px);
   border-radius:9999px;padding:5px 12px;cursor:pointer;display:inline-flex;
   align-items:center;gap:6px;white-space:nowrap;touch-action:manipulation;
   box-shadow:0 2px 8px rgba(0,0,0,0.05), inset 0 1px 1px #fff;
   transition:all .18s cubic-bezier(0.16, 1, 0.3, 1)}
 button, a, input, select, textarea, [data-rg], [data-close], [data-detail], [data-cred],
 [data-stop], [data-swap], [data-job], [data-del], [data-delone], [data-delclient],
-[data-resetclient], .chip, .rg, .step, .btn-xs {
+[data-resetclient], [data-togglejobfailed], [data-cleanjobfailed], .chip, .rg, .step, .btn-xs {
   cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
 button:hover:not(:disabled){background:#ffffff;border-color:rgba(2, 132, 199, 0.4);
   color:var(--accent);transform:translateY(-1px);box-shadow:0 4px 16px rgba(0,0,0,0.08)}
@@ -282,6 +220,8 @@ main{position:relative;z-index:10;padding:18px 20px 48px;max-width:1200px;width:
 .btn-xs.danger:hover{border-color:var(--bad);background:rgba(220,38,38,0.15)}
 .step.failed-summary{cursor:pointer;border-style:dashed}
 .step.failed-summary:hover{background:rgba(220,38,38,.15)}
+.failed-steps-wrap{width:100%;margin-top:8px;padding-top:8px;border-top:1px dashed rgba(255,255,255,0.6);display:none}
+.failed-steps-wrap.open{display:flex;flex-wrap:wrap;gap:6px}
 .links{display:flex;gap:14px;margin-right:4px}
 .links a{color:var(--dim);text-decoration:none;font-size:12px;transition:color .15s}
 .links a:hover{color:var(--accent)}
@@ -290,7 +230,7 @@ main{position:relative;z-index:10;padding:18px 20px 48px;max-width:1200px;width:
 .orch-source-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .orch-source{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.45)}
 .orch-source input{accent-color:var(--accent)}
-@media(max-width:860px){.links, .author-banner{display:none}
+@media(max-width:860px){.fluid-aura-container{display:none}.links, .author-banner{display:none}
   header{padding:9px 10px;gap:7px}
   .brand-wrap{min-width:0;gap:6px}
   .badge-jesee{max-width:118px}
@@ -312,11 +252,11 @@ main{position:relative;z-index:10;padding:18px 20px 48px;max-width:1200px;width:
   .exit>.row{padding:10px 12px}
 }
 .modal{position:fixed;inset:0;background:rgba(15, 23, 42, 0.25);
-  backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
   display:none;align-items:center;justify-content:center;z-index:50;padding:20px}
 .modal.open{display:flex}
 .sheet{background:rgba(255, 255, 255, 0.85);
-  backdrop-filter:blur(48px) saturate(220%);-webkit-backdrop-filter:blur(48px) saturate(220%);
+  backdrop-filter:blur(14px) saturate(125%);-webkit-backdrop-filter:blur(14px) saturate(125%);
   border:1px solid rgba(255, 255, 255, 0.95);border-top:1.5px solid #ffffff;
   border-radius:24px;width:min(700px,100%);max-height:86vh;display:flex;flex-direction:column;
   box-shadow:0 32px 80px rgba(0,0,0,0.15), inset 0 1px 2px #fff;
@@ -346,7 +286,7 @@ label.f>span{display:block;color:var(--dim);font-size:11px;margin-bottom:6px}
 .stepper button{border:0;border-radius:0;background:transparent;padding:6px 12px;box-shadow:none}
 select,input[type=search],input[type=text],input[type=password],textarea{font:inherit;background:rgba(255, 255, 255, 0.65);
   border:1px solid rgba(255, 255, 255, 0.90);color:var(--text);border-radius:12px;
-  padding:7px 10px;backdrop-filter:blur(10px);box-shadow:inset 0 1px 2px rgba(0,0,0,0.04);transition:all .15s}
+  padding:7px 10px;backdrop-filter:blur(6px);box-shadow:inset 0 1px 2px rgba(0,0,0,0.04);transition:all .15s}
 select:focus,input[type=search]:focus,input[type=text]:focus,input[type=password]:focus,textarea:focus{
   outline:none;border-color:var(--accent);background:#ffffff;box-shadow:0 0 0 3px rgba(2, 132, 199, 0.25)}
 select{cursor:pointer}
@@ -371,7 +311,7 @@ textarea{width:100%;min-height:300px;background:rgba(255,255,255,0.65);border:1p
 textarea:focus{outline:none;border-color:var(--accent)}
 .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);
   background:rgba(255,255,255,0.85);border:1px solid rgba(255,255,255,0.95);border-top:1.5px solid #fff;border-radius:9999px;
-  color:var(--text);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);box-shadow:0 12px 32px rgba(0,0,0,0.12), inset 0 1px 1px #fff;
+  color:var(--text);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 12px 32px rgba(0,0,0,0.12), inset 0 1px 1px #fff;
   padding:9px 18px;font-size:12px;font-weight:600;z-index:80;opacity:0;pointer-events:none;
   transition:all .2s cubic-bezier(0.16, 1, 0.3, 1)}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(-4px)}
@@ -477,9 +417,9 @@ textarea:focus{outline:none;border-color:var(--accent)}
         </div>
         <select id="wzSource" style="padding:8px 10px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--text);font-size:13px;width:100%">
           <option value="all">🌐 全部来源（只显示实时测活通过的节点）</option>
-          <option value="vpngate">🇯🇵 VPN Gate / 筑波大学官方与镜像</option>
+          <option value="vpngate">🇯🇵 VPN Gate（筑波大学学术项目官方源）</option>
           <option value="ipspeed">⚡ IPSpeed OpenVPN</option>
-          <option value="proxy">🔌 公共 SOCKS5 / HTTP</option>
+          <option value="proxy">🔌 自定义 SOCKS5 / HTTP（默认不拉公共垃圾源）</option>
           <option value="edu">🎓 海外高校学术科研网</option>
           <option value="residential">🏡 已识别住宅 / 家宽</option>
           <option value="gov">🏛️ 已识别公共机构</option>
@@ -770,9 +710,9 @@ textarea:focus{outline:none;border-color:var(--accent)}
       <div style="margin-top:14px">
         <div style="font-weight:700;margin-bottom:8px">候选节点源（可多选）</div>
         <div class="orch-source-grid">
-          <label class="orch-source"><input type="checkbox" class="orch-src" value="vpngate" checked> 🇯🇵 VPN Gate / 筑波大学</label>
+          <label class="orch-source"><input type="checkbox" class="orch-src" value="vpngate" checked> 🇯🇵 VPN Gate（筑波大学官方源）</label>
           <label class="orch-source"><input type="checkbox" class="orch-src" value="ipspeed" checked> 🌐 IPSpeed OpenVPN</label>
-          <label class="orch-source"><input type="checkbox" class="orch-src" value="proxy" checked> 🔌 公共 SOCKS5 / HTTP</label>
+          <label class="orch-source"><input type="checkbox" class="orch-src" value="proxy"> 🔌 自定义 SOCKS5 / HTTP</label>
           <label class="orch-source"><input type="checkbox" class="orch-src" value="edu" checked> 🎓 海外高校学术</label>
           <label class="orch-source"><input type="checkbox" class="orch-src" value="residential" checked> 🏠 已识别住宅</label>
           <label class="orch-source"><input type="checkbox" class="orch-src" value="gov"> 🏛️ 已识别公共机构</label>
@@ -1207,8 +1147,9 @@ function formatCountry(code, name) {
 
 function renderExits(){
   const list = $('#list');
-  const n = view.exits.length;
-  $('#ecount').textContent = n ? n + ' 个' : '';
+  const n = view.exits.filter(e => e.status === 'up').length;
+  const total = view.exits.length;
+  $('#ecount').textContent = n ? n + ' 个' + (total !== n ? '（总计 ' + total + '）' : '') : (total ? '0 个可用' : '');
   const hasInboundsOrExits = view.exits.some(e => (e.inbounds && e.inbounds.length) || e.status === 'up');
   $('#exportAll').disabled = !hasInboundsOrExits;
   $('#stopall').disabled = !n;
@@ -1220,7 +1161,7 @@ function renderExits(){
   const avgPurity = purities.length ? Math.round(purities.reduce((a, b) => a + b, 0) / purities.length) : 0;
 
   const summaryBar = '<div class="stats-summary">'
-    + '<span class="stat-pill">运行出口<b>' + n + '</b></span>'
+    + '<span class="stat-pill">健康出口<b>' + n + '</b></span>'
     + (govCount ? '<span class="stat-pill">🏛️ 政府专网<b style="color:#ebb237">' + govCount + '</b></span>' : '')
     + (eduCount ? '<span class="stat-pill">🎓 学术科研<b style="color:#a855f7">' + eduCount + '</b></span>' : '')
     + '<span class="stat-pill">🏡 住宅家宽<b style="color:#3fa66b">' + resCount + '</b></span>'
@@ -1317,6 +1258,8 @@ function renderOrphans(){
     + '</div>';
 }
 
+let showAllFailed = false;
+
 function renderJobs(jobs){
   const box = $('#jobs');
   if(!jobs || !jobs.length){
@@ -1327,7 +1270,8 @@ function renderJobs(jobs){
   const header = '<div class="jobs-bar">'
     + '<span>任务进度 (' + jobs.length + ')</span>'
     + '<span class="spacer"></span>'
-    + '<button class="btn-xs" id="clearAllDoneJobs" title="清空已结束任务卡片">🧹 清空任务</button>'
+    + '<button class="btn-xs" id="clearAllDoneJobs" title="清空所有已完成/失败的任务卡片">🧹 清空任务卡片</button>'
+    + '<button class="btn-xs" id="toggleAllFailedBtn">' + (showAllFailed ? '🙈 隐藏全部爆红' : '👁️ 显示全部爆红') + '</button>'
     + '</div>';
 
   const items = jobs.map(j => {
@@ -1347,10 +1291,15 @@ function renderJobs(jobs){
     stepsHtml += runningSteps.map(renderStep).join('');
 
     if(failedSteps.length > 0){
-      // 失败候选不再逐个渲染成红色按钮；它们已经被后端过滤/冷却，
-      // 页面只保留一个轻量统计，避免几百个死节点把移动端页面撑爆。
-      stepsHtml += '<span class="step failed-summary" title="失败节点已自动隐藏并进入冷却">'
-        + ICON.bad + '已自动过滤 ' + failedSteps.length + ' 个失败候选</span>';
+      const isRunning = j.status === 'running';
+      // 跑完后默认优雅自动折叠隐藏爆红失败项！
+      const isFailedOpen = showAllFailed || (isRunning && failedSteps.length < 4);
+      stepsHtml += '<button class="btn-xs step failed-summary" data-togglejobfailed="' + esc(j.id) + '" title="点击展开/折叠未连通候选">'
+        + (isFailedOpen ? '▲ 收起 ' : '▼ 查看 ') + failedSteps.length + ' 个未连通候选</button>';
+      stepsHtml += '<button class="btn-xs danger" data-cleanjobfailed="' + esc(j.id) + '" title="彻底清除此任务里的爆红记录">🧹 清理爆红</button>';
+      stepsHtml += '<div class="failed-steps-wrap' + (isFailedOpen ? ' open' : '') + '" id="failed_wrap_' + esc(j.id) + '">'
+        + failedSteps.map(renderStep).join('')
+        + '</div>';
     }
 
     const close = j.status === 'running' ? ''
@@ -1359,7 +1308,7 @@ function renderJobs(jobs){
     return '<div class="job"><div class="top"><strong>' + esc(j.summary) + '</strong>'
       + '<span class="count">' + j.done + '/' + j.total
       + (okSteps.length ? ' · <span style="color:var(--ok)">已成功 ' + okSteps.length + '</span>' : '')
-      + (failedSteps.length ? ' · <span style="color:var(--dim)">已过滤 ' + failedSteps.length + '</span>' : '')
+      + (failedSteps.length ? ' · <span style="color:var(--bad)">失败 ' + failedSteps.length + '</span>' : '')
       + '</span>'
       + '<span class="spacer"></span>' + close + '</div>'
       + '<div class="steps">' + stepsHtml + '</div></div>';
@@ -1369,6 +1318,7 @@ function renderJobs(jobs){
 }
 
 async function poll(){
+  if(document.hidden) return;
   try{
     view = await api('/api/exits');
     $('#panel').textContent = view.panel
@@ -1822,6 +1772,30 @@ document.addEventListener('click', async e => {
   const clearAllJobs = e.target.closest('#clearAllDoneJobs');
   if(clearAllJobs){
     try{ await api('/api/jobs/clear', {method:'POST'}); toast('已清理所有任务卡片'); }catch(err){}
+    poll();
+    return;
+  }
+  const toggleAll = e.target.closest('#toggleAllFailedBtn');
+  if(toggleAll){
+    showAllFailed = !showAllFailed;
+    poll();
+    return;
+  }
+  const toggleJob = e.target.closest('[data-togglejobfailed]');
+  if(toggleJob){
+    const wrap = $('#failed_wrap_' + toggleJob.dataset.togglejobfailed);
+    if(wrap){
+      wrap.classList.toggle('open');
+      toggleJob.textContent = wrap.classList.contains('open') ? '▲ 收起候选' : '▼ 查看候选';
+    }
+    return;
+  }
+  const cleanJob = e.target.closest('[data-cleanjobfailed]');
+  if(cleanJob){
+    try{
+      await api('/api/jobs/clean_failed?id=' + encodeURIComponent(cleanJob.dataset.cleanjobfailed), {method:'POST'});
+      toast('已清理该任务中的爆红失败项');
+    }catch(err){}
     poll();
     return;
   }
@@ -2910,7 +2884,7 @@ const nExitBtn = $('#newexit');
 if(nExitBtn) nExitBtn.onclick = () => { openModal('wizard'); if(!regionsLoaded) loadWizard(); else { renderRegions(); loadWizard(); } };
 
 poll();
-setInterval(poll, 3000);
+setInterval(poll, 7000);
 </script>
 </body>
 </html>`

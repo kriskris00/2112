@@ -448,6 +448,8 @@ func firstLine(s string) string {
 }
 
 // hotCountries 定义核心热门国家列表：各维持 3 个健康可用节点
+const defaultAutoMaxActive = 30
+
 var hotCountries = map[string]bool{
 	"JP": true, "US": true, "HK": true, "TW": true,
 	"SG": true, "KR": true, "GB": true, "DE": true,
@@ -527,7 +529,7 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 		opts.MaxStarts = 20
 	}
 	if opts.VerifyTimeout <= 0 {
-		opts.VerifyTimeout = 25 * time.Second
+		opts.VerifyTimeout = 45 * time.Second
 	}
 	if len(opts.Sources) == 0 {
 		opts.Sources = []string{"all"}
@@ -723,11 +725,9 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 	// 5. 为节点池中实际存在的国家补齐配额。
 	// 关键规则：候选节点不会因为“看起来可用”就直接进入正式出口，
 	// 必须逐个启动并完成真实出网验证；失败立即停止并冷却。
-	// 5. 为节点池中实际存在的国家补齐配额。
-	// 先并发做一轮真实测活，再对通过的少量候选建立隧道。这样“测活”不再
-	// 一个节点一个节点串行等待，尤其是 VPN Gate 大量死节点时速度差异很大。
 	var verifiedStarted []*Tunnel
 	startsUsed := 0
+	attemptsUsed := 0
 	for _, cc := range sortedCountries {
 		m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
 			p.CurrentCountry = cc
@@ -761,6 +761,7 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 			continue
 		}
 
+		// 先按已有质量信息排序；真正是否加入由下面的实际隧道验证决定。
 		sort.SliceStable(cands, func(i, j int) bool {
 			typeRank := func(t string) int {
 				switch strings.ToLower(t) {
@@ -796,54 +797,32 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 			return cands[i].SpeedMbps > cands[j].SpeedMbps
 		})
 
-		probeCount := needed * 4
-		if probeCount < 8 {
-			probeCount = 8
-		}
-		if probeCount > 24 {
-			probeCount = 24
-		}
-		if len(cands) > probeCount {
-			cands = cands[:probeCount]
-		}
-		m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
-			p.CandidatesTested += len(cands)
-			p.Message = fmt.Sprintf("%s 并发实测 %d 个候选，剔除无握手/无回包节点…", cc, len(cands))
-		})
-
-		live := probeNodesLive(cands, 1200*time.Millisecond)
-		liveSet := make(map[string]bool, len(live))
-		for _, n := range live {
-			liveSet[nodeKey(n)] = true
-		}
-		for _, n := range cands {
-			if !liveSet[nodeKey(n)] {
-				m.markNodeFailed(n)
-			}
-		}
-		if len(cands) > len(live) {
-			failed := len(cands) - len(live)
-			m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
-				p.Failed += failed
-				p.LastError = fmt.Sprintf("%s：%d 个候选未通过真实测活", cc, failed)
-			})
-		}
-		m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
-			p.LivePassed += len(live)
-			p.Stage = "start"
-			p.Message = fmt.Sprintf("%s 测活通过 %d 个，开始建立正式隧道…", cc, len(live))
-		})
-
-		for _, pick := range live {
-			if needed <= 0 || startsUsed >= opts.MaxStarts {
+		for _, pick := range cands {
+			if needed <= 0 || attemptsUsed >= opts.MaxStarts {
 				break
 			}
-			pick.Ping = int(pick.Ping)
+			attemptsUsed++
 			m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
 				p.CurrentNode = pick.HostName
+				p.CandidatesTested++
+				p.Message = fmt.Sprintf("测活 %s / %s：先检查远端可达性…", cc, pick.HostName)
+			})
+			// 第一阶段快速实测：代理必须完成真实 CONNECT；OpenVPN 至少确认远端服务可达。
+			// 第二阶段 Start/tryNode 会在独立 netns 中再次验证真实出口 IP，这是最终准入门槛。
+			alive, rtt, _, probeErr := probeNodeLive(pick, 1800*time.Millisecond)
+			if !alive {
+				m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) { p.Failed++; p.LastError = firstLine(fmt.Sprint(probeErr)) })
+				m.markNodeFailed(pick)
+				log.Printf("[智能编排] 预检失败，跳过 %s (%s): %v", pick.HostName, cc, probeErr)
+				continue
+			}
+			pick.Ping = int(rtt)
+			m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
+				p.LivePassed++
 				p.Stage = "start"
 				p.Message = fmt.Sprintf("%s 测活通过，正在建立真实隧道…", pick.HostName)
 			})
+
 			t, err := m.StartExact(pick)
 			if err != nil {
 				m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) { p.Failed++; p.LastError = firstLine(fmt.Sprint(err)) })
@@ -860,7 +839,7 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 
 			deadline := time.Now().Add(opts.VerifyTimeout)
 			for time.Now().Before(deadline) && t.Status == "starting" {
-				time.Sleep(250 * time.Millisecond)
+				time.Sleep(500 * time.Millisecond)
 			}
 			if t.Status != "up" || strings.TrimSpace(t.ExitIP) == "" {
 				m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
@@ -886,7 +865,7 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 				p.Added++
 				p.Message = fmt.Sprintf("%s 验证通过：%s，加入正式出口并准备绑定节点", cc, t.ExitIP)
 			})
-			log.Printf("[智能编排] %s 验证通过并加入正式出口: %s -> %s (%dms)", cc, t.Node.HostName, t.ExitIP, pick.Ping)
+			log.Printf("[智能编排] %s 验证通过并加入正式出口: %s -> %s (%dms)", cc, t.Node.HostName, t.ExitIP, rtt)
 		}
 	}
 

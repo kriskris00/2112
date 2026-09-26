@@ -103,7 +103,7 @@ func TestOrchestrateSourceAllowed(t *testing.T) {
 
 func TestDefaultAutoOrchestrateOptions(t *testing.T) {
 	o := DefaultAutoOrchestrateOptions()
-	if o.HotTarget != 3 || o.ColdTarget != 1 || o.MaxStarts != 12 {
+	if o.HotTarget != 3 || o.ColdTarget != 1 || o.MaxStarts != 8 {
 		t.Fatalf("默认编排参数异常: %+v", o)
 	}
 }

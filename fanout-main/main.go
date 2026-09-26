@@ -18,12 +18,12 @@ import (
 )
 
 // version 由构建时通过 -ldflags 注入。
-var version = "v3.1.0-live-engine"
+var version = "v3.0.0-Jesee-Mod"
 
 func main() {
 	var (
 		webPort  = flag.Int("web", 8899, "Web 管理端口")
-		maxSlots = flag.Int("max", 150, "最多同时运行的隧道数")
+		maxSlots = flag.Int("max", 40, "最多同时运行的隧道数（自动编排另有健康出口上限）")
 		workDir  = flag.String("dir", "/var/lib/fanout", "工作目录")
 	)
 	panelMode := flag.String("panel", "", "节点链接后端: 留空按界面设置/自动探测, 3x-ui, native, xray-cf-lite")
@@ -67,18 +67,6 @@ func main() {
 	initNodes, _ := mgr.Nodes()
 	log.Printf("节点底池已就绪: %d 个节点 (动态多源节点池，含 VPN Gate/筑波大学及其他公开 OpenVPN 源)", len(initNodes))
 
-	// 后台并发拉取全网最新节点与多源 OpenVPN/代理源，不阻塞服务极速启动
-	go func() {
-		log.Printf("后台开始并发拉取全网最新节点与多源 OpenVPN/代理源...")
-		if n, err := mgr.RefreshNodes(); err != nil {
-			log.Printf("后台拉取提示（底池正常运作）: %v", err)
-		} else {
-			log.Printf("全网节点池已聚合扩展至 %d 个节点", n)
-		}
-		// 节点池拉取完毕后立即触发全网自动编排（热门国家各3节点，冷门国家各1节点）
-		mgr.AutoOrchestrate()
-	}()
-
 	if n, err := mgr.restoreState(); err != nil {
 		log.Printf("恢复上次状态失败: %v", err)
 	} else if n > 0 {
@@ -88,6 +76,17 @@ func main() {
 		go mgr.ReconcileOutbounds()
 	}
 	go mgr.reconcilePanelBindings()
+
+	// 先恢复并稳定现有状态，再拉取新源和自动编排，避免重启时“旧隧道恢复”和“新隧道编排”同时抢 40 个槽位。
+	go func() {
+		log.Printf("后台开始并发拉取最新官方节点源...")
+		if n, err := mgr.RefreshNodes(); err != nil {
+			log.Printf("后台拉取提示: %v", err)
+		} else {
+			log.Printf("节点池已刷新至 %d 个本轮有效候选", n)
+		}
+		mgr.AutoOrchestrate()
+	}()
 
 	go mgr.WatchHealth()
 	go mgr.WatchAutoOrchestrate()
@@ -275,19 +274,14 @@ func apiNodes(m *Manager) http.HandlerFunc {
 		})
 
 		if liveOnly {
-			// 不要只测前 120 个就结束：前排可能全部是死节点。扩大到 2x 候选，
-			// 但设置硬上限，保证手机点国家时不会拖成几十秒。
-			probeLimit := limit * 2
-			if probeLimit < 120 {
-				probeLimit = 120
-			}
-			if probeLimit > 300 {
-				probeLimit = 300
+			probeLimit := limit
+			if probeLimit > 180 {
+				probeLimit = 180
 			}
 			if len(filtered) > probeLimit {
 				filtered = filtered[:probeLimit]
 			}
-			filtered = probeNodesLive(filtered, 1200*time.Millisecond)
+			filtered = probeNodesLive(filtered, 1500*time.Millisecond)
 			// live 模式只返回本机刚刚真实探测通过的节点；没有成功探测到的绝不展示。
 		}
 
