@@ -24,6 +24,7 @@ type Manager struct {
 	refreshing    bool
 	orchestrateMu sync.Mutex
 	bindingMu     sync.Mutex
+	limitMu       sync.Mutex
 	stateMu       sync.Mutex
 	progressMu    sync.RWMutex
 	orchProgress  AutoOrchestrateProgress
@@ -493,12 +494,84 @@ func (m *Manager) Start(node Node) (*Tunnel, error) {
 
 // StartExact 严格启动用户已经选中的节点，不自动偷偷换成同国其它节点。
 func (m *Manager) StartExact(node Node) (*Tunnel, error) {
+	m.limitMu.Lock()
+	defer m.limitMu.Unlock()
+	if err := m.checkExitNodeLimit(node, ""); err != nil {
+		return nil, err
+	}
 	return m.startTunnel(node, "", true)
 }
 
 // StartWithPolicy 用于策略型批量出口：策略在隧道启动前就写入，避免并发启动时丢失日本运营商限制。
 func (m *Manager) StartWithPolicy(node Node, jpMode string) (*Tunnel, error) {
+	m.limitMu.Lock()
+	defer m.limitMu.Unlock()
+	if err := m.checkExitNodeLimit(node, jpMode); err != nil {
+		return nil, err
+	}
 	return m.startTunnel(node, jpMode, false)
+}
+
+// checkExitNodeLimit 在真正占用槽位前统一执行限额检查，因此智能编排、
+// 批量策略、手动选节点三条路径都会受到同一条规则约束。
+func (m *Manager) checkExitNodeLimit(node Node, policyMode string) error {
+	cfg := getExitNodeLimitSettings()
+	if !cfg.Enabled {
+		return nil
+	}
+	region := strings.ToUpper(strings.TrimSpace(node.CountryCode))
+	if region == "" {
+		region = strings.ToUpper(strings.TrimSpace(countryCodeForName(node.Country)))
+	}
+	if region == "" {
+		region = "UNKNOWN"
+	}
+	mode := normalizeExitNodeLimitMode(cfg.Mode)
+	if mode == "isp" {
+		isp := normalizeISP(node.ISP)
+		if isp == "" {
+			isp = "未知运营商"
+		}
+		count := 0
+		m.mu.RLock()
+		for _, t := range m.tunnels {
+			if t.Status == "stopped" || t.Status == "failed" {
+				continue
+			}
+			tr := strings.ToUpper(strings.TrimSpace(t.TargetRegion))
+			if tr == "" {
+				tr = strings.ToUpper(strings.TrimSpace(t.Node.CountryCode))
+			}
+			if tr == region && strings.EqualFold(normalizeISP(t.Node.ISP), isp) {
+				count++
+			}
+		}
+		m.mu.RUnlock()
+		if count >= cfg.Limit {
+			return fmt.Errorf("%s · %s 运营商节点已达到限额（%d 个）", countryNameForCode(region), isp, cfg.Limit)
+		}
+		return nil
+	}
+
+	count := 0
+	m.mu.RLock()
+	for _, t := range m.tunnels {
+		if t.Status == "stopped" || t.Status == "failed" {
+			continue
+		}
+		tr := strings.ToUpper(strings.TrimSpace(t.TargetRegion))
+		if tr == "" {
+			tr = strings.ToUpper(strings.TrimSpace(t.Node.CountryCode))
+		}
+		if tr == region {
+			count++
+		}
+	}
+	m.mu.RUnlock()
+	if count >= cfg.Limit {
+		return fmt.Errorf("%s 节点已达到限额（%d 个）", countryNameForCode(region), cfg.Limit)
+	}
+	return nil
 }
 
 func (m *Manager) bringUpExact(t *Tunnel, notify bool) {

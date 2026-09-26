@@ -682,6 +682,22 @@ textarea:focus{outline:none;border-color:var(--accent)}
       </div>
       <div class="hint bad" id="setPortHint">改端口或监听地址会切换监听，保存后要用新地址重新打开界面。</div>
 
+      <div style="margin-top:16px;padding:12px 14px;border:1px solid rgba(99,102,241,.28);border-radius:12px;background:rgba(99,102,241,.06)">
+        <div style="font-weight:700;margin-bottom:8px">📦 出口节点限额</div>
+        <label class="f" style="margin:0 0 8px"><span><input id="setExitLimitEnabled" type="checkbox" style="width:auto;margin-right:6px">启用节点限额</span></label>
+        <div class="setrow">
+          <label class="f" style="margin:0"><span>限额数量</span>
+            <input id="setExitLimit" type="number" min="1" max="1000" value="5"></label>
+          <label class="f" style="margin:0"><span>限额方式</span>
+            <select id="setExitLimitMode">
+              <option value="country">按国家限制</option>
+              <option value="isp">按国家 + 运营商限制</option>
+            </select>
+          </label>
+        </div>
+        <div class="hint" style="margin-top:7px">默认 5 个。按国家限制时，同一国家最多 5 个出口；按国家 + 运营商限制时，同一国家的同一运营商最多 5 个。智能编排、批量开口、手动选节点都会统一检查，达到限额会直接提示。</div>
+      </div>
+
       <div class="updsec">
         <div class="updrow">
           <div class="updver">版本 <b id="updCur">-</b><span id="updLatest"></span></div>
@@ -2268,6 +2284,9 @@ $('#settingsBtn').onclick = async () => {
     $('#setPath').value = (s.base_path || '').replace(/^\//, '');
     $('#setPort').value = s.port || '';
     $('#setListen').value = s.listen_addr || '0.0.0.0';
+    $('#setExitLimitEnabled').checked = s.exit_limit_enabled !== false;
+    $('#setExitLimit').value = s.exit_limit || 5;
+    $('#setExitLimitMode').value = s.exit_limit_mode || 'country';
     $('#setPathHint').textContent = '界面挂在这个路径下，扫端口的探不到。只能用字母数字和 - _。';
     $('#updCur').textContent = s.version || '-';
     $('#updLatest').textContent = '';
@@ -2348,6 +2367,9 @@ $('#setSave').onclick = async e => {
   const port = parseInt($('#setPort').value.trim(), 10);
   if(port) body.port = port;
   body.listen_addr = $('#setListen').value;
+  body.exit_limit_enabled = $('#setExitLimitEnabled').checked;
+  body.exit_limit = Math.max(1, Math.min(1000, parseInt($('#setExitLimit').value || '5', 10)));
+  body.exit_limit_mode = $('#setExitLimitMode').value || 'country';
 
   const portChanged = curSettings && (port !== curSettings.port
     || body.listen_addr !== (curSettings.listen_addr || '0.0.0.0'));

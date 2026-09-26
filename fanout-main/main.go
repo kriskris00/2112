@@ -48,6 +48,9 @@ func main() {
 		log.Fatalf("创建工作目录失败: %v", err)
 	}
 	initIPIntel(*workDir)
+	if _, err := loadExitNodeLimitSettings(*workDir); err != nil {
+		log.Printf("加载出口节点限额设置失败，使用默认值: %v", err)
+	}
 	setPublicIPOverride(*publicIP)
 	go hostPublicIP() // 预热探测，别让首个请求阻塞
 	if err := prepareHost(); err != nil {
@@ -559,10 +562,13 @@ func apiCred(m *Manager) http.HandlerFunc {
 // GET 返回当前值（不含明文口令）；POST 按传入的字段逐项应用，任一项失败即整体回报。
 func apiSettings(auth *Auth, srv *webServer) http.HandlerFunc {
 	type settingsReq struct {
-		Password   *string `json:"password"`    // 非空则改口令
-		BasePath   *string `json:"base_path"`   // 提供即改访问路径（空串=去掉前缀）
-		Port       *int    `json:"port"`        // 提供即改监听端口
-		ListenAddr *string `json:"listen_addr"` // 提供即改监听地址
+		Password         *string `json:"password"`    // 非空则改口令
+		BasePath         *string `json:"base_path"`   // 提供即改访问路径（空串=去掉前缀）
+		Port             *int    `json:"port"`        // 提供即改监听端口
+		ListenAddr       *string `json:"listen_addr"` // 提供即改监听地址
+		ExitLimitEnabled *bool   `json:"exit_limit_enabled"`
+		ExitLimit        *int    `json:"exit_limit"`
+		ExitLimitMode    *string `json:"exit_limit_mode"`
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
@@ -586,6 +592,23 @@ func apiSettings(auth *Auth, srv *webServer) http.HandlerFunc {
 					return
 				}
 			}
+			if in.ExitLimitEnabled != nil || in.ExitLimit != nil || in.ExitLimitMode != nil {
+				next := getExitNodeLimitSettings()
+				if in.ExitLimitEnabled != nil {
+					next.Enabled = *in.ExitLimitEnabled
+				}
+				if in.ExitLimit != nil {
+					next.Limit = *in.ExitLimit
+				}
+				if in.ExitLimitMode != nil {
+					next.Mode = *in.ExitLimitMode
+				}
+				if err := setExitNodeLimitSettings(next); err != nil {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+					return
+				}
+			}
+
 			// 改端口 / 监听地址：合成一份新的 WebSettings 一起应用，避免绑两次
 			if in.Port != nil || in.ListenAddr != nil {
 				next := getWebSettings()
@@ -608,11 +631,14 @@ func apiSettings(auth *Auth, srv *webServer) http.HandlerFunc {
 			listen = "0.0.0.0"
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"base_path":    currentBasePath(),
-			"port":         cfg.Port,
-			"listen_addr":  listen,
-			"has_password": true,
-			"version":      version,
+			"base_path":          currentBasePath(),
+			"port":               cfg.Port,
+			"listen_addr":        listen,
+			"has_password":       true,
+			"version":            version,
+			"exit_limit_enabled": getExitNodeLimitSettings().Enabled,
+			"exit_limit":         getExitNodeLimitSettings().Limit,
+			"exit_limit_mode":    getExitNodeLimitSettings().Mode,
 		})
 	}
 }

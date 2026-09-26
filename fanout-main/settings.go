@@ -21,7 +21,19 @@ type WebSettings struct {
 	ListenAddr string `json:"listen_addr"`
 }
 
+// ExitNodeLimitSettings 控制出口节点数量上限。
+// Mode=country 时按国家限制；Mode=isp 时按“国家+运营商”分别限制。
+type ExitNodeLimitSettings struct {
+	Enabled bool   `json:"enabled"`
+	Limit   int    `json:"limit"`
+	Mode    string `json:"mode"`
+}
+
 var (
+	exitNodeLimitMu   sync.RWMutex
+	exitNodeLimitCur  ExitNodeLimitSettings
+	exitNodeLimitPath string
+
 	webSettingsMu   sync.RWMutex
 	webSettingsCur  WebSettings
 	webSettingsPath string
@@ -86,6 +98,76 @@ func saveWebSettings() error {
 		return err
 	}
 	return os.Rename(tmp, webSettingsPath)
+}
+
+func exitNodeLimitFilePath(dir string) string { return filepath.Join(dir, "exit_node_limit.json") }
+
+func normalizeExitNodeLimitMode(mode string) string {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode == "isp" || mode == "operator" || mode == "provider" {
+		return "isp"
+	}
+	return "country"
+}
+
+func loadExitNodeLimitSettings(dir string) (ExitNodeLimitSettings, error) {
+	exitNodeLimitPath = exitNodeLimitFilePath(dir)
+	s := ExitNodeLimitSettings{Enabled: true, Limit: 5, Mode: "country"}
+	blob, err := os.ReadFile(exitNodeLimitPath)
+	if os.IsNotExist(err) {
+		exitNodeLimitMu.Lock()
+		exitNodeLimitCur = s
+		exitNodeLimitMu.Unlock()
+		return s, saveExitNodeLimitSettings()
+	}
+	if err != nil {
+		return s, err
+	}
+	if err := json.Unmarshal(blob, &s); err != nil {
+		return s, err
+	}
+	if s.Limit < 1 {
+		s.Limit = 5
+	}
+	if s.Limit > 1000 {
+		s.Limit = 1000
+	}
+	s.Mode = normalizeExitNodeLimitMode(s.Mode)
+	exitNodeLimitMu.Lock()
+	exitNodeLimitCur = s
+	exitNodeLimitMu.Unlock()
+	return s, nil
+}
+
+func getExitNodeLimitSettings() ExitNodeLimitSettings {
+	exitNodeLimitMu.RLock()
+	defer exitNodeLimitMu.RUnlock()
+	return exitNodeLimitCur
+}
+
+func saveExitNodeLimitSettings() error {
+	exitNodeLimitMu.RLock()
+	blob, err := json.MarshalIndent(exitNodeLimitCur, "", "  ")
+	exitNodeLimitMu.RUnlock()
+	if err != nil {
+		return err
+	}
+	tmp := exitNodeLimitPath + ".tmp"
+	if err := os.WriteFile(tmp, blob, 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, exitNodeLimitPath)
+}
+
+func setExitNodeLimitSettings(next ExitNodeLimitSettings) error {
+	if next.Limit < 1 || next.Limit > 1000 {
+		return fmt.Errorf("节点限额必须在 1-1000 之间")
+	}
+	next.Mode = normalizeExitNodeLimitMode(next.Mode)
+	exitNodeLimitMu.Lock()
+	exitNodeLimitCur = next
+	exitNodeLimitMu.Unlock()
+	return saveExitNodeLimitSettings()
 }
 
 // normalizeListenAddr 把用户填的监听地址规整成合法值：空 / 0.0.0.0 / 127.0.0.1 / 具体 IP。
