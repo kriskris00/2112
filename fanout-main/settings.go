@@ -21,12 +21,14 @@ type WebSettings struct {
 	ListenAddr string `json:"listen_addr"`
 }
 
-// ExitNodeLimitSettings 控制出口节点数量上限。
-// Mode=country 时按国家限制；Mode=isp 时按“国家+运营商”分别限制。
+// ExitNodeLimitSettings 是全局出口节点限额：对所有国家统一按“国家”计算。
+// 运营商只作为节点信息展示，不单独产生配额，因此同一国家无论运营商如何不同，
+// 都共享同一个全局国家上限。
 type ExitNodeLimitSettings struct {
-	Enabled bool   `json:"enabled"`
-	Limit   int    `json:"limit"`
-	Mode    string `json:"mode"`
+	Enabled bool `json:"enabled"`
+	Limit   int  `json:"limit"`
+	// Mode 保留用于兼容旧配置，但不再参与限额计算。
+	Mode string `json:"mode,omitempty"`
 }
 
 var (
@@ -102,17 +104,9 @@ func saveWebSettings() error {
 
 func exitNodeLimitFilePath(dir string) string { return filepath.Join(dir, "exit_node_limit.json") }
 
-func normalizeExitNodeLimitMode(mode string) string {
-	mode = strings.ToLower(strings.TrimSpace(mode))
-	if mode == "isp" || mode == "operator" || mode == "provider" {
-		return "isp"
-	}
-	return "country"
-}
-
 func loadExitNodeLimitSettings(dir string) (ExitNodeLimitSettings, error) {
 	exitNodeLimitPath = exitNodeLimitFilePath(dir)
-	s := ExitNodeLimitSettings{Enabled: true, Limit: 5, Mode: "country"}
+	s := ExitNodeLimitSettings{Enabled: true, Limit: 5}
 	blob, err := os.ReadFile(exitNodeLimitPath)
 	if os.IsNotExist(err) {
 		exitNodeLimitMu.Lock()
@@ -132,7 +126,6 @@ func loadExitNodeLimitSettings(dir string) (ExitNodeLimitSettings, error) {
 	if s.Limit > 1000 {
 		s.Limit = 1000
 	}
-	s.Mode = normalizeExitNodeLimitMode(s.Mode)
 	exitNodeLimitMu.Lock()
 	exitNodeLimitCur = s
 	exitNodeLimitMu.Unlock()
@@ -163,7 +156,6 @@ func setExitNodeLimitSettings(next ExitNodeLimitSettings) error {
 	if next.Limit < 1 || next.Limit > 1000 {
 		return fmt.Errorf("节点限额必须在 1-1000 之间")
 	}
-	next.Mode = normalizeExitNodeLimitMode(next.Mode)
 	exitNodeLimitMu.Lock()
 	exitNodeLimitCur = next
 	exitNodeLimitMu.Unlock()

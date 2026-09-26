@@ -353,6 +353,15 @@ textarea:focus{outline:none;border-color:var(--accent)}
 <main>
   <div class="jobs" id="jobs"></div>
 
+  <div id="globalExitLimitBar" style="margin:0 0 12px;padding:12px 14px;border:1px solid rgba(99,102,241,.30);border-radius:14px;background:rgba(255,255,255,.58);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 6px 20px rgba(15,23,42,.05);display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <div style="font-weight:750;white-space:nowrap">🛡️ 全局出口节点限额</div>
+    <label style="display:flex;align-items:center;gap:6px;white-space:nowrap"><input id="globalExitLimitEnabled" type="checkbox" style="width:auto;margin:0"> 启用</label>
+    <label style="display:flex;align-items:center;gap:6px;white-space:nowrap">每个国家最多 <input id="globalExitLimit" type="number" min="1" max="1000" value="5" style="width:78px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:rgba(255,255,255,.75);color:var(--text);font-weight:700;text-align:center"> 个</label>
+    <span style="font-size:12px;color:var(--dim);flex:1;min-width:220px">所有国家统一生效；不区分运营商。同一国家达到上限后，智能编排、手动添加、批量开口都会停止继续创建。</span>
+    <button class="primary" id="saveGlobalExitLimit" style="padding:6px 13px">保存</button>
+    <span id="globalExitLimitStatus" style="font-size:12px;color:var(--dim)"></span>
+  </div>
+
   <div class="bar">
     <h2>出口</h2>
     <span class="count" id="ecount"></span>
@@ -681,22 +690,6 @@ textarea:focus{outline:none;border-color:var(--accent)}
           </select></label>
       </div>
       <div class="hint bad" id="setPortHint">改端口或监听地址会切换监听，保存后要用新地址重新打开界面。</div>
-
-      <div style="margin-top:16px;padding:12px 14px;border:1px solid rgba(99,102,241,.28);border-radius:12px;background:rgba(99,102,241,.06)">
-        <div style="font-weight:700;margin-bottom:8px">📦 出口节点限额</div>
-        <label class="f" style="margin:0 0 8px"><span><input id="setExitLimitEnabled" type="checkbox" style="width:auto;margin-right:6px">启用节点限额</span></label>
-        <div class="setrow">
-          <label class="f" style="margin:0"><span>限额数量</span>
-            <input id="setExitLimit" type="number" min="1" max="1000" value="5"></label>
-          <label class="f" style="margin:0"><span>限额方式</span>
-            <select id="setExitLimitMode">
-              <option value="country">按国家限制</option>
-              <option value="isp">按国家 + 运营商限制</option>
-            </select>
-          </label>
-        </div>
-        <div class="hint" style="margin-top:7px">默认 5 个。按国家限制时，同一国家最多 5 个出口；按国家 + 运营商限制时，同一国家的同一运营商最多 5 个。智能编排、批量开口、手动选节点都会统一检查，达到限额会直接提示。</div>
-      </div>
 
       <div class="updsec">
         <div class="updrow">
@@ -1345,6 +1338,36 @@ function renderJobs(jobs){
 
   box.innerHTML = header + items;
 }
+
+async function loadGlobalExitLimit(){
+  try{
+    const s = await api('/api/settings');
+    $('#globalExitLimitEnabled').checked = s.exit_limit_enabled !== false;
+    $('#globalExitLimit').value = Math.max(1, Math.min(1000, Number(s.exit_limit || 5)));
+    $('#globalExitLimitStatus').textContent = (s.exit_limit_enabled !== false ? '已启用：默认上限 ' + (s.exit_limit || 5) + ' / 国家' : '已关闭');
+  }catch(e){
+    $('#globalExitLimitStatus').textContent = '读取失败';
+  }
+}
+
+$('#saveGlobalExitLimit').onclick = async () => {
+  const btn = $('#saveGlobalExitLimit');
+  btn.disabled = true;
+  try{
+    const limit = Math.max(1, Math.min(1000, parseInt($('#globalExitLimit').value || '5', 10)));
+    const enabled = $('#globalExitLimitEnabled').checked;
+    const s = await api('/api/settings', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({exit_limit_enabled: enabled, exit_limit: limit})
+    });
+    $('#globalExitLimit').value = s.exit_limit || limit;
+    $('#globalExitLimitStatus').textContent = enabled ? '已保存：每个国家最多 ' + (s.exit_limit || limit) + ' 个' : '已保存：限额已关闭';
+    toast(enabled ? '全局国家限额已保存' : '全局国家限额已关闭');
+    poll();
+  }catch(e){
+    toast('保存全局限额失败: ' + e.message, true);
+  }finally{ btn.disabled = false; }
+};
 
 async function poll(){
   if(document.hidden) return;
@@ -2284,9 +2307,6 @@ $('#settingsBtn').onclick = async () => {
     $('#setPath').value = (s.base_path || '').replace(/^\//, '');
     $('#setPort').value = s.port || '';
     $('#setListen').value = s.listen_addr || '0.0.0.0';
-    $('#setExitLimitEnabled').checked = s.exit_limit_enabled !== false;
-    $('#setExitLimit').value = s.exit_limit || 5;
-    $('#setExitLimitMode').value = s.exit_limit_mode || 'country';
     $('#setPathHint').textContent = '界面挂在这个路径下，扫端口的探不到。只能用字母数字和 - _。';
     $('#updCur').textContent = s.version || '-';
     $('#updLatest').textContent = '';
@@ -2367,9 +2387,6 @@ $('#setSave').onclick = async e => {
   const port = parseInt($('#setPort').value.trim(), 10);
   if(port) body.port = port;
   body.listen_addr = $('#setListen').value;
-  body.exit_limit_enabled = $('#setExitLimitEnabled').checked;
-  body.exit_limit = Math.max(1, Math.min(1000, parseInt($('#setExitLimit').value || '5', 10)));
-  body.exit_limit_mode = $('#setExitLimitMode').value || 'country';
 
   const portChanged = curSettings && (port !== curSettings.port
     || body.listen_addr !== (curSettings.listen_addr || '0.0.0.0'));
@@ -2973,6 +2990,7 @@ if(srcBtn) srcBtn.onclick = () => { openModal('sourcesModal'); loadSources(); };
 const nExitBtn = $('#newexit');
 if(nExitBtn) nExitBtn.onclick = () => { openModal('wizard'); if(!regionsLoaded) loadWizard(); else { renderRegions(); loadWizard(); } };
 
+loadGlobalExitLimit();
 poll();
 setInterval(poll, 7000);
 </script>

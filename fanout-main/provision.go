@@ -836,9 +836,8 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 		}
 	}
 
-	// 2. 不再按国家做数量配额或精简。
-	// 只要节点通过真实验证，就允许进入正式出口；国家/数量不限制。
-	// 实际并发上限由 Manager.maxSlots 和本轮 MaxStarts 控制，避免把 VPS 资源无限打爆。
+	// 2. 全局国家限额由下面的候选筛选与 StartExact 双重执行；同一国家达到上限后，
+	// 智能编排不会继续为该国测活或创建出口。
 
 	m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
 		p.Stage = "collect"
@@ -920,6 +919,20 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 			p.Message = fmt.Sprintf("正在扫描 %s：只要真实验证通过就加入正式出口", cc)
 		})
 		needed := opts.MaxStarts - startsUsed
+		// 全局国家限额在智能编排筛选阶段就生效：达到上限后直接跳过该国，
+		// 不再继续测活/尝试启动该国的其它候选，避免“虽然启动被拒绝，但一直尝试”的假象。
+		if cfg := getExitNodeLimitSettings(); cfg.Enabled {
+			current := len(activeTunnelsByCountry[cc])
+			if current >= cfg.Limit {
+				m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
+					p.Message = fmt.Sprintf("%s 已达到全局限额（%d 个），跳过该国家", countryNameForCode(cc), cfg.Limit)
+				})
+				continue
+			}
+			if remain := cfg.Limit - current; needed > remain {
+				needed = remain
+			}
+		}
 
 		cands := append([]Node(nil), countryCandidates[cc]...)
 		filtered := cands[:0]
@@ -1081,7 +1094,7 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 	}
 
 	if len(verifiedStarted) > 0 {
-		log.Printf("[全网智能编排] 本轮加入 %d 个已实测出网的正式出口（不按国家限额，最大启动 %d）", len(verifiedStarted), opts.MaxStarts)
+		log.Printf("[全网智能编排] 本轮加入 %d 个已实测出网的正式出口（遵守全局国家限额，最大启动 %d）", len(verifiedStarted), opts.MaxStarts)
 	}
 
 	m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {

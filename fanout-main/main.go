@@ -568,7 +568,6 @@ func apiSettings(auth *Auth, srv *webServer) http.HandlerFunc {
 		ListenAddr       *string `json:"listen_addr"` // 提供即改监听地址
 		ExitLimitEnabled *bool   `json:"exit_limit_enabled"`
 		ExitLimit        *int    `json:"exit_limit"`
-		ExitLimitMode    *string `json:"exit_limit_mode"`
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
@@ -592,16 +591,13 @@ func apiSettings(auth *Auth, srv *webServer) http.HandlerFunc {
 					return
 				}
 			}
-			if in.ExitLimitEnabled != nil || in.ExitLimit != nil || in.ExitLimitMode != nil {
+			if in.ExitLimitEnabled != nil || in.ExitLimit != nil {
 				next := getExitNodeLimitSettings()
 				if in.ExitLimitEnabled != nil {
 					next.Enabled = *in.ExitLimitEnabled
 				}
 				if in.ExitLimit != nil {
 					next.Limit = *in.ExitLimit
-				}
-				if in.ExitLimitMode != nil {
-					next.Mode = *in.ExitLimitMode
 				}
 				if err := setExitNodeLimitSettings(next); err != nil {
 					writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -638,7 +634,6 @@ func apiSettings(auth *Auth, srv *webServer) http.HandlerFunc {
 			"version":            version,
 			"exit_limit_enabled": getExitNodeLimitSettings().Enabled,
 			"exit_limit":         getExitNodeLimitSettings().Limit,
-			"exit_limit_mode":    getExitNodeLimitSettings().Mode,
 		})
 	}
 }

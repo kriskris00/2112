@@ -512,8 +512,8 @@ func (m *Manager) StartWithPolicy(node Node, jpMode string) (*Tunnel, error) {
 	return m.startTunnel(node, jpMode, false)
 }
 
-// checkExitNodeLimit 在真正占用槽位前统一执行限额检查，因此智能编排、
-// 批量策略、手动选节点三条路径都会受到同一条规则约束。
+// checkExitNodeLimit 在真正占用槽位前统一执行全局国家限额检查。
+// 所有创建路径（智能编排、批量开口、手动选节点）最终都必须经过这里。
 func (m *Manager) checkExitNodeLimit(node Node, policyMode string) error {
 	cfg := getExitNodeLimitSettings()
 	if !cfg.Enabled {
@@ -525,32 +525,6 @@ func (m *Manager) checkExitNodeLimit(node Node, policyMode string) error {
 	}
 	if region == "" {
 		region = "UNKNOWN"
-	}
-	mode := normalizeExitNodeLimitMode(cfg.Mode)
-	if mode == "isp" {
-		isp := normalizeISP(node.ISP)
-		if isp == "" {
-			isp = "未知运营商"
-		}
-		count := 0
-		m.mu.RLock()
-		for _, t := range m.tunnels {
-			if t.Status == "stopped" || t.Status == "failed" {
-				continue
-			}
-			tr := strings.ToUpper(strings.TrimSpace(t.TargetRegion))
-			if tr == "" {
-				tr = strings.ToUpper(strings.TrimSpace(t.Node.CountryCode))
-			}
-			if tr == region && strings.EqualFold(normalizeISP(t.Node.ISP), isp) {
-				count++
-			}
-		}
-		m.mu.RUnlock()
-		if count >= cfg.Limit {
-			return fmt.Errorf("%s · %s 运营商节点已达到限额（%d 个）", countryNameForCode(region), isp, cfg.Limit)
-		}
-		return nil
 	}
 
 	count := 0
@@ -569,7 +543,7 @@ func (m *Manager) checkExitNodeLimit(node Node, policyMode string) error {
 	}
 	m.mu.RUnlock()
 	if count >= cfg.Limit {
-		return fmt.Errorf("%s 节点已达到限额（%d 个）", countryNameForCode(region), cfg.Limit)
+		return fmt.Errorf("%s 节点已达到限额（全局国家上限 %d 个）", countryNameForCode(region), cfg.Limit)
 	}
 	return nil
 }
