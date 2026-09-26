@@ -487,7 +487,7 @@ func orchestrateSourceAllowed(n Node, sources []string) bool {
 				return true
 			}
 		case "ipspeed", "openvpn":
-			if strings.EqualFold(n.Source, "ipspeed") || strings.EqualFold(n.Source, "vpngate") {
+			if strings.EqualFold(n.Source, "ipspeed") {
 				return true
 			}
 		case "custom":

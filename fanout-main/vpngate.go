@@ -856,6 +856,69 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 		}
 	}
 
+	// 3c. VPNBook（illria/gatevpn 默认源之一）：仅接受官网明确发布的 .ovpn。
+	if sourceFilter == "" || sourceFilter == "all" || sourceFilter == "vpnbook" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			nodes := fetchVPNBookNodes(timeout)
+			mu.Lock()
+			for _, n := range nodes {
+				nodeMap[n.IP+":"+strconv.Itoa(n.Port)] = n
+				freshKeys[n.IP+":"+strconv.Itoa(n.Port)] = true
+			}
+			if len(nodes) > 0 {
+				successCount++
+				if activeSrc == "" {
+					activeSrc = "VPNBook"
+				}
+			}
+			mu.Unlock()
+		}()
+	}
+
+	// 3d. Vpngate-Scraper（illria/gatevpn 默认源之一）。
+	if sourceFilter == "" || sourceFilter == "all" || sourceFilter == "vpngate_scraper" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			nodes := fetchVpngateScraperNodes(timeout)
+			mu.Lock()
+			for _, n := range nodes {
+				nodeMap[n.IP+":"+strconv.Itoa(n.Port)] = n
+				freshKeys[n.IP+":"+strconv.Itoa(n.Port)] = true
+			}
+			if len(nodes) > 0 {
+				successCount++
+				if activeSrc == "" {
+					activeSrc = "Vpngate-Scraper"
+				}
+			}
+			mu.Unlock()
+		}()
+	}
+
+	// 3e. PublicVPNList（illria/gatevpn 默认源之一）。只接受 API 明确给出并实际下载到的配置。
+	if sourceFilter == "" || sourceFilter == "all" || sourceFilter == "publicvpnlist" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			nodes := fetchPublicVPNListNodes(timeout)
+			mu.Lock()
+			for _, n := range nodes {
+				nodeMap[n.IP+":"+strconv.Itoa(n.Port)] = n
+				freshKeys[n.IP+":"+strconv.Itoa(n.Port)] = true
+			}
+			if len(nodes) > 0 {
+				successCount++
+				if activeSrc == "" {
+					activeSrc = "PublicVPNList"
+				}
+			}
+			mu.Unlock()
+		}()
+	}
+
 	// 3c. IPSpeed：独立的公开 OpenVPN 配置源。失败只影响这一源，不阻塞其他来源。
 	if sourceFilter == "" || sourceFilter == "all" || sourceFilter == "ipspeed" || sourceFilter == "openvpn" {
 		wg.Add(1)

@@ -419,6 +419,9 @@ textarea:focus{outline:none;border-color:var(--accent)}
           <option value="all">🌐 全部来源（只显示实时测活通过的节点）</option>
           <option value="vpngate">🇯🇵 VPN Gate（筑波大学学术项目官方源）</option>
           <option value="ipspeed">⚡ IPSpeed OpenVPN</option>
+          <option value="vpnbook">📘 VPNBook OpenVPN</option>
+          <option value="vpngate_scraper">🧪 Vpngate-Scraper</option>
+          <option value="publicvpnlist">🌐 PublicVPNList</option>
           <option value="proxy">🔌 自定义 SOCKS5 / HTTP（默认不拉公共垃圾源）</option>
           <option value="edu">🎓 海外高校学术科研网</option>
           <option value="residential">🏡 已识别住宅 / 家宽</option>
@@ -712,6 +715,9 @@ textarea:focus{outline:none;border-color:var(--accent)}
         <div class="orch-source-grid">
           <label class="orch-source"><input type="checkbox" class="orch-src" value="vpngate" checked> 🇯🇵 VPN Gate（筑波大学官方源）</label>
           <label class="orch-source"><input type="checkbox" class="orch-src" value="ipspeed" checked> 🌐 IPSpeed OpenVPN</label>
+          <label class="orch-source"><input type="checkbox" class="orch-src" value="vpnbook" checked> 📘 VPNBook OpenVPN</label>
+          <label class="orch-source"><input type="checkbox" class="orch-src" value="vpngate_scraper" checked> 🧪 Vpngate-Scraper</label>
+          <label class="orch-source"><input type="checkbox" class="orch-src" value="publicvpnlist" checked> 🌐 PublicVPNList</label>
           <label class="orch-source"><input type="checkbox" class="orch-src" value="proxy"> 🔌 自定义 SOCKS5 / HTTP</label>
           <label class="orch-source"><input type="checkbox" class="orch-src" value="edu" checked> 🎓 海外高校学术</label>
           <label class="orch-source"><input type="checkbox" class="orch-src" value="residential" checked> 🏠 已识别住宅</label>
