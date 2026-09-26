@@ -103,7 +103,7 @@ func cloneTemplateToTunnels(templateID int, hosts []string, tunnels []*Tunnel) (
 			}
 			created, err := x.CreateInbound(spec, tunnels)
 			if err != nil {
-				spec.Protocol = "vless"
+				spec.Protocol = "vmess"
 				created, err = x.CreateInbound(spec, tunnels)
 			}
 			if err == nil && created != nil {
@@ -727,7 +727,6 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 	// 必须逐个启动并完成真实出网验证；失败立即停止并冷却。
 	var verifiedStarted []*Tunnel
 	startsUsed := 0
-	attemptsUsed := 0
 	for _, cc := range sortedCountries {
 		m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
 			p.CurrentCountry = cc
@@ -797,28 +796,66 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 			return cands[i].SpeedMbps > cands[j].SpeedMbps
 		})
 
+		// 第一阶段并发快速预检：只做远端可达性/真实代理 CONNECT，不启动 VPN。
+		// 预检并发上限固定为 8，显著缩短“逐个测活”的等待，同时避免压垮 1G VPS。
+		probeLimit := needed + 2
+		if probeLimit < 4 {
+			probeLimit = 4
+		}
+		if probeLimit > 8 {
+			probeLimit = 8
+		}
+		if probeLimit < 1 {
+			continue
+		}
+		if len(cands) > probeLimit {
+			cands = cands[:probeLimit]
+		}
+
+		type probeResult struct {
+			node  Node
+			alive bool
+			rtt   int64
+			err   error
+		}
+		results := make(chan probeResult, len(cands))
+		var probeWG sync.WaitGroup
+		sem := make(chan struct{}, 8)
 		for _, pick := range cands {
-			if needed <= 0 || attemptsUsed >= opts.MaxStarts {
-				break
-			}
-			attemptsUsed++
-			m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
-				p.CurrentNode = pick.HostName
-				p.CandidatesTested++
-				p.Message = fmt.Sprintf("测活 %s / %s：先检查远端可达性…", cc, pick.HostName)
-			})
-			// 第一阶段快速实测：代理必须完成真实 CONNECT；OpenVPN 至少确认远端服务可达。
-			// 第二阶段 Start/tryNode 会在独立 netns 中再次验证真实出口 IP，这是最终准入门槛。
-			alive, rtt, _, probeErr := probeNodeLive(pick, 1800*time.Millisecond)
-			if !alive {
-				m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) { p.Failed++; p.LastError = firstLine(fmt.Sprint(probeErr)) })
-				m.markNodeFailed(pick)
-				log.Printf("[智能编排] 预检失败，跳过 %s (%s): %v", pick.HostName, cc, probeErr)
+			pick := pick
+			probeWG.Add(1)
+			go func() {
+				defer probeWG.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				alive, rtt, _, err := probeNodeLive(pick, 1800*time.Millisecond)
+				results <- probeResult{node: pick, alive: alive, rtt: rtt, err: err}
+			}()
+		}
+		probeWG.Wait()
+		close(results)
+		passed := make([]probeResult, 0, len(cands))
+		for r := range results {
+			m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) { p.CandidatesTested++ })
+			if !r.alive {
+				m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) { p.Failed++; p.LastError = firstLine(fmt.Sprint(r.err)) })
+				m.markNodeFailed(r.node)
+				log.Printf("[智能编排] 预检失败，跳过 %s (%s): %v", r.node.HostName, cc, r.err)
 				continue
 			}
-			pick.Ping = int(rtt)
+			r.node.Ping = int(r.rtt)
+			m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) { p.LivePassed++ })
+			passed = append(passed, r)
+		}
+		sort.SliceStable(passed, func(i, j int) bool { return passed[i].rtt < passed[j].rtt })
+
+		for _, pr := range passed {
+			if needed <= 0 || startsUsed >= opts.MaxStarts {
+				break
+			}
+			pick := pr.node
 			m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
-				p.LivePassed++
+				p.CurrentNode = pick.HostName
 				p.Stage = "start"
 				p.Message = fmt.Sprintf("%s 测活通过，正在建立真实隧道…", pick.HostName)
 			})
@@ -865,7 +902,7 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 				p.Added++
 				p.Message = fmt.Sprintf("%s 验证通过：%s，加入正式出口并准备绑定节点", cc, t.ExitIP)
 			})
-			log.Printf("[智能编排] %s 验证通过并加入正式出口: %s -> %s (%dms)", cc, t.Node.HostName, t.ExitIP, rtt)
+			log.Printf("[智能编排] %s 验证通过并加入正式出口: %s -> %s (%dms)", cc, t.Node.HostName, t.ExitIP, pr.rtt)
 		}
 	}
 
@@ -951,11 +988,11 @@ func (m *Manager) reconcilePanelBindings() {
 				log.Printf("[节点绑定] 已将入站 %d 标记为服务器直连 · 本机", candidate.ID)
 			}
 		} else {
-			// 使用 VLESS + TCP + REALITY，作为真正的“本机直连”节点：不绑定任何 VPN 出口。
+			// 使用 VMess + TCP 作为真正的“本机直连”节点：不绑定任何 VPN 出口。
 			ib, err := p.CreateInbound(NewInboundSpec{
-				Protocol:    "vless",
+				Protocol:    "vmess",
 				Network:     "tcp",
-				Security:    "reality",
+				Security:    "none",
 				Remark:      "服务器直连 · 本机",
 				Dest:        "www.microsoft.com:443",
 				ServerNames: "www.microsoft.com",

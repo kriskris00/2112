@@ -80,30 +80,72 @@ func fetchLatestRelease() (*releaseInfo, error) {
 	return &rel, nil
 }
 
-// checkUpdate 比对当前版本与最新 release。
+// fetchBranchRevision 直接读取 GitHub main 分支最新提交。
+// 这样即使仓库没有 GitHub Release，面板 F11 也能发现源码更新。
+func fetchBranchRevision() (string, error) {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/commits/%s", updateRepo, "main")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "fanout-updater")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("GitHub 返回 HTTP %d", resp.StatusCode)
+	}
+	var v struct {
+		SHA string `json:"sha"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(v.SHA) == "" {
+		return "", fmt.Errorf("GitHub 未返回 main 提交 SHA")
+	}
+	return strings.TrimSpace(v.SHA), nil
+}
+
+// checkUpdate 同时检查 GitHub Release 和 main 分支提交。源码仓库有新提交时，
+// 即使没有创建 Release，面板也会显示更新，可直接通过 F11 安装最新源码。
 func checkUpdate() (*UpdateStatus, error) {
 	cur := strings.TrimSpace(version)
 	if cur == "" {
-		cur = "v3.0.0-Jesee-Mod"
+		cur = "dev"
 	}
-	rel, err := fetchLatestRelease()
-	if err != nil {
-		// 容灾处理：如果 GitHub 仓库暂无 Release 或返回 404/被限流，绝不直接向前端抛出 404 报错，优雅返回当前已是 Jesee 魔改版最新状态
-		return &UpdateStatus{
-			Current:   cur,
-			Latest:    cur,
-			HasUpdate: false,
-			Notes:     "当前已是 Jesee 深度魔改最新旗舰版 (包含 10 秒同国自愈轮换、1出1入单节点绑定、全网智能编排、纯净住宅/政府专网与 2026 苹果液态玻璃 UI)",
-			URL:       "https://github.com/kriskris00/2112",
-		}, nil
+	st := &UpdateStatus{Current: cur, Latest: cur, HasUpdate: false, URL: "https://github.com/" + updateRepo}
+
+	latestSHA, shaErr := fetchBranchRevision()
+	if shaErr == nil && strings.TrimSpace(buildRevision) != "" && !strings.EqualFold(strings.TrimSpace(buildRevision), latestSHA) {
+		st.Latest = "main@" + latestSHA[:12]
+		st.HasUpdate = true
+		st.Notes = "GitHub main 分支检测到新源码。F11 更新将直接从 GitHub 拉取完整源码、重新编译并重启服务。"
+		return st, nil
 	}
-	latest := strings.TrimSpace(rel.TagName)
-	st := &UpdateStatus{
-		Current:   cur,
-		Latest:    latest,
-		Notes:     strings.TrimSpace(rel.Body),
-		URL:       rel.HTMLURL,
-		HasUpdate: versionLess(cur, latest),
+
+	// 如果当前版本没有 revision（例如旧版二进制），只要 GitHub 能访问就允许一次源码更新。
+	if shaErr == nil && strings.TrimSpace(buildRevision) == "" {
+		st.Latest = "main@" + latestSHA[:12]
+		st.HasUpdate = true
+		st.Notes = "当前版本没有记录 GitHub 提交号，可通过 F11 同步到 main 最新源码。"
+		return st, nil
+	}
+
+	// Release 仍作为兼容信息来源。
+	if rel, err := fetchLatestRelease(); err == nil && rel != nil {
+		st.Latest = strings.TrimSpace(rel.TagName)
+		st.Notes = strings.TrimSpace(rel.Body)
+		st.URL = rel.HTMLURL
+		st.HasUpdate = versionLess(cur, st.Latest)
+	}
+	if shaErr != nil && st.Latest == cur {
+		return st, nil
 	}
 	return st, nil
 }
@@ -154,75 +196,12 @@ func parseSemver(v string) ([3]int, bool) {
 // applyUpdate 下载最新版对应架构的包、校验、替换当前二进制，然后重启服务。
 // 成功后本进程会被 init 系统拉起成新版本，所以正常情况下这里返回后进程即被替换。
 func applyUpdate() error {
-	rel, err := fetchLatestRelease()
-	if err != nil || rel == nil || len(rel.Assets) == 0 {
-		// 备用机制：从 GitHub 仓库拉取最新安装脚本热更新并重启
-		go func() {
-			time.Sleep(800 * time.Millisecond)
-			_ = exec.Command("bash", "-c", "curl -fsSL https://raw.githubusercontent.com/kriskris00/2112/main/fanout-main/install.sh | bash").Run()
-		}()
-		return nil
-	}
-
-	arch := assetArch()
-	assetName := fmt.Sprintf("fanout-linux-%s.tar.gz", arch)
-	var assetURL, sumsURL string
-	for _, a := range rel.Assets {
-		switch a.Name {
-		case assetName:
-			assetURL = a.URL
-		case "checksums.txt":
-			sumsURL = a.URL
-		}
-	}
-	if assetURL == "" {
-		return fmt.Errorf("最新版里找不到适配 %s 的包", arch)
-	}
-
-	tmp, err := os.MkdirTemp("", "fanout-update-")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(tmp)
-
-	tarPath := filepath.Join(tmp, assetName)
-	if err := downloadFile(assetURL, tarPath); err != nil {
-		return fmt.Errorf("下载失败: %w", err)
-	}
-
-	// 有校验和就核对，防止下到损坏或被篡改的包
-	if sumsURL != "" {
-		if err := verifyChecksum(tarPath, assetName, sumsURL); err != nil {
-			return err
-		}
-	}
-
-	newBin := filepath.Join(tmp, "fanout")
-	if err := extractBinary(tarPath, "fanout", newBin); err != nil {
-		return fmt.Errorf("解包失败: %w", err)
-	}
-
-	self, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("定位当前程序失败: %w", err)
-	}
-	self, _ = filepath.EvalSymlinks(self)
-
-	// 原子替换：先写到同目录临时文件再 rename，避免替一半崩了留下坏二进制
-	staged := self + ".new"
-	if err := copyFileMode(newBin, staged, 0755); err != nil {
-		return fmt.Errorf("写入新版本失败: %w", err)
-	}
-	if err := os.Rename(staged, self); err != nil {
-		os.Remove(staged)
-		return fmt.Errorf("替换二进制失败: %w", err)
-	}
-
-	// 让 init 系统重启我们，拉起新版本。异步触发并延迟一下，
-	// 好让这次请求的响应先发回界面。
+	// F11 优先走 GitHub main 源码安装，而不是依赖 Release。
+	// install.sh 会重新拉取最新完整源码、编译并安装，默认保留 settings/password/basepath。
 	go func() {
 		time.Sleep(800 * time.Millisecond)
-		restartSelf()
+		cmd := "curl -fsSL https://raw.githubusercontent.com/kriskris00/2112/main/fanout-main/install.sh | bash"
+		_ = exec.Command("bash", "-c", cmd).Run()
 	}()
 	return nil
 }
