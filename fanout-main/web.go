@@ -434,6 +434,14 @@ textarea:focus{outline:none;border-color:var(--accent)}
         <input type="search" id="rgfilter" placeholder="搜索或筛选国家/地区，如 日本、JP、美国、海外学术...">
         <div class="regions" id="regions" style="margin-top:6px"></div>
       </label>
+      <div id="countryPolicyWrap" style="margin:-2px 0 14px;padding:12px;border:1px solid rgba(99,102,241,.28);border-radius:10px;background:rgba(99,102,241,.06)">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <div style="font-weight:700">🌍 国家出口策略</div><span class="hint" style="margin:0">可同时设置多个国家；每个国家独立限制数量和运营商规则</span>
+          <span class="spacer"></span><button type="button" id="addCountryPolicy" style="font-size:11px;padding:4px 9px">＋ 添加国家</button>
+        </div>
+        <div id="countryPolicies"></div>
+        <div class="hint" style="margin-top:8px">“随机”=数量内不限制运营商；“运营商不同”=同一国家的每个出口必须使用不同 ISP。所有国家均严格禁止重复 IP；节点失效后会继续补同国家、同规则的新节点，连续没有合格节点才停止补位。</div>
+      </div>
       <div id="wzCandidateSection" style="margin-bottom:14px">
         <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;padding:8px 12px;background:var(--subtle);border-radius:6px;border:1px solid var(--border)" id="toggleWzCandidates">
           <span style="font-size:12px;font-weight:600;display:flex;align-items:center;gap:6px">
@@ -1397,7 +1405,11 @@ function renderRegions(){
   }
 
   $('#regions').innerHTML = btns.join('');
+  let dl = $('#countryCodeList');
+  if(!dl){ dl = document.createElement('datalist'); dl.id = 'countryCodeList'; document.body.appendChild(dl); }
+  dl.innerHTML = sourceList.map(r => '<option value="' + esc(r.code) + '">' + esc(r.name || '') + '</option>').join('');
   updateAvail();
+  updateJapanPolicyUI();
 }
 
 function availOf(code){
@@ -1406,6 +1418,55 @@ function availOf(code){
   const r = sourceList.find(x => x.code === code);
   return r ? r.available : 0;
 }
+
+let countryPolicies = [];
+
+function policyRow(p = {}){
+  const id = 'cp_' + Math.random().toString(36).slice(2,9);
+  const code = esc(p.region || region || '');
+  const count = Number(p.count || $('#count')?.value || 3);
+  const mode = p.mode === 'isp' ? 'isp' : 'random';
+  return '<div class="country-policy-row" data-cpid="' + id + '" style="display:grid;grid-template-columns:minmax(120px,1.5fr) 80px minmax(145px,1fr) 32px;gap:7px;align-items:center;margin-bottom:7px">'
+    + '<input class="cp-region" list="countryCodeList" value="' + code + '" placeholder="国家，如 JP / 日本" style="min-width:0">'
+    + '<input class="cp-count" type="number" min="1" max="100" value="' + count + '" title="出口数量">'
+    + '<select class="cp-mode"><option value="random" ' + (mode==='random'?'selected':'') + '>随机运营商</option><option value="isp" ' + (mode==='isp'?'selected':'') + '>运营商必须不同</option></select>'
+    + '<button type="button" class="cp-remove" title="删除国家">×</button>'
+    + '</div>';
+}
+
+function renderCountryPolicies(){
+  const box = $('#countryPolicies'); if(!box) return;
+  if(!countryPolicies.length){ countryPolicies = [{region: region || 'JP', count: Number($('#count')?.value || 3), mode:'random'}]; }
+  box.innerHTML = countryPolicies.map(policyRow).join('');
+}
+
+function readCountryPolicies(){
+  return Array.from(document.querySelectorAll('.country-policy-row')).map(row => ({
+    region: row.querySelector('.cp-region')?.value.trim() || '',
+    count: Math.max(1, Math.min(100, Number(row.querySelector('.cp-count')?.value || 1))),
+    mode: row.querySelector('.cp-mode')?.value || 'random'
+  })).filter(p => p.region);
+}
+
+function updateJapanPolicyUI(){ renderCountryPolicies(); }
+
+if($('#addCountryPolicy')) $('#addCountryPolicy').onclick = () => {
+  countryPolicies = readCountryPolicies();
+  countryPolicies.push({region:'', count:Number($('#count')?.value || 3), mode:'random'});
+  renderCountryPolicies();
+  const rows = document.querySelectorAll('.country-policy-row');
+  rows[rows.length-1]?.querySelector('.cp-region')?.focus();
+};
+
+document.addEventListener('click', e => {
+  const rm = e.target.closest('.cp-remove');
+  if(!rm) return;
+  countryPolicies = readCountryPolicies();
+  const row = rm.closest('.country-policy-row');
+  const idx = Array.from(document.querySelectorAll('.country-policy-row')).indexOf(row);
+  if(idx >= 0) countryPolicies.splice(idx,1);
+  renderCountryPolicies();
+});
 
 function updateAvail(){
   const countEl = $('#count');
@@ -1490,7 +1551,10 @@ document.addEventListener('click', e => {
   const rg = e.target.closest('[data-rg]');
   if(rg){
     region = rg.dataset.rg;
+    if(countryPolicies.length === 1 && !countryPolicies[0].region) countryPolicies[0].region = region;
+    if(countryPolicies.length === 1 && countryPolicies[0].region && countryPolicies[0].region !== region) countryPolicies[0].region = region;
     renderRegions();
+    updateJapanPolicyUI();
     // 点国家后直接展开并加载该国家的实时节点，避免“点了没反应”。
     if(region){
       wzCandidatesExpanded = true;
@@ -1754,11 +1818,10 @@ $('#go').onclick = async e => {
       await api('/api/provision?hosts=' + encodeURIComponent(hosts) + '&template=' + tpl, {method:'POST', timeout: 60000});
       selectedWzHosts.clear();
     } else {
-      const count = clampCount($('#count').value);
-      const avail = availOf(region);
-      const want = Math.min(count, avail > 0 ? avail : count);
-      await api('/api/provision?count=' + want + '&region=' + encodeURIComponent(region)
-        + '&source=' + encodeURIComponent(src) + '&template=' + tpl, {method:'POST', timeout: 60000});
+      const policies = readCountryPolicies();
+      if(!policies.length){ throw new Error('请至少添加一个国家及出口数量'); }
+      for(const p of policies){ if(p.count < 1 || p.count > 100) throw new Error('国家出口数量必须为 1-100'); }
+      await api('/api/provision?policies=' + encodeURIComponent(JSON.stringify(policies.map(p => ({region:p.region,count:p.count,mode:p.mode,source:src})))) + '&template=' + tpl, {method:'POST', timeout: 60000});
     }
     closeModal('wizard');
     $('#wzhint').textContent = '';

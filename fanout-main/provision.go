@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"math/rand"
 	"sort"
 	"strings"
 	"sync"
@@ -14,64 +15,252 @@ type ProvisionRequest struct {
 	Region     string // 国家码，空表示不限
 	Source     string // 节点源："all", "vpngate", "edu", "proxy", "custom"
 	Count      int
-	TemplateID int      // 3x-ui 入站模板；0 表示只开隧道不建入站
-	Hosts      []string // 指定要启动的主机名列表；非空时直接选用
+	TemplateID int             // 3x-ui 入站模板；0 表示只开隧道不建入站
+	Hosts      []string        // 指定要启动的主机名列表；非空时直接选用
+	JapanMode  string          // 兼容旧参数：JP 专用策略
+	Policies   []CountryPolicy // 多国家出口策略；每个国家可独立设置数量与运营商规则
 }
 
 // Provision 异步执行一次批量开出口，立刻返回作业句柄供界面轮询。
 //
 // 隧道并行拉起（每条都要等 openvpn 握手，串行会线性累加等待），
 // 面板侧的入站创建则统一放到最后串行做一次，因为每次改路由都要重启 Xray。
+type CountryPolicy struct {
+	Region string `json:"region"`
+	Source string `json:"source,omitempty"`
+	Count  int    `json:"count"`
+	Mode   string `json:"mode,omitempty"` // random / isp
+}
+
+func normalizePolicyMode(mode string) string {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode == "isp" || mode == "different_isp" || mode == "different-isp" || mode == "different" {
+		return "isp"
+	}
+	return "random"
+}
+
 func (m *Manager) Provision(req ProvisionRequest) (*Job, error) {
+	if len(req.Policies) > 0 && len(req.Hosts) == 0 {
+		return m.ProvisionPolicies(req.Policies, req.TemplateID)
+	}
+	var policies []CountryPolicy
+	if len(req.Hosts) == 0 {
+		policies = []CountryPolicy{{Region: req.Region, Source: req.Source, Count: req.Count, Mode: req.JapanMode}}
+	}
+	return m.provisionInternal(policies, req.Hosts, req.TemplateID)
+}
+
+// ProvisionPolicies 一次提交多个国家策略，例如 JP=10/random、US=5/isp、DE=3/random。
+func (m *Manager) ProvisionPolicies(policies []CountryPolicy, templateID int) (*Job, error) {
+	if len(policies) == 0 {
+		return nil, fmt.Errorf("至少需要一个国家策略")
+	}
+	if len(policies) > 30 {
+		return nil, fmt.Errorf("单次最多设置 30 个国家")
+	}
+	return m.provisionInternal(policies, nil, templateID)
+}
+
+func (m *Manager) provisionInternal(policies []CountryPolicy, hosts []string, templateID int) (*Job, error) {
 	var picks []Node
-	if len(req.Hosts) > 0 {
+	var modes []string
+	if len(hosts) > 0 {
 		m.mu.RLock()
 		nodeMap := make(map[string]Node, len(m.nodes))
 		for _, n := range m.nodes {
 			nodeMap[n.HostName] = n
 		}
 		m.mu.RUnlock()
-		for _, h := range req.Hosts {
-			if n, ok := nodeMap[h]; ok {
-				picks = append(picks, n)
-			} else if globalScanner != nil {
-				if n, ok := globalScanner.GetNodeByHost(h); ok {
-					picks = append(picks, n)
-				}
+		seenIP := map[string]bool{}
+		for _, h := range hosts {
+			var n Node
+			var ok bool
+			if n, ok = nodeMap[h]; !ok && globalScanner != nil {
+				n, ok = globalScanner.GetNodeByHost(h)
 			}
+			if !ok {
+				continue
+			}
+			ip := normalizeIP(n.IP)
+			if ip != "" && seenIP[ip] {
+				continue
+			}
+			if ip != "" {
+				seenIP[ip] = true
+			}
+			picks = append(picks, n)
+			modes = append(modes, "")
 		}
 		if len(picks) == 0 {
 			return nil, fmt.Errorf("指定的候选节点已不存在或已下线")
 		}
 	} else {
-		if req.Count < 1 {
-			return nil, fmt.Errorf("数量至少为 1")
-		}
-		var err error
-		picks, err = m.pickNodesSource(req.Region, req.Source, req.Count)
-		if err != nil {
-			return nil, err
+		reservedIPs := map[string]bool{}
+		reservedHosts := map[string]bool{}
+		reservedISPs := map[string]bool{}
+		for _, p := range policies {
+			p.Region = strings.TrimSpace(p.Region)
+			p.Source = strings.TrimSpace(p.Source)
+			if p.Count < 1 {
+				return nil, fmt.Errorf("%s 数量至少为 1", p.Region)
+			}
+			if p.Count > 100 {
+				return nil, fmt.Errorf("%s 数量不能超过 100", p.Region)
+			}
+			p.Mode = normalizePolicyMode(p.Mode)
+			got, err := m.pickCountryNodesReserved(p.Region, p.Count, p.Mode, p.Source, reservedIPs, reservedHosts, reservedISPs)
+			if err != nil {
+				return nil, err
+			}
+			picks = append(picks, got...)
+			for range got {
+				modes = append(modes, p.Mode)
+			}
 		}
 	}
-
 	labels := make([]string, 0, len(picks)+1)
-	for _, n := range picks {
-		labels = append(labels, regionLabel(n)+" 出口")
+	for i, n := range picks {
+		mode := ""
+		if i < len(modes) {
+			mode = modes[i]
+		}
+		label := regionLabel(n) + " 出口"
+		if mode == "isp" {
+			label += " · 不同运营商"
+		}
+		labels = append(labels, label)
 	}
-	if req.TemplateID > 0 {
+	if templateID > 0 {
 		labels = append(labels, "创建节点链接")
 	}
-
-	where := req.Region
-	if len(req.Hosts) > 0 {
-		where = "自选节点"
-	} else if where == "" {
-		where = "任意地区"
+	where := "多国家"
+	if len(policies) == 1 {
+		where = policies[0].Region
+		if where == "" {
+			where = "任意地区"
+		}
 	}
 	job := m.jobs.New(fmt.Sprintf("开 %d 个 %s 出口", len(picks), where), labels)
-
-	go m.runProvision(job, picks, req.TemplateID)
+	go m.runProvision(job, picks, modes, templateID, len(hosts) > 0)
 	return job, nil
+}
+
+// pickCountryNodes 是所有国家通用的出口策略：IP 严格唯一；isp 模式要求当前出口 ISP 不重复。
+func (m *Manager) pickCountryNodes(region string, count int, mode string, source string) ([]Node, error) {
+	return m.pickCountryNodesReserved(region, count, mode, source, nil, nil, nil)
+}
+
+func (m *Manager) pickCountryNodesReserved(region string, count int, mode string, source string, reservedIPs, reservedHosts, reservedISPs map[string]bool) ([]Node, error) {
+	if count < 1 {
+		return nil, fmt.Errorf("数量至少为 1")
+	}
+	mode = normalizePolicyMode(mode)
+	region = strings.TrimSpace(region)
+	canonicalRegion := strings.ToUpper(countryCodeForName(region))
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	usedHosts, usedIPs, usedISPs := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	for k, v := range reservedHosts {
+		if v {
+			usedHosts[k] = true
+		}
+	}
+	for k, v := range reservedIPs {
+		if v {
+			usedIPs[k] = true
+		}
+	}
+	for k, v := range reservedISPs {
+		if v && strings.HasPrefix(k, canonicalRegion+"|") {
+			usedISPs[strings.TrimPrefix(k, canonicalRegion+"|")] = true
+		}
+	}
+	for _, t := range m.tunnels {
+		if t.Status == "stopped" || t.Status == "failed" {
+			continue
+		}
+		usedHosts[t.Node.HostName] = true
+		if ip := normalizeIP(t.Node.IP); ip != "" {
+			usedIPs[ip] = true
+		}
+		tr := strings.ToUpper(strings.TrimSpace(t.TargetRegion))
+		if tr == "" {
+			tr = strings.ToUpper(strings.TrimSpace(t.Node.CountryCode))
+		}
+		if mode == "isp" && countryMatches(t.Node, region) && strings.EqualFold(tr, canonicalRegion) {
+			if isp := normalizeISP(t.Node.ISP); isp != "" {
+				usedISPs[isp] = true
+			}
+		}
+	}
+	var pool []Node
+	seen := map[string]bool{}
+	for _, n := range m.nodes {
+		if !countryMatches(n, region) || !nodeMatchesSource(n, source) || m.nodeCooling(n) {
+			continue
+		}
+		if n.Config == "" && n.Proto != "socks5" && n.Proto != "http" {
+			continue
+		}
+		ip := normalizeIP(n.IP)
+		if ip == "" || seen[ip] || usedIPs[ip] || usedHosts[n.HostName] {
+			continue
+		}
+		seen[ip] = true
+		pool = append(pool, n)
+	}
+	if len(pool) == 0 {
+		return nil, fmt.Errorf("%s 暂无可用且 IP 不重复的节点", region)
+	}
+	if mode == "isp" {
+		picked := make([]Node, 0, count)
+		local := map[string]bool{}
+		for _, n := range pool {
+			isp := normalizeISP(n.ISP)
+			if isp == "" || usedISPs[isp] || local[isp] {
+				continue
+			}
+			local[isp] = true
+			picked = append(picked, n)
+			if len(picked) >= count {
+				break
+			}
+		}
+		if len(picked) < count {
+			return nil, fmt.Errorf("%s 不同运营商节点不足：需要 %d 个，当前可用不同运营商 %d 个", region, count, len(picked))
+		}
+		return picked, nil
+	}
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	r.Shuffle(len(pool), func(i, j int) { pool[i], pool[j] = pool[j], pool[i] })
+	if len(pool) > count {
+		pool = pool[:count]
+	}
+	return pool, nil
+}
+
+func countryMatches(n Node, region string) bool {
+	region = strings.TrimSpace(region)
+	if region == "" {
+		return true
+	}
+	return strings.EqualFold(n.CountryCode, region) || strings.EqualFold(n.Country, region) || strings.EqualFold(n.CountryCode, countryCodeForName(region)) || strings.EqualFold(n.Country, countryNameForCode(region))
+}
+
+func countryCodeForName(s string) string {
+	for cc, name := range countryNameZH {
+		if strings.EqualFold(strings.TrimSpace(name), strings.TrimSpace(s)) {
+			return cc
+		}
+	}
+	return s
+}
+func countryNameForCode(s string) string {
+	if v, ok := countryNameZH[strings.ToUpper(strings.TrimSpace(s))]; ok {
+		return v
+	}
+	return s
 }
 
 // cloneTemplateToTunnels 为指定主机名列表的隧道复制并绑定入站模板（与新建出口完全一致）
@@ -116,7 +305,7 @@ func cloneTemplateToTunnels(templateID int, hosts []string, tunnels []*Tunnel) (
 	return ports, err
 }
 
-func (m *Manager) runProvision(job *Job, picks []Node, templateID int) {
+func (m *Manager) runProvision(job *Job, picks []Node, modes []string, templateID int, strictHosts bool) {
 	defer job.Finish()
 
 	var wg sync.WaitGroup
@@ -125,11 +314,15 @@ func (m *Manager) runProvision(job *Job, picks []Node, templateID int) {
 	for i, node := range picks {
 		var t *Tunnel
 		var err error
-		if len(picks) > 0 {
+		if strictHosts {
 			// Hosts 是用户明确选择的实时节点，必须严格启动这个节点，不允许静默换节点。
 			t, err = m.StartExact(node)
 		} else {
-			t, err = m.Start(node)
+			mode := ""
+			if i < len(modes) {
+				mode = modes[i]
+			}
+			t, err = m.StartWithPolicy(node, mode)
 		}
 		if err != nil {
 			job.Set(i, "failed", err.Error())
@@ -151,7 +344,6 @@ func (m *Manager) runProvision(job *Job, picks []Node, templateID int) {
 	}
 	wg.Wait()
 
-	step := len(picks)
 	var hosts []string
 	for _, t := range started {
 		if t != nil && t.Status == "up" {
@@ -159,10 +351,17 @@ func (m *Manager) runProvision(job *Job, picks []Node, templateID int) {
 		}
 	}
 	if len(hosts) == 0 {
-		job.Set(step, "failed", "没有连通的出口，跳过")
+		if len(picks) > 0 {
+			job.Set(len(picks)-1, "failed", "没有连通的出口，跳过")
+		}
 		return
 	}
-
+	// templateID=0 明确表示“只开出口，不创建入站”。旧版本这里仍会自动创建模板，
+	// 与界面选项含义冲突；现在真正跳过面板入站创建。
+	if templateID <= 0 {
+		return
+	}
+	step := len(picks)
 	job.Set(step, "running", fmt.Sprintf("为 %d 个出口建入站", len(hosts)))
 	ports, err := cloneTemplateToTunnels(templateID, hosts, m.Tunnels())
 	if err != nil {
@@ -183,6 +382,13 @@ func (m *Manager) waitUp(t *Tunnel) {
 		}
 		time.Sleep(time.Second)
 	}
+}
+
+func normalizeJapanMode(mode string) string { return normalizePolicyMode(mode) }
+
+// 兼容旧调用：JP 专用接口现在复用通用国家策略。
+func (m *Manager) pickJapanNodes(count int, mode string, source string) ([]Node, error) {
+	return m.pickCountryNodes("JP", count, mode, source)
 }
 
 // pickNodes 按地区挑 count 个还没被占用的节点（向前兼容，供重连与测试使用）。
@@ -1042,4 +1248,9 @@ func (m *Manager) WatchAutoOrchestrate() {
 			m.AutoOrchestrate()
 		}
 	}
+}
+
+func normalizeIP(ip string) string { return strings.ToLower(strings.TrimSpace(ip)) }
+func normalizeISP(isp string) string {
+	return strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(isp)), " "))
 }

@@ -690,12 +690,21 @@ func apiProvision(m *Manager) http.HandlerFunc {
 		}
 
 		source := q.Get("source")
+		var policies []CountryPolicy
+		if raw := q.Get("policies"); raw != "" && len(hosts) == 0 {
+			if err := json.Unmarshal([]byte(raw), &policies); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "policies 参数格式错误"})
+				return
+			}
+		}
 		job, err := m.Provision(ProvisionRequest{
 			Region:     q.Get("region"),
 			Source:     source,
 			Count:      count,
 			TemplateID: tpl,
 			Hosts:      hosts,
+			JapanMode:  q.Get("japan_mode"),
+			Policies:   policies,
 		})
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})

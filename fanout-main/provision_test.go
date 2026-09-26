@@ -122,3 +122,42 @@ func TestNodeMatchesSourceIsStrict(t *testing.T) {
 		t.Fatal("代理节点来源过滤不严格")
 	}
 }
+
+func TestPickCountryNodesDifferentISPAndIP(t *testing.T) {
+	m := mgrWith([]Node{
+		{HostName: "u1", IP: "1.1.1.1", CountryCode: "US", Config: "x", ISP: "A"},
+		{HostName: "u2", IP: "2.2.2.2", CountryCode: "US", Config: "x", ISP: "A"},
+		{HostName: "u3", IP: "3.3.3.3", CountryCode: "US", Config: "x", ISP: "B"},
+		{HostName: "d1", IP: "1.1.1.1", CountryCode: "DE", Config: "x", ISP: "A"},
+	})
+	got, err := m.pickCountryNodes("US", 2, "isp", "all")
+	if err != nil || len(got) != 2 {
+		t.Fatalf("US 策略选择失败: %v %+v", err, got)
+	}
+	if normalizeISP(got[0].ISP) == normalizeISP(got[1].ISP) {
+		t.Fatal("ISP 不应重复")
+	}
+	if normalizeIP(got[0].IP) == normalizeIP(got[1].IP) {
+		t.Fatal("IP 不应重复")
+	}
+}
+
+func TestPickCountryNodesReservedAcrossPolicies(t *testing.T) {
+	m := mgrWith([]Node{
+		{HostName: "a", IP: "1.1.1.1", CountryCode: "US", Config: "x", ISP: "A"},
+		{HostName: "b", IP: "2.2.2.2", CountryCode: "US", Config: "x", ISP: "B"},
+		{HostName: "c", IP: "3.3.3.3", CountryCode: "US", Config: "x", ISP: "C"},
+	})
+	resIP := map[string]bool{"1.1.1.1": true}
+	resHost := map[string]bool{"a": true}
+	resISP := map[string]bool{"US|A": true}
+	got, err := m.pickCountryNodesReserved("US", 2, "isp", "all", resIP, resHost, resISP)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("预留资源未正确排除: %v %+v", err, got)
+	}
+	for _, n := range got {
+		if n.HostName == "a" || n.IP == "1.1.1.1" || n.ISP == "A" {
+			t.Fatalf("选到了已预留节点: %+v", n)
+		}
+	}
+}

@@ -35,7 +35,7 @@ func NewManager(maxSlots int, workDir string) *Manager {
 	if maxSlots < 100 {
 		maxSlots = 150
 	}
-	initial := loadInitialNodes(workDir)
+	initial := dedupNodesByIP(loadInitialNodes(workDir))
 	return &Manager{
 		tunnels:   map[int]*Tunnel{},
 		nodes:     initial,
@@ -169,6 +169,24 @@ func (m *Manager) nodeCooling(n Node) bool {
 	return false
 }
 
+func dedupNodesByIP(nodes []Node) []Node {
+	seen := make(map[string]bool, len(nodes))
+	out := make([]Node, 0, len(nodes))
+	for _, n := range nodes {
+		ip := normalizeIP(n.IP)
+		if ip == "" {
+			out = append(out, n)
+			continue
+		}
+		if seen[ip] {
+			continue
+		}
+		seen[ip] = true
+		out = append(out, n)
+	}
+	return out
+}
+
 // RefreshNodes 重新拉取所有节点源。
 func (m *Manager) RefreshNodes() (int, error) {
 	return m.RefreshNodesSource("all")
@@ -176,6 +194,10 @@ func (m *Manager) RefreshNodes() (int, error) {
 
 // RefreshNodesSource 重新拉取指定节点源（all, vpngate, edu, proxy）。
 func (m *Manager) RefreshNodesSource(source string) (int, error) {
+	return m.refreshNodesSource(source, true)
+}
+
+func (m *Manager) refreshNodesSource(source string, triggerOrchestrate bool) (int, error) {
 	if source == "" {
 		source = "all"
 	}
@@ -216,13 +238,16 @@ func (m *Manager) RefreshNodesSource(source string) (int, error) {
 	if err != nil && len(nodes) == 0 {
 		return 0, err
 	}
+	nodes = dedupNodesByIP(nodes)
 	m.mu.Lock()
 	m.nodes = nodes
 	m.fetched = time.Now()
 	m.mu.Unlock()
 
-	// 节点刷新成功后触发全网自愈编排检查
-	go m.AutoOrchestrate()
+	// 手动刷新才触发全网智能编排；故障自愈刷新只更新节点池，避免递归启动另一套编排。
+	if triggerOrchestrate {
+		go m.AutoOrchestrate()
+	}
 
 	return len(nodes), nil
 }
@@ -269,6 +294,7 @@ func (m *Manager) ImportNodes(rawText string) (int, error) {
 	if len(newNodes) == 0 {
 		return 0, fmt.Errorf("未从文本中识别出有效节点或 IP")
 	}
+	newNodes = dedupNodesByIP(newNodes)
 
 	m.mu.Lock()
 	existing := map[string]bool{}
@@ -348,9 +374,19 @@ func (m *Manager) Nodes() ([]Node, time.Time) {
 func (m *Manager) AddVerifiedNode(n Node) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	nip := normalizeIP(n.IP)
 	for i, cur := range m.nodes {
 		if cur.HostName == n.HostName {
+			// 同一 Host 更新元数据；若新 IP 与池中其它节点冲突，则保留已有唯一 IP。
+			for j, other := range m.nodes {
+				if j != i && nip != "" && normalizeIP(other.IP) == nip {
+					return
+				}
+			}
 			m.nodes[i] = n
+			return
+		}
+		if nip != "" && normalizeIP(cur.IP) == nip {
 			return
 		}
 	}
@@ -388,61 +424,29 @@ func (m *Manager) freeSlot() (int, error) {
 }
 
 // Start 为指定节点开一条隧道，返回分配到的本地端口。
-func (m *Manager) Start(node Node) (*Tunnel, error) {
-	m.mu.Lock()
-	// 检查是否已有相同 HostName 或 IP 的隧道在运行，避免重复开同一节点导致 Xray 出站冲突与资源浪费
-	for _, other := range m.tunnels {
-		if other.Status != "stopped" && other.Status != "failed" {
-			if other.Node.HostName == node.HostName || (node.IP != "" && other.Node.IP == node.IP) {
-				m.mu.Unlock()
-				return nil, fmt.Errorf("节点 %s (IP: %s) 已在运行中，请勿重复添加", node.HostName, node.IP)
-			}
+func (m *Manager) exitIPInUse(ip string, exceptSlot int) bool {
+	ip = normalizeIP(ip)
+	if ip == "" {
+		return false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for slot, other := range m.tunnels {
+		if slot == exceptSlot || other.Status == "stopped" || other.Status == "failed" {
+			continue
+		}
+		if normalizeIP(other.ExitIP) == ip {
+			return true
 		}
 	}
-	slot, err := m.freeSlot()
-	if err != nil {
-		m.mu.Unlock()
-		return nil, err
-	}
-	// 端口随机取，避免固定规律撞上机器上的其他服务
-	taken := map[int]bool{}
-	for _, other := range m.tunnels {
-		taken[other.Port] = true
-	}
-	port, err := freeRandomPort(taken)
-	if err != nil {
-		m.mu.Unlock()
-		return nil, err
-	}
-	cred, err := newSocksCred()
-	if err != nil {
-		m.mu.Unlock()
-		return nil, err
-	}
-	targetRegion := strings.ToUpper(strings.TrimSpace(node.CountryCode))
-	t := &Tunnel{
-		Slot:         slot,
-		Port:         port,
-		Node:         node,
-		TargetRegion: targetRegion,
-		Status:       "starting",
-		Since:        time.Now(),
-		Cred:         cred,
-	}
-	m.tunnels[slot] = t
-	m.mu.Unlock()
-
-	go m.bringUp(t, true)
-	return t, nil
+	return false
 }
 
-// StartExact 严格启动用户已经选中的节点，不自动偷偷换成同国其它节点。
-// 选择页已经完成实时测活；这里再做一次真实隧道验证，失败就明确失败并清理。
-func (m *Manager) StartExact(node Node) (*Tunnel, error) {
+func (m *Manager) startTunnel(node Node, jpMode string, exact bool) (*Tunnel, error) {
 	m.mu.Lock()
 	for _, other := range m.tunnels {
 		if other.Status != "stopped" && other.Status != "failed" &&
-			(other.Node.HostName == node.HostName || (node.IP != "" && other.Node.IP == node.IP)) {
+			(other.Node.HostName == node.HostName || (node.IP != "" && normalizeIP(other.Node.IP) == normalizeIP(node.IP))) {
 			m.mu.Unlock()
 			return nil, fmt.Errorf("节点 %s (IP: %s) 已在运行中，请勿重复添加", node.HostName, node.IP)
 		}
@@ -466,16 +470,50 @@ func (m *Manager) StartExact(node Node) (*Tunnel, error) {
 		m.mu.Unlock()
 		return nil, err
 	}
-	t := &Tunnel{Slot: slot, Port: port, Node: node, TargetRegion: strings.ToUpper(strings.TrimSpace(node.CountryCode)), Status: "starting", Since: time.Now(), Cred: cred}
+	t := &Tunnel{
+		Slot: slot, Port: port, Node: node,
+		TargetRegion:     strings.ToUpper(strings.TrimSpace(node.CountryCode)),
+		TargetPolicyMode: normalizeJapanMode(jpMode),
+		Status:           "starting", Since: time.Now(), Cred: cred,
+	}
 	m.tunnels[slot] = t
 	m.mu.Unlock()
-	go m.bringUpExact(t, true)
+	if exact {
+		go m.bringUpExact(t, true)
+	} else {
+		go m.bringUp(t, true)
+	}
 	return t, nil
+}
+
+// Start 为指定节点开一条隧道。普通自动启动允许故障时按策略寻找替代节点。
+func (m *Manager) Start(node Node) (*Tunnel, error) {
+	return m.startTunnel(node, "", false)
+}
+
+// StartExact 严格启动用户已经选中的节点，不自动偷偷换成同国其它节点。
+func (m *Manager) StartExact(node Node) (*Tunnel, error) {
+	return m.startTunnel(node, "", true)
+}
+
+// StartWithPolicy 用于策略型批量出口：策略在隧道启动前就写入，避免并发启动时丢失日本运营商限制。
+func (m *Manager) StartWithPolicy(node Node, jpMode string) (*Tunnel, error) {
+	return m.startTunnel(node, jpMode, false)
 }
 
 func (m *Manager) bringUpExact(t *Tunnel, notify bool) {
 	if err := m.tryNode(t); err != nil {
 		t.Err = firstLine(err.Error())
+		t.stop()
+		t.Status = "failed"
+		m.markNodeFailed(t.Node)
+		if serr := m.saveState(); serr != nil {
+			log.Printf("保存状态失败: %v", serr)
+		}
+		return
+	}
+	if m.exitIPInUse(t.ExitIP, t.Slot) {
+		t.Err = fmt.Sprintf("出口 IP %s 与现有出口重复，已拒绝加入", t.ExitIP)
 		t.stop()
 		t.Status = "failed"
 		m.markNodeFailed(t.Node)
@@ -521,16 +559,22 @@ func (m *Manager) bringUpPersist(t *Tunnel, notify bool, persist bool) {
 		return
 	}
 	if persist {
-		// 再尝试一次短暂延时重试，避免瞬时网络抖动
-		time.Sleep(3 * time.Second)
-		if !m.tunnelActive(t) {
-			return
+		// 自动故障恢复：先等待瞬时抖动过去；随后刷新节点池再尝试新的候选。
+		// 连续几轮都没有新的可用节点，才删除失效出口，避免短暂源波动导致出口立刻消失。
+		for round := 0; round < 3; round++ {
+			if !m.tunnelActive(t) {
+				return
+			}
+			time.Sleep(time.Duration(3+round*5) * time.Second)
+			if !m.tunnelActive(t) {
+				return
+			}
+			_, _ = m.refreshNodesSource("all", false)
+			if m.tryCandidates(t, notify) {
+				return
+			}
 		}
-		if m.tryCandidates(t, notify) {
-			return
-		}
-		// 同国所有候选节点皆不可用，严格遵循用户策略：删除该失效节点，保持订阅及面板 100% 纯净可用！
-		log.Printf("隧道 %d (国家: %s) 同国候选均不可用，已自动删除此失效出口", t.Slot, t.TargetRegion)
+		log.Printf("隧道 %d (国家: %s) 连续多轮均无新的可用候选，已自动删除失效出口", t.Slot, t.TargetRegion)
 		_ = m.Stop(t.Slot)
 		return
 	}
@@ -544,7 +588,7 @@ func (m *Manager) bringUpPersist(t *Tunnel, notify bool, persist bool) {
 // tryCandidates 走一轮候选节点，成功返回 true。失败不改 Status（留给调用方决定）。
 func (m *Manager) tryCandidates(t *Tunnel, notify bool) bool {
 	// 连不上就顺着同国家最优候选列表换下一个，优先速度与纯净度
-	candidates := m.candidatesFor(t.Node)
+	candidates := m.candidatesFor(t)
 	// 如果这是一次故障恢复，且首个候选节点正好是刚才挂掉的旧节点，直接跳过它尝试下一个同国候选
 	if len(candidates) > 1 && t.Status == "starting" && t.Err != "" && candidates[0].HostName == t.Node.HostName {
 		candidates = candidates[1:]
@@ -564,6 +608,9 @@ func (m *Manager) tryCandidates(t *Tunnel, notify bool) bool {
 		}
 
 		err := m.tryNode(t)
+		if err == nil && m.exitIPInUse(t.ExitIP, t.Slot) {
+			err = fmt.Errorf("出口 IP %s 与现有出口重复", t.ExitIP)
+		}
 		if err == nil {
 			t.Status = "up"
 			t.Err = ""
@@ -653,20 +700,33 @@ func (m *Manager) tryNode(t *Tunnel) error {
 
 // candidatesFor 寻找指定节点所属同一国家的其他优质候选节点。
 // 严格按【纯净度(学术/家宽原生优先) ➔ 延迟(最低Ping优先) ➔ 带宽速度】智能排序。
-func (m *Manager) candidatesFor(first Node) []Node {
+func (m *Manager) candidatesFor(t *Tunnel) []Node {
+	first := t.Node
 	const maxTries = 8
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	usedHosts := map[string]bool{first.HostName: true}
 	usedIPs := map[string]bool{}
+	usedISPs := map[string]bool{}
 	if first.IP != "" {
-		usedIPs[first.IP] = true
+		usedIPs[normalizeIP(first.IP)] = true
 	}
 	for _, t := range m.tunnels {
 		usedHosts[t.Node.HostName] = true
 		if t.Node.IP != "" {
-			usedIPs[t.Node.IP] = true
+			usedIPs[normalizeIP(t.Node.IP)] = true
+		}
+		if t.TargetPolicyMode == "isp" {
+			tr := strings.ToUpper(strings.TrimSpace(t.TargetRegion))
+			if tr == "" {
+				tr = strings.ToUpper(strings.TrimSpace(t.Node.CountryCode))
+			}
+			if tr != "" && strings.EqualFold(tr, strings.ToUpper(strings.TrimSpace(first.CountryCode))) {
+				if isp := normalizeISP(t.Node.ISP); isp != "" {
+					usedISPs[isp] = true
+				}
+			}
 		}
 	}
 
@@ -684,8 +744,13 @@ func (m *Manager) candidatesFor(first Node) []Node {
 	// 收集同一国家的所有可用空闲节点
 	var pool []Node
 	for _, n := range m.nodes {
-		if usedHosts[n.HostName] || (n.IP != "" && usedIPs[n.IP]) {
+		if usedHosts[n.HostName] || (n.IP != "" && usedIPs[normalizeIP(n.IP)]) {
 			continue
+		}
+		if t.TargetPolicyMode == "isp" {
+			if isp := normalizeISP(n.ISP); isp == "" || usedISPs[isp] {
+				continue
+			}
 		}
 		if m.nodeCooling(n) {
 			continue

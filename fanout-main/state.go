@@ -6,18 +6,21 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
 // persistedTunnel 是隧道在磁盘上的形态。
 // 只存重建所需的信息，运行态（netns、进程、监听）重启后重新建立。
 type persistedTunnel struct {
-	Slot        int    `json:"slot"`
-	Port        int    `json:"port"`
-	HostName    string `json:"hostname"`
-	CountryCode string `json:"country_code"`
-	Country     string `json:"country"`
-	Config      string `json:"config"`
+	Slot               int    `json:"slot"`
+	Port               int    `json:"port"`
+	HostName           string `json:"hostname"`
+	CountryCode        string `json:"country_code"`
+	Country            string `json:"country"`
+	TargetPolicyMode   string `json:"target_policy_mode,omitempty"`
+	LegacyTargetJPMode string `json:"target_jp_mode,omitempty"`
+	Config             string `json:"config"`
 	// SOCKS5 凭据要存盘：用户已经把它分发给客户端了，重启后变掉等于全断
 	SocksUser string `json:"socks_user,omitempty"`
 	SocksPass string `json:"socks_pass,omitempty"`
@@ -41,14 +44,15 @@ func (m *Manager) saveState() error {
 			continue
 		}
 		st.Tunnels = append(st.Tunnels, persistedTunnel{
-			Slot:        t.Slot,
-			Port:        t.Port,
-			HostName:    t.Node.HostName,
-			CountryCode: t.Node.CountryCode,
-			Country:     t.Node.Country,
-			Config:      t.Node.Config,
-			SocksUser:   t.Cred.User,
-			SocksPass:   t.Cred.Pass,
+			Slot:             t.Slot,
+			Port:             t.Port,
+			HostName:         t.Node.HostName,
+			CountryCode:      t.Node.CountryCode,
+			Country:          t.Node.Country,
+			TargetPolicyMode: t.TargetPolicyMode,
+			Config:           t.Node.Config,
+			SocksUser:        t.Cred.User,
+			SocksPass:        t.Cred.Pass,
 		})
 	}
 
@@ -111,11 +115,18 @@ func (m *Manager) restoreState() (int, error) {
 			cred = gen
 		}
 		t := &Tunnel{
-			Slot:   p.Slot,
-			Port:   p.Port,
-			Node:   node,
-			Status: "starting",
-			Cred:   cred,
+			Slot:         p.Slot,
+			Port:         p.Port,
+			Node:         node,
+			Status:       "starting",
+			TargetRegion: strings.ToUpper(strings.TrimSpace(node.CountryCode)),
+			TargetPolicyMode: func() string {
+				if p.TargetPolicyMode != "" {
+					return p.TargetPolicyMode
+				}
+				return p.LegacyTargetJPMode
+			}(),
+			Cred: cred,
 		}
 		m.mu.Lock()
 		m.tunnels[p.Slot] = t
