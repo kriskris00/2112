@@ -527,7 +527,9 @@ func (m *Manager) checkExitNodeLimit(node Node, policyMode string) error {
 		region = "UNKNOWN"
 	}
 
+	// 全局国家上限仍然是第一道硬限制。
 	count := 0
+	usedISPs := map[string]bool{}
 	m.mu.RLock()
 	for _, t := range m.tunnels {
 		if t.Status == "stopped" || t.Status == "failed" {
@@ -537,13 +539,38 @@ func (m *Manager) checkExitNodeLimit(node Node, policyMode string) error {
 		if tr == "" {
 			tr = strings.ToUpper(strings.TrimSpace(t.Node.CountryCode))
 		}
-		if tr == region {
-			count++
+		if tr != region {
+			continue
+		}
+		count++
+		if isp := normalizeISP(t.Node.ISP); isp != "" {
+			usedISPs[isp] = true
 		}
 	}
 	m.mu.RUnlock()
+
 	if count >= cfg.Limit {
 		return fmt.Errorf("%s 节点已达到限额（全局国家上限 %d 个）", countryNameForCode(region), cfg.Limit)
+	}
+
+	// “运营商必须不同”是全局限额之外的第二道硬限制。
+	// policyMode 优先；未显式指定时使用全局设置。这样手动添加、智能编排、
+	// 自动恢复都会遵守同一套规则，而不是只有批量选择时才去重。
+	mode := normalizePolicyMode(policyMode)
+	if strings.TrimSpace(policyMode) == "" {
+		mode = normalizePolicyMode(cfg.Mode)
+	}
+	if mode == "isp" {
+		isp := normalizeISP(node.ISP)
+		if isp == "" {
+			// ISP 未知时不能假装满足“不同运营商”，但也不因为第三方
+			// 情报短暂不可用而把节点永远挡掉；允许进入，并由候选池在
+			// 已知 ISP 节点不足时承担兜底。
+			return nil
+		}
+		if usedISPs[isp] {
+			return fmt.Errorf("%s 已存在运营商 %q 的出口；当前策略要求同一国家 %d 个出口使用不同运营商", countryNameForCode(region), node.ISP, cfg.Limit)
+		}
 	}
 	return nil
 }

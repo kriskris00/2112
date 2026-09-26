@@ -51,6 +51,9 @@ func main() {
 	if _, err := loadExitNodeLimitSettings(*workDir); err != nil {
 		log.Printf("加载出口节点限额设置失败，使用默认值: %v", err)
 	}
+	if _, err := loadSubscriptionSettings(*workDir); err != nil {
+		log.Printf("加载订阅策略失败，使用默认值: %v", err)
+	}
 	setPublicIPOverride(*publicIP)
 	go hostPublicIP() // 预热探测，别让首个请求阻塞
 	if err := prepareHost(); err != nil {
@@ -144,6 +147,7 @@ func main() {
 	mux.HandleFunc("/api/panel/client/add", apiClientAdd(mgr))
 	mux.HandleFunc("/api/panel/client/del", apiClientDelete(mgr))
 	mux.HandleFunc("/api/panel/client/reset", apiClientReset(mgr))
+	mux.HandleFunc("/api/panel/client/reset_all", apiClientResetAll(mgr))
 	mux.HandleFunc("/api/panel/mode", apiPanelMode(*workDir))
 
 	auth, created, err := NewAuth(*workDir)
@@ -164,6 +168,7 @@ func main() {
 
 	mux.HandleFunc("/sub", apiSubscription(mgr, auth))
 	mux.HandleFunc("/api/cred/token", apiCredToken(auth))
+	mux.HandleFunc("/api/subscription", apiSubscriptionSettings(auth, mgr))
 
 	// 用户显式给了 -web 就以命令行为准，否则沿用界面上存过的端口
 	portExplicit := false
@@ -568,6 +573,7 @@ func apiSettings(auth *Auth, srv *webServer) http.HandlerFunc {
 		ListenAddr       *string `json:"listen_addr"` // 提供即改监听地址
 		ExitLimitEnabled *bool   `json:"exit_limit_enabled"`
 		ExitLimit        *int    `json:"exit_limit"`
+		ExitLimitMode    *string `json:"exit_limit_mode"`
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
@@ -598,6 +604,14 @@ func apiSettings(auth *Auth, srv *webServer) http.HandlerFunc {
 				}
 				if in.ExitLimit != nil {
 					next.Limit = *in.ExitLimit
+				}
+				if in.ExitLimitMode != nil {
+					mode := strings.ToLower(strings.TrimSpace(*in.ExitLimitMode))
+					if mode != "random" && mode != "isp" {
+						writeJSON(w, http.StatusBadRequest, map[string]string{"error": "运营商策略必须是 isp 或 random"})
+						return
+					}
+					next.Mode = mode
 				}
 				if err := setExitNodeLimitSettings(next); err != nil {
 					writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -634,6 +648,7 @@ func apiSettings(auth *Auth, srv *webServer) http.HandlerFunc {
 			"version":            version,
 			"exit_limit_enabled": getExitNodeLimitSettings().Enabled,
 			"exit_limit":         getExitNodeLimitSettings().Limit,
+			"exit_limit_mode":    getExitNodeLimitSettings().Mode,
 		})
 	}
 }
@@ -1175,6 +1190,38 @@ func apiClientDelete(m *Manager) http.HandlerFunc {
 	return clientAction(m, "已删除", func(p Panel, id int, email string, t []*Tunnel) error {
 		return p.DeleteClient(id, email, t)
 	})
+}
+
+func apiClientResetAll(m *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "用 POST"})
+			return
+		}
+		id, _ := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("id")))
+		if id <= 0 {
+			var body struct {
+				ID int `json:"id"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			id = body.ID
+		}
+		if id <= 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "缺少入站 ID"})
+			return
+		}
+		p, err := openPanel()
+		if err != nil || p == nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "后端面板不可用"})
+			return
+		}
+		if err := p.ResetAllClients(id, m.Tunnels()); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		invalidateInbounds()
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "该入站及其克隆入站的客户端凭据已全部重置"})
+	}
 }
 
 func apiClientReset(m *Manager) http.HandlerFunc {

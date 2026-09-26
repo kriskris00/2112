@@ -1873,6 +1873,94 @@ func isAllDigits(s string) bool {
 	return true
 }
 
+// ResetAllClients 一键重置指定入站上的全部客户端凭据。
+// 如果这些客户端被 CloneToTunnels 复制到其它入站，则按 email 同步重置，
+// 避免只改一个出口后其它出口仍持有旧 UUID。
+func (x *XUI) ResetAllClients(id int, tunnels []*Tunnel) error {
+	d, err := x.InboundDetail(id, "")
+	if err != nil {
+		return err
+	}
+	emails := map[string]bool{}
+	for _, c := range d.Clients {
+		if strings.TrimSpace(c.Email) != "" {
+			emails[c.Email] = true
+		}
+	}
+	if len(emails) == 0 {
+		return fmt.Errorf("该入站没有可重置的客户端")
+	}
+	inbounds, err := x.Inbounds(nil)
+	if err != nil {
+		return err
+	}
+	for _, ib := range inbounds {
+		err := x.updateInboundRaw(ib.ID, "一键重置客户端凭据", func(p, raw map[string]any) error {
+			proto := fmt.Sprint(raw["protocol"])
+			settings, err := asObject(raw["settings"])
+			if err != nil {
+				return err
+			}
+			clients, _ := settings["clients"].([]any)
+			for _, c := range clients {
+				cm, ok := c.(map[string]any)
+				if !ok || !emails[fmt.Sprint(orEmpty(cm["email"]))] {
+					continue
+				}
+				if proto == "trojan" {
+					cm["password"] = randomHex(8)
+				} else {
+					cm["id"] = newUUID()
+				}
+			}
+			settings["clients"] = clients
+			p["settings"] = mustJSON(settings)
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// SetAllClientLimits 将订阅策略实际写入 3x-ui 客户端。
+// 3x-ui 的 totalGB 单位是字节，expiryTime 使用毫秒时间戳。
+func (x *XUI) SetAllClientLimits(quotaGB float64, expireAt int64, tunnels []*Tunnel) error {
+	inbounds, err := x.Inbounds(nil)
+	if err != nil {
+		return err
+	}
+	totalBytes := int64(0)
+	if quotaGB > 0 {
+		totalBytes = int64(quotaGB * 1024 * 1024 * 1024)
+	}
+	for _, ib := range inbounds {
+		err := x.updateInboundRaw(ib.ID, "更新订阅配额", func(p, raw map[string]any) error {
+			settings, err := asObject(raw["settings"])
+			if err != nil {
+				return err
+			}
+			clients, _ := settings["clients"].([]any)
+			for _, c := range clients {
+				cm, ok := c.(map[string]any)
+				if !ok {
+					continue
+				}
+				cm["totalGB"] = totalBytes
+				cm["expiryTime"] = expireAt
+			}
+			settings["clients"] = clients
+			p["settings"] = mustJSON(settings)
+			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("入站 %d 更新配额失败: %w", ib.ID, err)
+		}
+	}
+	return nil
+}
+
 // OnTunnelsChanged 对 3x-ui 是空操作：出站在 Bind/CloneToTunnels 里已经顺带
 // 同步过，这里再写一次只会多重启一遍面板的 Xray，把已有连接打断。
 func (x *XUI) OnTunnelsChanged(tunnels []*Tunnel) error { return nil }

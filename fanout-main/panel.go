@@ -44,6 +44,11 @@ type Panel interface {
 	DeleteClient(id int, email string, tunnels []*Tunnel) error
 	// ResetClient 换掉客户端的凭据（UUID / trojan 密码），已分发的旧链接随即失效。
 	ResetClient(id int, email string, tunnels []*Tunnel) error
+	// ResetAllClients 一键重置指定入站（以及同邮箱的克隆入站）全部客户端凭据。
+	ResetAllClients(id int, tunnels []*Tunnel) error
+	// SetAllClientLimits 为当前后端所有客户端统一设置流量上限/到期时间。
+	// 0 配额表示不限流量；0 到期表示永不过期。
+	SetAllClientLimits(quotaGB float64, expireAt int64, tunnels []*Tunnel) error
 
 	// OnTunnelsChanged 在隧道集合变化后调用。
 	//

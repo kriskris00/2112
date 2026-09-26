@@ -20,6 +20,7 @@ import (
 type Auth struct {
 	dir      string
 	password string
+	subToken string
 	mu       sync.RWMutex
 	sessions map[string]time.Time
 	// 按来源 IP 记录登录失败，挡低速凭据喷洒
@@ -64,9 +65,26 @@ func NewAuth(dir string) (*Auth, bool, error) {
 		return nil, false, err
 	}
 
+	// 订阅密钥独立于后台登录口令，重置订阅不会踢掉管理员。
+	subPath := filepath.Join(dir, "subscription_token")
+	subBlob, subErr := os.ReadFile(subPath)
+	if os.IsNotExist(subErr) {
+		tok, gerr := randomToken(18)
+		if gerr != nil {
+			return nil, false, gerr
+		}
+		if werr := os.WriteFile(subPath, []byte(tok+"\n"), 0600); werr != nil {
+			return nil, false, fmt.Errorf("写订阅密钥失败: %w", werr)
+		}
+		subBlob = []byte(tok)
+	} else if subErr != nil {
+		return nil, false, subErr
+	}
+
 	return &Auth{
 		dir:      dir,
 		password: strings.TrimSpace(string(blob)),
+		subToken: strings.TrimSpace(string(subBlob)),
 		sessions: map[string]time.Time{},
 		fails:    map[string]*loginFails{},
 	}, created, nil
@@ -145,6 +163,31 @@ func (a *Auth) Password() string {
 	return a.password
 }
 
+func (a *Auth) SubscriptionToken() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.subToken
+}
+
+func (a *Auth) ResetSubscriptionToken() (string, error) {
+	tok, err := randomToken(18)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(a.dir, "subscription_token")
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(tok+"\n"), 0600); err != nil {
+		return "", fmt.Errorf("写订阅密钥失败: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return "", fmt.Errorf("保存订阅密钥失败: %w", err)
+	}
+	a.mu.Lock()
+	a.subToken = tok
+	a.mu.Unlock()
+	return tok, nil
+}
+
 // Wrap 保护一个 handler，未登录时 API 返回 401、页面跳登录。
 func (a *Auth) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -164,7 +207,7 @@ func (a *Auth) Wrap(next http.Handler) http.Handler {
 					token = pass
 				}
 			}
-			if token != "" && subtle.ConstantTimeCompare([]byte(token), []byte(a.Password())) == 1 {
+			if token != "" && (subtle.ConstantTimeCompare([]byte(token), []byte(a.SubscriptionToken())) == 1 || subtle.ConstantTimeCompare([]byte(token), []byte(a.Password())) == 1) {
 				next.ServeHTTP(w, r)
 				return
 			}

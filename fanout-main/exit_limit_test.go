@@ -40,3 +40,20 @@ func TestExitNodeLimitIsGlobalPerCountry(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestExitNodeLimitDistinctISP(t *testing.T) {
+	oldPath := exitNodeLimitPath
+	exitNodeLimitPath = t.TempDir() + "/exit_node_limit.json"
+	defer func() { exitNodeLimitPath = oldPath }()
+	if err := setExitNodeLimitSettings(ExitNodeLimitSettings{Enabled: true, Limit: 5, Mode: "isp"}); err != nil {
+		t.Fatal(err)
+	}
+	m := NewManager(100, t.TempDir())
+	m.tunnels[1] = &Tunnel{Slot: 1, Status: "up", TargetRegion: "JP", Node: Node{CountryCode: "JP", ISP: "Carrier-A"}}
+	if err := m.checkExitNodeLimit(Node{CountryCode: "JP", ISP: "Carrier-A"}, ""); err == nil {
+		t.Fatal("expected duplicate ISP to be rejected")
+	}
+	if err := m.checkExitNodeLimit(Node{CountryCode: "JP", ISP: "Carrier-B"}, ""); err != nil {
+		t.Fatalf("different ISP should be accepted: %v", err)
+	}
+}

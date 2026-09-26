@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -109,7 +110,64 @@ func formatProxyName(countryCode, country, isp string) string {
 func apiCredToken(a *Auth) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{
-			"token": a.Password(),
+			"token": a.SubscriptionToken(),
+		})
+	}
+}
+
+// apiSubscriptionSettings 管理独立订阅密钥、流量上限和到期时间。
+// 流量/到期策略会同步写入 3x-ui 的客户端字段，真正由 Xray/3x-ui 执行。
+func apiSubscriptionSettings(a *Auth, m *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		cur := getSubscriptionSettings()
+		if r.Method == http.MethodPost {
+			var in struct {
+				ResetToken bool     `json:"reset_token"`
+				QuotaGB    *float64 `json:"quota_gb"`
+				ExpireAt   *int64   `json:"expire_at"`
+				ExpireDays *int     `json:"expire_days"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求格式错误"})
+				return
+			}
+			if in.QuotaGB != nil {
+				cur.QuotaGB = *in.QuotaGB
+			}
+			if in.ExpireAt != nil {
+				cur.ExpireAt = *in.ExpireAt
+			}
+			if in.ExpireDays != nil {
+				if *in.ExpireDays <= 0 {
+					cur.ExpireAt = 0
+				} else {
+					cur.ExpireAt = time.Now().Add(time.Duration(*in.ExpireDays) * 24 * time.Hour).UnixMilli()
+				}
+			}
+			if err := setSubscriptionSettings(cur); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			if in.ResetToken {
+				if _, err := a.ResetSubscriptionToken(); err != nil {
+					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+					return
+				}
+			}
+			if p, err := openPanel(); err == nil && p != nil {
+				if err := p.SetAllClientLimits(cur.QuotaGB, cur.ExpireAt, m.Tunnels()); err != nil {
+					writeJSON(w, http.StatusBadGateway, map[string]string{"error": "订阅配额已保存，但同步到后端失败: " + err.Error()})
+					return
+				}
+			}
+		}
+		cur = getSubscriptionSettings()
+		writeJSON(w, http.StatusOK, map[string]any{
+			"token":            a.SubscriptionToken(),
+			"quota_gb":         cur.QuotaGB,
+			"expire_at":        cur.ExpireAt,
+			"quota_unlimited":  cur.QuotaGB <= 0,
+			"expire_unlimited": cur.ExpireAt <= 0,
 		})
 	}
 }
@@ -117,6 +175,11 @@ func apiCredToken(a *Auth) http.HandlerFunc {
 // apiSubscription 生成聚合订阅链接，支持 Base64 通用订阅与 Clash / Mihomo 配置订阅
 func apiSubscription(m *Manager, a *Auth) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		policy := getSubscriptionSettings()
+		if policy.ExpireAt > 0 && time.Now().UnixMilli() >= policy.ExpireAt {
+			http.Error(w, "订阅已到期", http.StatusForbidden)
+			return
+		}
 		// 订阅被请求时再对账一次，确保“服务器直连 · 本机”已经真实存在，
 		// 即使智能编排尚未跑完，直连节点也必须进入订阅。
 		m.reconcilePanelBindings()
@@ -312,8 +375,17 @@ func apiSubscription(m *Manager, a *Auth) http.HandlerFunc {
 			allLinks = append(allLinks, s5Link)
 		}
 
-		// 统一流量头信息（展示 10TB 配额，永不过期）
-		w.Header().Set("Subscription-Userinfo", "upload=0; download=0; total=10737418240000; expire=0")
+		// Subscription-Userinfo 与实际 3x-ui 客户端配额保持一致。
+		// 未设置配额时使用 0，表示不限。
+		totalBytes := int64(0)
+		if policy.QuotaGB > 0 {
+			totalBytes = int64(policy.QuotaGB * 1024 * 1024 * 1024)
+		}
+		expireSec := int64(0)
+		if policy.ExpireAt > 0 {
+			expireSec = policy.ExpireAt / 1000
+		}
+		w.Header().Set("Subscription-Userinfo", fmt.Sprintf("upload=0; download=0; total=%d; expire=%d", totalBytes, expireSec))
 		w.Header().Set("Profile-Update-Interval", "12")
 
 		if isClash {

@@ -406,6 +406,30 @@ func (n *Native) DeleteClient(id int, email string, tunnels []*Tunnel) error {
 	return n.apply(tunnels)
 }
 
+// ResetAllClients 一键重置一个入站的全部客户端凭据。
+func (n *Native) ResetAllClients(id int, tunnels []*Tunnel) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	ib := n.store.byID(id)
+	if ib == nil {
+		return fmt.Errorf("入站 %d 不存在", id)
+	}
+	if len(ib.Clients) == 0 {
+		return fmt.Errorf("该入站没有客户端")
+	}
+	for i := range ib.Clients {
+		ib.Clients[i].ID = newUUID()
+		ib.Clients[i].Password = randomHex(8)
+	}
+	return n.apply(tunnels)
+}
+
+// SetAllClientLimits: Native 当前使用自有轻量客户端存储；订阅配额由 3x-ui 后端负责。
+// 保持接口兼容，避免切换后端时面板崩溃。
+func (n *Native) SetAllClientLimits(quotaGB float64, expireAt int64, tunnels []*Tunnel) error {
+	return nil
+}
+
 // ResetClient 换一套新凭据，旧链接立即失效。
 func (n *Native) ResetClient(id int, email string, tunnels []*Tunnel) error {
 	n.mu.Lock()

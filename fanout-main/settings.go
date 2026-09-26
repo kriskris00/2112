@@ -21,6 +21,73 @@ type WebSettings struct {
 	ListenAddr string `json:"listen_addr"`
 }
 
+type SubscriptionSettings struct {
+	QuotaGB  float64 `json:"quota_gb"`
+	ExpireAt int64   `json:"expire_at"` // Unix milliseconds; 0 = never
+}
+
+var subscriptionSettingsMu sync.RWMutex
+var subscriptionSettingsCur SubscriptionSettings
+var subscriptionSettingsPath string
+
+func loadSubscriptionSettings(dir string) (SubscriptionSettings, error) {
+	subscriptionSettingsPath = filepath.Join(dir, "subscription_settings.json")
+	s := SubscriptionSettings{}
+	blob, err := os.ReadFile(subscriptionSettingsPath)
+	if os.IsNotExist(err) {
+		subscriptionSettingsMu.Lock()
+		subscriptionSettingsCur = s
+		subscriptionSettingsMu.Unlock()
+		return s, saveSubscriptionSettings()
+	}
+	if err != nil {
+		return s, err
+	}
+	if err := json.Unmarshal(blob, &s); err != nil {
+		return s, err
+	}
+	if s.QuotaGB < 0 {
+		s.QuotaGB = 0
+	}
+	subscriptionSettingsMu.Lock()
+	subscriptionSettingsCur = s
+	subscriptionSettingsMu.Unlock()
+	return s, nil
+}
+
+func getSubscriptionSettings() SubscriptionSettings {
+	subscriptionSettingsMu.RLock()
+	defer subscriptionSettingsMu.RUnlock()
+	return subscriptionSettingsCur
+}
+
+func saveSubscriptionSettings() error {
+	subscriptionSettingsMu.RLock()
+	blob, err := json.MarshalIndent(subscriptionSettingsCur, "", "  ")
+	subscriptionSettingsMu.RUnlock()
+	if err != nil {
+		return err
+	}
+	tmp := subscriptionSettingsPath + ".tmp"
+	if err := os.WriteFile(tmp, blob, 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, subscriptionSettingsPath)
+}
+
+func setSubscriptionSettings(next SubscriptionSettings) error {
+	if next.QuotaGB < 0 || next.QuotaGB > 100000 {
+		return fmt.Errorf("订阅流量必须在 0-100000 GB 之间，0 表示不限")
+	}
+	if next.ExpireAt < 0 {
+		return fmt.Errorf("订阅到期时间无效")
+	}
+	subscriptionSettingsMu.Lock()
+	subscriptionSettingsCur = next
+	subscriptionSettingsMu.Unlock()
+	return saveSubscriptionSettings()
+}
+
 // ExitNodeLimitSettings 是全局出口节点限额：对所有国家统一按“国家”计算。
 // 运营商只作为节点信息展示，不单独产生配额，因此同一国家无论运营商如何不同，
 // 都共享同一个全局国家上限。
@@ -28,7 +95,7 @@ type ExitNodeLimitSettings struct {
 	Enabled bool `json:"enabled"`
 	Limit   int  `json:"limit"`
 	// Mode 保留用于兼容旧配置，但不再参与限额计算。
-	Mode string `json:"mode,omitempty"`
+	Mode string `json:"mode,omitempty"` // random / isp；isp 表示同国尽量/必须使用不同运营商
 }
 
 var (
@@ -106,7 +173,7 @@ func exitNodeLimitFilePath(dir string) string { return filepath.Join(dir, "exit_
 
 func loadExitNodeLimitSettings(dir string) (ExitNodeLimitSettings, error) {
 	exitNodeLimitPath = exitNodeLimitFilePath(dir)
-	s := ExitNodeLimitSettings{Enabled: true, Limit: 5}
+	s := ExitNodeLimitSettings{Enabled: true, Limit: 5, Mode: "isp"}
 	blob, err := os.ReadFile(exitNodeLimitPath)
 	if os.IsNotExist(err) {
 		exitNodeLimitMu.Lock()
@@ -125,6 +192,9 @@ func loadExitNodeLimitSettings(dir string) (ExitNodeLimitSettings, error) {
 	}
 	if s.Limit > 1000 {
 		s.Limit = 1000
+	}
+	if strings.ToLower(strings.TrimSpace(s.Mode)) != "random" && strings.ToLower(strings.TrimSpace(s.Mode)) != "isp" {
+		s.Mode = "isp"
 	}
 	exitNodeLimitMu.Lock()
 	exitNodeLimitCur = s

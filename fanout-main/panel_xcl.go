@@ -435,5 +435,13 @@ func (x *XCL) ResetClient(id int, email string, tunnels []*Tunnel) error {
 	return errXCLReadOnly
 }
 
+func (x *XCL) ResetAllClients(id int, tunnels []*Tunnel) error {
+	return errXCLReadOnly
+}
+
+func (x *XCL) SetAllClientLimits(quotaGB float64, expireAt int64, tunnels []*Tunnel) error {
+	return errXCLReadOnly
+}
+
 // Close 无自管进程，空实现。
 func (x *XCL) Close() {}
