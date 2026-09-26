@@ -856,6 +856,102 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 		}
 	}
 
+	// 3f. AutoOVPN：公开自动生成的 OpenVPN 配置仓库，补充大量 VPN Gate 之外的历史/临时节点。
+	if sourceFilter == "" || sourceFilter == "all" || sourceFilter == "autoovpn" || sourceFilter == "github" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			nodes := fetchGitHubOVPNArchiveNodes(timeout, "9xN/auto-ovpn", "main", "autoovpn")
+			mu.Lock()
+			for _, n := range nodes {
+				key := n.IP + ":" + strconv.Itoa(n.Port)
+				if _, exists := nodeMap[key]; !exists {
+					nodeMap[key] = n
+					freshKeys[key] = true
+				}
+			}
+			if len(nodes) > 0 {
+				successCount++
+				if activeSrc == "" {
+					activeSrc = "AutoOVPN"
+				}
+			}
+			mu.Unlock()
+		}()
+	}
+
+	// 3g. Zoult/.ovpn：按国家目录保存公开 .ovpn，作为额外国家覆盖池。
+	if sourceFilter == "" || sourceFilter == "all" || sourceFilter == "zoultovpn" || sourceFilter == "github" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			nodes := fetchGitHubOVPNArchiveNodes(timeout, "Zoult/.ovpn", "master", "zoultovpn")
+			mu.Lock()
+			for _, n := range nodes {
+				key := n.IP + ":" + strconv.Itoa(n.Port)
+				if _, exists := nodeMap[key]; !exists {
+					nodeMap[key] = n
+					freshKeys[key] = true
+				}
+			}
+			if len(nodes) > 0 {
+				successCount++
+				if activeSrc == "" {
+					activeSrc = "ZoultOVPN"
+				}
+			}
+			mu.Unlock()
+		}()
+	}
+
+	// 3i. AlexSwanRu/ovpn：公开 .ovpn 仓库，包含 FreeOpenVPN/FreeVPN4You/IPSpeed 等额外国家目录。
+	if sourceFilter == "" || sourceFilter == "all" || sourceFilter == "alexovpn" || sourceFilter == "github" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			nodes := fetchGitHubOVPNArchiveNodes(timeout, "AlexSwanRu/ovpn", "master", "alexovpn")
+			mu.Lock()
+			for _, n := range nodes {
+				key := n.IP + ":" + strconv.Itoa(n.Port)
+				if _, exists := nodeMap[key]; !exists {
+					nodeMap[key] = n
+					freshKeys[key] = true
+				}
+			}
+			if len(nodes) > 0 {
+				successCount++
+				if activeSrc == "" {
+					activeSrc = "AlexOVPN"
+				}
+			}
+			mu.Unlock()
+		}()
+	}
+
+	// 3h. RiseupVPN：官方 LEAP API 动态生成短期 OpenVPN 客户端配置。
+	if sourceFilter == "" || sourceFilter == "all" || sourceFilter == "riseupvpn" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			nodes := fetchRiseupVPNNodes(timeout)
+			mu.Lock()
+			for _, n := range nodes {
+				key := n.IP + ":" + strconv.Itoa(n.Port)
+				if _, exists := nodeMap[key]; !exists {
+					nodeMap[key] = n
+					freshKeys[key] = true
+				}
+			}
+			if len(nodes) > 0 {
+				successCount++
+				if activeSrc == "" {
+					activeSrc = "RiseupVPN"
+				}
+			}
+			mu.Unlock()
+		}()
+	}
+
 	// 3c. VPNBook（illria/gatevpn 默认源之一）：仅接受官网明确发布的 .ovpn。
 	if sourceFilter == "" || sourceFilter == "all" || sourceFilter == "vpnbook" {
 		wg.Add(1)
