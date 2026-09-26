@@ -18,7 +18,8 @@ import (
 )
 
 // version 由构建时通过 -ldflags 注入。
-var version = "v3.0.0-Jesee-Mod"
+var version = "v3.1.0-fanout"
+var buildRevision = ""
 
 func main() {
 	var (

@@ -873,7 +873,7 @@ func (x *XUI) ensureDefaultTemplateInbound(tunnels []*Tunnel) (int, error) {
 	}
 	created, err := x.CreateInbound(spec, tunnels)
 	if err != nil {
-		spec.Protocol = "vless"
+		spec.Protocol = "vmess"
 		created, err = x.CreateInbound(spec, tunnels)
 	}
 	if err != nil {

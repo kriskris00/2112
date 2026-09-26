@@ -26,7 +26,7 @@ type normalizedSpec struct {
 func normalizeInboundSpec(spec NewInboundSpec, used map[int]bool) (*normalizedSpec, error) {
 	proto := strings.ToLower(strings.TrimSpace(spec.Protocol))
 	if proto == "" {
-		proto = "vless"
+		proto = "vmess"
 	}
 	if !nativeProtocols[proto] {
 		return nil, fmt.Errorf("不支持的协议 %q", spec.Protocol)

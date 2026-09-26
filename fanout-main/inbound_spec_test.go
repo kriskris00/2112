@@ -7,11 +7,11 @@ func TestNormalizeInboundSpecDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("意外报错: %v", err)
 	}
-	if ns.Protocol != "vless" || ns.Network != "tcp" || ns.Security != "none" {
-		t.Fatalf("默认值不对: %+v", ns)
+	if ns.Protocol != "vmess" || ns.Network != "tcp" || ns.Security != "none" {
+		t.Fatalf("默认 VMess 值不对: %+v", ns)
 	}
-	if ns.Remark != "vless-12345" {
-		t.Errorf("备注 = %q, want vless-12345", ns.Remark)
+	if ns.Remark != "vmess-12345" {
+		t.Errorf("备注 = %q, want vmess-12345", ns.Remark)
 	}
 	if ns.Path != "" {
 		t.Errorf("tcp 不该生成路径, got %q", ns.Path)

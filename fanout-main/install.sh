@@ -229,6 +229,12 @@ fi
 [[ -f "$APP_SRC/go.mod" ]] || die "源码缺少 go.mod：$APP_SRC"
 [[ -f "$APP_SRC/main.go" ]] || die "源码缺少 main.go：$APP_SRC"
 
+# 记录 GitHub 当前提交，用于面板 F11 一键更新检测。
+BUILD_REVISION=""
+if [[ -d "$SRC/repo/.git" ]]; then
+  BUILD_REVISION="$(git -C "$SRC/repo" rev-parse HEAD 2>/dev/null || true)"
+fi
+
 # ---------- build ----------
 log "编译 GitHub 最新源码"
 cd "$APP_SRC"
@@ -241,7 +247,7 @@ mkdir -p "$GOCACHE"
 # 不执行 go mod tidy，避免安装脚本修改用户上传源码；只下载并编译。
 go mod download
 NEW_BIN="$TMP_ROOT/fanout"
-go build -p 1 -trimpath -ldflags '-s -w' -o "$NEW_BIN" .
+go build -p 1 -trimpath -ldflags "-s -w -X main.version=v3.1.0-fanout -X main.buildRevision=${BUILD_REVISION}" -o "$NEW_BIN" .
 chmod 755 "$NEW_BIN"
 "$NEW_BIN" --help >/dev/null 2>&1 || true
 
@@ -365,6 +371,12 @@ printf '管理面板： http://%s:%s/%s/\n' "$IP" "$WEB_PORT" "$BP"
 printf '配置目录： %s\n' "$WORK_DIR"
 printf '二进制：   %s\n' "$BIN"
 printf '源码版本： %s/%s\n' "$REPO" "$BRANCH"
+PASS="$(cat "$WORK_DIR/password" 2>/dev/null || true)"
+if [[ -n "$PASS" ]]; then
+  printf '访问密码： %s\n' "$PASS"
+else
+  warn "未读取到访问密码，请执行：cat $WORK_DIR/password"
+fi
 echo
 if [[ "$INIT" == systemd ]]; then
   echo '查看日志： journalctl -u fanout -n 100 --no-pager -l'
