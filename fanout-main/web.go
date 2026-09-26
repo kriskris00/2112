@@ -705,11 +705,9 @@ textarea:focus{outline:none;border-color:var(--accent)}
     </div>
     <div class="body">
       <div class="hint" style="margin-bottom:12px">严格模式：<b>先测活 → 再真实建立隧道 → 再验证出口 IP → 验证通过才进入正式出口</b>。失败节点自动冷却，不会一上来批量塞一堆未经验证的节点。</div>
-      <div class="orch-grid">
-        <label class="f"><span>热门国家目标数量</span><input id="orchHot" type="number" min="1" max="20" value="3"></label>
-        <label class="f"><span>其他有节点国家目标数量</span><input id="orchCold" type="number" min="1" max="10" value="1"></label>
+      <div class="hint" style="margin-bottom:12px"><b>不限国家、不限单国数量：</b>哪个节点真实测活、真实建隧道、真实 Exit-IP 验证通过，就自动加入；直到当前隧道容量用完。
       </div>
-      <label class="f" style="margin-top:10px"><span>本轮最多尝试验证多少个候选</span><input id="orchMax" type="number" min="1" max="20" value="12"></label>
+      <label class="f" style="margin-top:10px"><span>本轮最多启动数量（留空=按服务器隧道容量）</span><input id="orchMax" type="number" min="1" max="150" value="40"></label>
       <div style="margin-top:14px">
         <div style="font-weight:700;margin-bottom:8px">候选节点源（可多选）</div>
         <div class="orch-source-grid">
@@ -718,6 +716,7 @@ textarea:focus{outline:none;border-color:var(--accent)}
           <label class="orch-source"><input type="checkbox" class="orch-src" value="vpnbook" checked> 📘 VPNBook OpenVPN</label>
           <label class="orch-source"><input type="checkbox" class="orch-src" value="vpngate_scraper" checked> 🧪 Vpngate-Scraper</label>
           <label class="orch-source"><input type="checkbox" class="orch-src" value="publicvpnlist" checked> 🌐 PublicVPNList</label>
+          <label class="orch-source"><input type="checkbox" class="orch-src" value="meridian" checked> 🧭 VPN Meridian（独立聚合源）</label>
           <label class="orch-source"><input type="checkbox" class="orch-src" value="proxy"> 🔌 自定义 SOCKS5 / HTTP</label>
           <label class="orch-source"><input type="checkbox" class="orch-src" value="edu" checked> 🎓 海外高校学术</label>
           <label class="orch-source"><input type="checkbox" class="orch-src" value="residential" checked> 🏠 已识别住宅</label>
@@ -732,7 +731,7 @@ textarea:focus{outline:none;border-color:var(--accent)}
         <div id="orchProgressMsg" style="font-size:12px;line-height:1.5">正在启动…</div>
         <div id="orchProgressStats" style="margin-top:7px;font-size:11px;color:var(--dim)">测活通过 0 · 已启动 0 · 验证通过 0 · 新增 0 · 失败 0</div>
       </div>
-      <div style="margin-top:14px;padding:10px;border-radius:10px;background:rgba(2,132,199,.07);border:1px solid rgba(2,132,199,.16);font-size:12px;color:var(--dim)">测活为强制步骤，不能关闭。国家没有合格节点就不创建；有 4 个、5 个或更多合格节点时，可把目标数量调高。</div>
+      <div style="margin-top:14px;padding:10px;border-radius:10px;background:rgba(2,132,199,.07);border:1px solid rgba(2,132,199,.16);font-size:12px;color:var(--dim)">测活为强制步骤。国家不设配额；只保留真实验证通过的节点。个人手动启动的节点同样会等待真实出网验证并自动创建/绑定节点链接。</div>
     </div>
     <div class="foot"><span class="spacer"></span><button data-close="orchestrateModal">取消</button><button class="primary" id="runOrchestrate">开始智能编排</button></div>
   </div>
@@ -2469,9 +2468,9 @@ document.addEventListener('click', async e => {
   if(e.target.closest('#runOrchestrate')){
     const btn = e.target.closest('#runOrchestrate');
     const sources = Array.from(document.querySelectorAll('.orch-src:checked')).map(x => x.value);
-    const hot = Math.max(1, Math.min(20, parseInt($('#orchHot').value || '3', 10)));
-    const cold = Math.max(1, Math.min(10, parseInt($('#orchCold').value || '1', 10)));
-    const maxStarts = Math.max(1, Math.min(20, parseInt($('#orchMax').value || '6', 10)));
+    const maxStarts = Math.max(1, Math.min(150, parseInt($('#orchMax').value || '40', 10)));
+    const hot = 1;
+    const cold = 1;
     if(!sources.length){ toast('至少选择一个节点源', true); return; }
     btn.disabled = true;
     $('#orchProgress').style.display = 'block';
@@ -2497,7 +2496,7 @@ document.addEventListener('click', async e => {
     try {
       const res = await api('/api/auto/orchestrate', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({sources:sources,hot_target:hot,cold_target:cold,max_starts:maxStarts})
+        body:JSON.stringify({sources:sources,max_starts:maxStarts})
       });
       closeModal('orchestrateModal');
       toast(res.message || '智能编排已启动');

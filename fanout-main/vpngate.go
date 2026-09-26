@@ -904,6 +904,31 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 		}()
 	}
 
+	// 3j. VPN Meridian：独立的 VPN Gate 聚合/验证项目，发布 gh-pages 分支的 .ovpn 配置。
+	// 与官方 API/现有抓取器并行，作为额外去重来源；最终仍必须经过本程序真实隧道与 Exit-IP 验证。
+	if sourceFilter == "" || sourceFilter == "all" || sourceFilter == "meridian" || sourceFilter == "github" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			nodes := fetchGitHubOVPNArchiveNodes(timeout, "6Kmfi6HP/vpngate-meridian", "gh-pages", "meridian")
+			mu.Lock()
+			for _, n := range nodes {
+				key := n.IP + ":" + strconv.Itoa(n.Port)
+				if _, exists := nodeMap[key]; !exists {
+					nodeMap[key] = n
+					freshKeys[key] = true
+				}
+			}
+			if len(nodes) > 0 {
+				successCount++
+				if activeSrc == "" {
+					activeSrc = "VPN Meridian"
+				}
+			}
+			mu.Unlock()
+		}()
+	}
+
 	// 3i. AlexSwanRu/ovpn：公开 .ovpn 仓库，包含 FreeOpenVPN/FreeVPN4You/IPSpeed 等额外国家目录。
 	if sourceFilter == "" || sourceFilter == "all" || sourceFilter == "alexovpn" || sourceFilter == "github" {
 		wg.Add(1)

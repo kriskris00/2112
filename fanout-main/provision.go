@@ -630,32 +630,9 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 		}
 	}
 
-	// 2. 超额出口自动精简：热门国家严格限制最多 3 个，冷门国家严格限制最多 1 个
-	for cc, tList := range activeTunnelsByCountry {
-		target := opts.ColdTarget
-		if hotCountries[cc] {
-			target = opts.HotTarget
-		}
-		if len(tList) > target {
-			// 排序保留最优质/最稳定运行的出口，剔除超额出口
-			sort.Slice(tList, func(i, j int) bool {
-				if (tList[i].Status == "up") != (tList[j].Status == "up") {
-					return tList[i].Status == "up"
-				}
-				return tList[i].Since.Before(tList[j].Since)
-			})
-			for idx := target; idx < len(tList); idx++ {
-				excess := tList[idx]
-				log.Printf("[配额精简] 国家 %s 运行出口数 (%d) 超过目标配额 (%d)，自动移除超额出口 槽位 %d (%s)...", cc, len(tList), target, excess.Slot, excess.Node.HostName)
-				_ = m.Stop(excess.Slot)
-				delete(usedHosts, excess.Node.HostName)
-				if excess.Node.IP != "" {
-					delete(usedIPs, excess.Node.IP)
-				}
-			}
-			activeTunnelsByCountry[cc] = tList[:target]
-		}
-	}
+	// 2. 不再按国家做数量配额或精简。
+	// 只要节点通过真实验证，就允许进入正式出口；国家/数量不限制。
+	// 实际并发上限由 Manager.maxSlots 和本轮 MaxStarts 控制，避免把 VPS 资源无限打爆。
 
 	m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
 		p.Stage = "collect"
@@ -728,25 +705,15 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 	var verifiedStarted []*Tunnel
 	startsUsed := 0
 	for _, cc := range sortedCountries {
+		if startsUsed >= opts.MaxStarts {
+			break
+		}
 		m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
 			p.CurrentCountry = cc
 			p.Stage = "probe"
-			p.Message = fmt.Sprintf("正在处理 %s：目标 %d 个", cc, func() int {
-				if hotCountries[cc] {
-					return opts.HotTarget
-				}
-				return opts.ColdTarget
-			}())
+			p.Message = fmt.Sprintf("正在扫描 %s：只要真实验证通过就加入正式出口", cc)
 		})
-		target := opts.ColdTarget
-		if hotCountries[cc] {
-			target = opts.HotTarget
-		}
-		curCount := len(activeTunnelsByCountry[cc])
-		needed := target - curCount
-		if needed <= 0 || startsUsed >= opts.MaxStarts {
-			continue
-		}
+		needed := opts.MaxStarts - startsUsed
 
 		cands := append([]Node(nil), countryCandidates[cc]...)
 		filtered := cands[:0]
@@ -798,19 +765,7 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 
 		// 第一阶段并发快速预检：只做远端可达性/真实代理 CONNECT，不启动 VPN。
 		// 预检并发上限固定为 8，显著缩短“逐个测活”的等待，同时避免压垮 1G VPS。
-		probeLimit := needed + 2
-		if probeLimit < 4 {
-			probeLimit = 4
-		}
-		if probeLimit > 8 {
-			probeLimit = 8
-		}
-		if probeLimit < 1 {
-			continue
-		}
-		if len(cands) > probeLimit {
-			cands = cands[:probeLimit]
-		}
+		// 测活全部候选，不再因为国家配额提前截断；并发固定 8，避免 VPS 被探测流量压垮。
 
 		type probeResult struct {
 			node  Node
@@ -920,7 +875,7 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 	}
 
 	if len(verifiedStarted) > 0 {
-		log.Printf("[全网智能编排] 本轮仅加入 %d 个已实测出网的正式出口 (热门%d/冷门%d，最大补位%d)", len(verifiedStarted), opts.HotTarget, opts.ColdTarget, opts.MaxStarts)
+		log.Printf("[全网智能编排] 本轮加入 %d 个已实测出网的正式出口（不按国家限额，最大启动 %d）", len(verifiedStarted), opts.MaxStarts)
 	}
 
 	m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
@@ -1027,20 +982,33 @@ func (m *Manager) reconcilePanelBindings() {
 		if bound[host] || bound[sanitizeTag(host)] {
 			continue
 		}
+		// 绑定前再次确认该隧道仍然 UP。健康轮换可能恰好在这里把它切到 starting，
+		// 这时不要拿一个旧快照反复调用 CloneToTunnels，避免形成“没有可用隧道”的重试风暴。
+		if t.Status != "up" {
+			continue
+		}
 		var lastErr error
-		for attempt := 1; attempt <= 3; attempt++ {
-			if _, err := cloneTemplateToTunnels(0, []string{host}, tunnels); err == nil {
+		for attempt := 1; attempt <= 2; attempt++ {
+			if t.Status != "up" {
+				lastErr = fmt.Errorf("隧道正在轮换")
+				break
+			}
+			if _, err := cloneTemplateToTunnels(0, []string{host}, m.Tunnels()); err == nil {
 				bound[host] = true
 				bound[sanitizeTag(host)] = true
-				log.Printf("[节点绑定] 出口 %s 已自动创建并绑定入站（第 %d 次尝试）", host, attempt)
+				log.Printf("[节点绑定] 出口 %s 已自动创建并绑定入站", host)
 				break
 			} else {
 				lastErr = err
-				time.Sleep(time.Second)
+				if strings.Contains(err.Error(), "没有可用的隧道") {
+					// 可能正处于同国轮换窗口；交给下一轮 reconcile，不要每个出口都刷日志。
+					break
+				}
+				time.Sleep(300 * time.Millisecond)
 			}
 		}
-		if lastErr != nil && !bound[host] && !bound[sanitizeTag(host)] {
-			log.Printf("[节点绑定] 出口 %s 自动绑定失败，稍后继续重试: %v", host, lastErr)
+		if lastErr != nil && !bound[host] && !bound[sanitizeTag(host)] && !strings.Contains(lastErr.Error(), "没有可用的隧道") && !strings.Contains(lastErr.Error(), "隧道正在轮换") {
+			log.Printf("[节点绑定] 出口 %s 自动绑定失败，下一轮继续: %v", host, lastErr)
 		}
 	}
 	invalidateInbounds()
