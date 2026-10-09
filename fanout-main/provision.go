@@ -105,7 +105,7 @@ func (m *Manager) provisionInternal(policies []CountryPolicy, hosts []string, te
 			if p.Count < 1 {
 				return nil, fmt.Errorf("%s 数量至少为 1", p.Region)
 			}
-			if p.Count > 1000 {
+			if p.Count > 100 {
 				return nil, fmt.Errorf("%s 数量不能超过 100", p.Region)
 			}
 			p.Mode = normalizePolicyMode(p.Mode)
