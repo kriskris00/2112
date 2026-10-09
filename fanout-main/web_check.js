@@ -453,7 +453,7 @@ function policyRow(p = {}){
   const mode = p.mode === 'isp' ? 'isp' : 'random';
   return '<div class="country-policy-row" data-cpid="' + id + '" style="display:grid;grid-template-columns:minmax(120px,1.5fr) 80px minmax(145px,1fr) 32px;gap:7px;align-items:center;margin-bottom:7px">'
     + '<input class="cp-region" list="countryCodeList" value="' + code + '" placeholder="国家，如 JP / 日本" style="min-width:0">'
-    + '<input class="cp-count" type="number" min="1" max="100" value="' + count + '" title="出口数量">'
+    + '<input class="cp-count" type="number" min="1" max="1000" value="' + count + '" title="出口数量">'
     + '<select class="cp-mode"><option value="random" ' + (mode==='random'?'selected':'') + '>随机运营商</option><option value="isp" ' + (mode==='isp'?'selected':'') + '>运营商必须不同</option></select>'
     + '<button type="button" class="cp-remove" title="删除国家">×</button>'
     + '</div>';
@@ -468,7 +468,7 @@ function renderCountryPolicies(){
 function readCountryPolicies(){
   return Array.from(document.querySelectorAll('.country-policy-row')).map(row => ({
     region: row.querySelector('.cp-region')?.value.trim() || '',
-    count: Math.max(1, Math.min(100, Number(row.querySelector('.cp-count')?.value || 1))),
+    count: Math.max(1, Math.min(1000, Number(row.querySelector('.cp-count')?.value || 1))),
     mode: row.querySelector('.cp-mode')?.value || 'random'
   })).filter(p => p.region);
 }
@@ -845,7 +845,7 @@ $('#go').onclick = async e => {
     } else {
       const policies = readCountryPolicies();
       if(!policies.length){ throw new Error('请至少添加一个国家及出口数量'); }
-      for(const p of policies){ if(p.count < 1 || p.count > 100) throw new Error('国家出口数量必须为 1-100'); }
+      for(const p of policies){ if(p.count < 1 || p.count > 1000) throw new Error('国家出口数量必须为 1-1000'); }
       await api('/api/provision?policies=' + encodeURIComponent(JSON.stringify(policies.map(p => ({region:p.region,count:p.count,mode:p.mode,source:src})))) + '&template=' + tpl, {method:'POST', timeout: 60000});
     }
     closeModal('wizard');

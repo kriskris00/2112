@@ -720,8 +720,8 @@ func apiProvision(m *Manager) http.HandlerFunc {
 			if err != nil || count < 1 {
 				count = 3
 			}
-			if count > 100 {
-				count = 100
+			if count > 1000 {
+				count = 1000
 			}
 		}
 
