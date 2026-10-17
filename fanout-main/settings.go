@@ -119,6 +119,9 @@ func loadWebSettings(dir string, defaultPort int, portExplicit bool) (WebSetting
 	webSettingsPath = webSettingsFilePath(dir)
 
 	s := WebSettings{Port: defaultPort, ListenAddr: ""}
+	if err := validatePort(defaultPort); err != nil {
+		return s, err
+	}
 	blob, err := os.ReadFile(webSettingsPath)
 	switch {
 	case os.IsNotExist(err):
@@ -135,6 +138,14 @@ func loadWebSettings(dir string, defaultPort int, portExplicit bool) (WebSetting
 	if s.Port == 0 {
 		s.Port = defaultPort
 	}
+	if err := validatePort(s.Port); err != nil {
+		return s, err
+	}
+	norm, err := normalizeListenAddr(s.ListenAddr)
+	if err != nil {
+		return s, err
+	}
+	s.ListenAddr = norm
 	changed := false
 	if portExplicit && s.Port != defaultPort {
 		s.Port = defaultPort

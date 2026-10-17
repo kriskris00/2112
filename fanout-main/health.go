@@ -2,7 +2,6 @@ package main
 
 import (
 	"log"
-	"net/http"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -53,33 +52,14 @@ func (m *Manager) tunnelHealthy(t *Tunnel) bool {
 		if t.dialer == nil {
 			return false
 		}
-		client := &http.Client{
-			Transport: &http.Transport{Dial: t.dialer},
-			Timeout:   healthTimeout,
-		}
-		resp, err := client.Get("http://1.1.1.1/cdn-cgi/trace")
-		if err == nil && resp.StatusCode == http.StatusOK {
-			resp.Body.Close()
-			return true
-		}
-		if resp != nil {
-			resp.Body.Close()
-		}
-		resp2, err2 := client.Get("http://api.ipify.org")
-		if err2 == nil && resp2.StatusCode == http.StatusOK {
-			resp2.Body.Close()
-			return true
-		}
-		if resp2 != nil {
-			resp2.Body.Close()
-		}
-		return false
+		got, err := t.probeExitIP()
+		return err == nil && got != "" && got == t.ExitIP
 	}
 
 	// 2. OpenVPN netns 隧道探测
 	// 直连 IP 探测（无需域名解析，抗限流）
 	out, err := exec.Command("ip", "netns", "exec", t.nsName(),
-		"curl", "-s", "--max-time", strconv.Itoa(int(healthTimeout.Seconds())),
+		"curl", "--interface", "tun0", "-fsS", "--max-time", strconv.Itoa(int(healthTimeout.Seconds())),
 		"http://1.1.1.1/cdn-cgi/trace").Output()
 	if err == nil {
 		for _, line := range strings.Split(string(out), "\n") {
@@ -94,7 +74,7 @@ func (m *Manager) tunnelHealthy(t *Tunnel) bool {
 
 	// 备用通过 ipify 探测
 	out2, err2 := exec.Command("ip", "netns", "exec", t.nsName(),
-		"curl", "-s", "--max-time", strconv.Itoa(int(healthTimeout.Seconds())),
+		"curl", "--interface", "tun0", "-fsS", "--max-time", strconv.Itoa(int(healthTimeout.Seconds())),
 		"http://api.ipify.org").Output()
 	if err2 == nil {
 		got := strings.TrimSpace(string(out2))

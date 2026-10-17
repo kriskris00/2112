@@ -1,0 +1,1 @@
+PASS Linux/amd64 vet and build

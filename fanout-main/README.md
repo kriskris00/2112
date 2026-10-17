@@ -1,5 +1,9 @@
 # fanout
 
+2026-10-18 修复版：请先阅读 [修复与测试报告](REPAIR_REPORT.md)。在 Linux 上进入本目录运行 `sudo bash install.sh`，安装器优先编译本地修复源码。原有远程安装链接会获取上游代码，不包含本次修改，除非先将修复代码上传到对应仓库。
+
+可执行 `bash check.sh` 复查；具备 C 编译器时使用 `FANOUT_RACE=1 bash check.sh` 增加竞态检测。本项目实际运行仍需要 Linux/root/OpenVPN/Xray，非 Linux 支持只用于单元测试，命名空间拨号会明确报错。
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 把 VPN Gate 的公共节点变成本地 SOCKS5 端口：一个端口一个出口 IP。

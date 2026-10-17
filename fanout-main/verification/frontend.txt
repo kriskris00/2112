@@ -1,0 +1,1 @@
+PASS: embedded UI helpers, API error handling, script synchronization, worker authorization/cache/header isolation

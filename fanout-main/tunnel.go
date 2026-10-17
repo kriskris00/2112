@@ -151,6 +151,9 @@ func (t *Tunnel) teardownNetns() {
 
 // startOpenVPN 在 netns 内拉起 openvpn，并等待 tun0 拿到地址。
 func (t *Tunnel) startOpenVPN(dir string) error {
+	if err := validateOpenVPNConfig(t.Node.Config); err != nil {
+		return err
+	}
 	ns := t.nsName()
 	cfgPath := filepath.Join(dir, ns+".ovpn")
 	if err := os.WriteFile(cfgPath, []byte(t.Node.Config), 0600); err != nil {
@@ -165,6 +168,7 @@ func (t *Tunnel) startOpenVPN(dir string) error {
 	_ = os.Remove(logPath)
 	cmd := exec.Command("ip", "netns", "exec", ns, "openvpn",
 		"--config", cfgPath,
+		"--script-security", "1",
 		"--auth-user-pass", authPath,
 		"--auth-nocache",
 		"--dev", "tun0",
@@ -178,7 +182,8 @@ func (t *Tunnel) startOpenVPN(dir string) error {
 		return fmt.Errorf("启动 openvpn 失败: %w", err)
 	}
 	t.ovpn = cmd
-	go cmd.Wait() // 回收子进程，避免僵尸
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
 
 	// openvpn 建好 tun0 前 SOCKS5 无法正常出网，这里等它就绪
 	deadline := time.Now().Add(40 * time.Second)
@@ -188,8 +193,10 @@ func (t *Tunnel) startOpenVPN(dir string) error {
 				return nil
 			}
 		}
-		if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+		select {
+		case <-done:
 			return fmt.Errorf("openvpn 提前退出，详见 %s", logPath)
+		default:
 		}
 		time.Sleep(time.Second)
 	}
@@ -271,7 +278,7 @@ func (t *Tunnel) probeExitIP() (string, error) {
 	if t.Node.Config != "" {
 		// 1. 在 netns 内执行 curl（独立进程，直接走 tun0，抗干扰）
 		out, err := exec.Command("ip", "netns", "exec", t.nsName(),
-			"curl", "-s", "--max-time", "8", "http://1.1.1.1/cdn-cgi/trace").Output()
+			"curl", "--interface", "tun0", "-fsS", "--max-time", "8", "http://1.1.1.1/cdn-cgi/trace").Output()
 		if err == nil {
 			for _, line := range strings.Split(string(out), "\n") {
 				if strings.HasPrefix(line, "ip=") {
@@ -284,7 +291,7 @@ func (t *Tunnel) probeExitIP() (string, error) {
 		}
 
 		out2, err2 := exec.Command("ip", "netns", "exec", t.nsName(),
-			"curl", "-s", "--max-time", "8", "http://api.ipify.org").Output()
+			"curl", "--interface", "tun0", "-fsS", "--max-time", "8", "http://api.ipify.org").Output()
 		if err2 == nil {
 			ip := strings.TrimSpace(string(out2))
 			if net.ParseIP(ip) != nil {
@@ -301,7 +308,7 @@ func (t *Tunnel) probeExitIP() (string, error) {
 	if t.dialer != nil {
 		client := &http.Client{
 			Transport: &http.Transport{
-				Dial: t.dialer,
+				Dial: t.dialer, DisableKeepAlives: true,
 			},
 			Timeout: 6 * time.Second,
 		}
@@ -309,7 +316,7 @@ func (t *Tunnel) probeExitIP() (string, error) {
 		// 1. 直连 IP 接口
 		resp, err := client.Get("http://1.1.1.1/cdn-cgi/trace")
 		if err == nil && resp.StatusCode == http.StatusOK {
-			body, _ := io.ReadAll(resp.Body)
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 			resp.Body.Close()
 			for _, line := range strings.Split(string(body), "\n") {
 				if strings.HasPrefix(line, "ip=") {
@@ -327,7 +334,7 @@ func (t *Tunnel) probeExitIP() (string, error) {
 		// 2. 备用接口：api.ipify.org
 		resp2, err2 := client.Get("http://api.ipify.org")
 		if err2 == nil && resp2.StatusCode == http.StatusOK {
-			body, _ := io.ReadAll(resp2.Body)
+			body, _ := io.ReadAll(io.LimitReader(resp2.Body, 64<<10))
 			resp2.Body.Close()
 			ip := strings.TrimSpace(string(body))
 			if net.ParseIP(ip) != nil {
@@ -341,15 +348,9 @@ func (t *Tunnel) probeExitIP() (string, error) {
 		if err != nil && err2 != nil {
 			return "", fmt.Errorf("上游代理连通测试失败 (trace: %v, ipify: %v)", err, err2)
 		}
-		if t.Node.IP != "" && net.ParseIP(t.Node.IP) != nil {
-			return t.Node.IP, nil
-		}
 		return "", fmt.Errorf("上游代理未返回有效公网 IP")
 	}
 
-	if t.Node.IP != "" && net.ParseIP(t.Node.IP) != nil {
-		return t.Node.IP, nil
-	}
 	return "", fmt.Errorf("无法确定出口 IP")
 }
 
@@ -383,8 +384,11 @@ func (b *bufferedConn) Read(p []byte) (int, error) {
 
 // makeUpstreamDialer 为上游公开 SOCKS5 或 HTTP 代理构造出站直连拨号器
 func makeUpstreamDialer(proto, upstreamAddr string, timeout time.Duration) func(network, addr string) (net.Conn, error) {
-	if proto == "http" {
+	if proto == "http" || proto == "https" {
 		return func(network, addr string) (net.Conn, error) {
+			if network != "tcp" && network != "tcp4" {
+				return nil, fmt.Errorf("HTTP 上游不支持 %s", network)
+			}
 			conn, err := net.DialTimeout("tcp", upstreamAddr, timeout)
 			if err != nil {
 				return nil, err
@@ -416,13 +420,18 @@ func makeUpstreamDialer(proto, upstreamAddr string, timeout time.Duration) func(
 				conn.Close()
 				return nil, err
 			}
-			if !strings.Contains(statusLine, "200") {
+			parts := strings.Fields(statusLine)
+			if len(parts) < 2 || !strings.HasPrefix(parts[0], "HTTP/") || parts[1] != "200" {
 				conn.Close()
 				return nil, fmt.Errorf("http proxy connect failed: %s", strings.TrimSpace(statusLine))
 			}
 			for {
 				line, err := br.ReadString('\n')
-				if err != nil || strings.TrimSpace(line) == "" {
+				if err != nil {
+					conn.Close()
+					return nil, err
+				}
+				if strings.TrimSpace(line) == "" {
 					break
 				}
 			}
@@ -436,6 +445,9 @@ func makeUpstreamDialer(proto, upstreamAddr string, timeout time.Duration) func(
 
 	// 默认 SOCKS5 上游拨号协议
 	return func(network, addr string) (net.Conn, error) {
+		if network != "tcp" && network != "tcp4" {
+			return nil, fmt.Errorf("SOCKS5 上游仅支持 TCP CONNECT")
+		}
 		conn, err := net.DialTimeout("tcp", upstreamAddr, timeout)
 		if err != nil {
 			return nil, err
@@ -505,7 +517,7 @@ func makeUpstreamDialer(proto, upstreamAddr string, timeout time.Duration) func(
 			conn.Close()
 			return nil, err
 		}
-		if repHead[1] != 0x00 {
+		if repHead[0] != socksVer5 || repHead[2] != 0 || repHead[1] != 0x00 {
 			conn.Close()
 			return nil, fmt.Errorf("upstream socks5 connect rep: %d", repHead[1])
 		}

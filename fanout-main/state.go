@@ -133,5 +133,5 @@ func (m *Manager) restoreState() (int, error) {
 		m.mu.Unlock()
 		go m.bringUpPersist(t, true, true)
 	}
-	return len(st.Tunnels), nil
+	return maxRestore, nil
 }

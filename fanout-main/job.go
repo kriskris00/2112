@@ -142,7 +142,7 @@ func (s *JobStore) DismissAll() {
 	defer s.mu.Unlock()
 	kept := s.jobs[:0]
 	for _, j := range s.jobs {
-		if j.status == "running" {
+		if j.View().Status == "running" {
 			kept = append(kept, j)
 		}
 	}

@@ -111,6 +111,10 @@ func socksHandshake(c net.Conn, cred *SocksCred) error {
 	fromLocal := isLocalhost(c.RemoteAddr())
 
 	if cred == nil || cred.User == "" {
+		if !bytes.ContainsRune(methods, rune(authNone)) {
+			_, _ = c.Write([]byte{socksVer5, authNoAccept})
+			return errors.New("客户端未提供可接受的认证方式")
+		}
 		_, err := c.Write([]byte{socksVer5, authNone})
 		return err
 	}
@@ -124,10 +128,6 @@ func socksHandshake(c net.Conn, cred *SocksCred) error {
 
 	// 客户端没提用户名口令就直接拒绝，不退回无认证
 	if !bytes.ContainsRune(methods, rune(authUserPass)) {
-		if fromLocal {
-			_, err := c.Write([]byte{socksVer5, authNone})
-			return err
-		}
 		_, _ = c.Write([]byte{socksVer5, authNoAccept})
 		return errors.New("客户端不支持用户名口令认证")
 	}
@@ -207,6 +207,9 @@ func socksReadRequestWithCmd(c net.Conn) (byte, string, error) {
 	if _, err := io.ReadFull(c, head); err != nil {
 		return 0, "", err
 	}
+	if head[0] != socksVer5 || head[2] != 0 {
+		return 0, "", errors.New("无效 SOCKS5 请求头")
+	}
 	switch head[1] {
 	case cmdConnect, cmdUDPAssociate:
 	default:
@@ -234,6 +237,9 @@ func socksReadRequestWithCmd(c net.Conn) (byte, string, error) {
 			return 0, "", err
 		}
 		b := make([]byte, int(l[0]))
+		if len(b) == 0 {
+			return 0, "", errors.New("目标域名为空")
+		}
 		if _, err := io.ReadFull(c, b); err != nil {
 			return 0, "", err
 		}

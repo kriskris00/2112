@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -123,7 +124,7 @@ func checkUpdate() (*UpdateStatus, error) {
 
 	latestSHA, shaErr := fetchBranchRevision()
 	if shaErr == nil && strings.TrimSpace(buildRevision) != "" && !strings.EqualFold(strings.TrimSpace(buildRevision), latestSHA) {
-		st.Latest = "main@" + latestSHA[:12]
+		st.Latest = "main@" + shortRevision(latestSHA)
 		st.HasUpdate = true
 		st.Notes = "GitHub main 分支检测到新源码。F11 更新将直接从 GitHub 拉取完整源码、重新编译并重启服务。"
 		return st, nil
@@ -131,7 +132,7 @@ func checkUpdate() (*UpdateStatus, error) {
 
 	// 如果当前版本没有 revision（例如旧版二进制），只要 GitHub 能访问就允许一次源码更新。
 	if shaErr == nil && strings.TrimSpace(buildRevision) == "" {
-		st.Latest = "main@" + latestSHA[:12]
+		st.Latest = "main@" + shortRevision(latestSHA)
 		st.HasUpdate = true
 		st.Notes = "当前版本没有记录 GitHub 提交号，可通过 F11 同步到 main 最新源码。"
 		return st, nil
@@ -198,12 +199,34 @@ func parseSemver(v string) ([3]int, bool) {
 func applyUpdate() error {
 	// F11 优先走 GitHub main 源码安装，而不是依赖 Release。
 	// install.sh 会重新拉取最新完整源码、编译并安装，默认保留 settings/password/basepath。
+	dir, err := os.MkdirTemp("", "fanout-update-")
+	if err != nil {
+		return err
+	}
+	script := filepath.Join(dir, "install.sh")
+	if err := downloadFile("https://raw.githubusercontent.com/kriskris00/2112/main/fanout-main/install.sh", script); err != nil {
+		os.RemoveAll(dir)
+		return fmt.Errorf("下载安装脚本失败: %w", err)
+	}
 	go func() {
+		defer os.RemoveAll(dir)
 		time.Sleep(800 * time.Millisecond)
-		cmd := "curl -fsSL https://raw.githubusercontent.com/kriskris00/2112/main/fanout-main/install.sh | bash"
-		_ = exec.Command("bash", "-c", cmd).Run()
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "bash", script)
+		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+		if err := cmd.Run(); err != nil {
+			log.Printf("更新安装失败: %v", err)
+		}
 	}()
 	return nil
+}
+
+func shortRevision(revision string) string {
+	if len(revision) > 12 {
+		return revision[:12]
+	}
+	return revision
 }
 
 func downloadFile(url, dst string) error {

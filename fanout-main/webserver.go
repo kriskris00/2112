@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 )
@@ -15,10 +17,11 @@ import (
 type webServer struct {
 	handler http.Handler
 
-	mu   sync.Mutex
-	ln   net.Listener
-	srv  *http.Server
-	addr string
+	mu      sync.Mutex
+	applyMu sync.Mutex
+	ln      net.Listener
+	srv     *http.Server
+	addr    string
 }
 
 func newWebServer(h http.Handler) *webServer {
@@ -49,7 +52,7 @@ func (s *webServer) reload(cfg WebSettings) error {
 	s.mu.Lock()
 	oldSrv := s.srv
 	oldLn := s.ln
-	srv := &http.Server{Handler: s.handler}
+	srv := &http.Server{Handler: s.handler, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
 	s.srv = srv
 	s.ln = ln
 	s.addr = addr
@@ -79,6 +82,8 @@ func (s *webServer) reload(cfg WebSettings) error {
 
 // applyWebSettings 校验、落盘并切换监听。任一步失败都不改动线上监听。
 func (s *webServer) applyWebSettings(next WebSettings) error {
+	s.applyMu.Lock()
+	defer s.applyMu.Unlock()
 	if err := validatePort(next.Port); err != nil {
 		return err
 	}
@@ -94,16 +99,32 @@ func (s *webServer) applyWebSettings(next WebSettings) error {
 		return nil
 	}
 
+	// Persist before touching the active listener. Roll back disk on bind failure.
+	blob, err := json.MarshalIndent(next, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := webSettingsPath + ".tmp"
+	if err := os.WriteFile(tmp, blob, 0600); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, webSettingsPath); err != nil {
+		return err
+	}
 	if err := s.reload(next); err != nil {
+		oldBlob, _ := json.MarshalIndent(cur, "", "  ")
+		if writeErr := os.WriteFile(tmp, oldBlob, 0600); writeErr == nil {
+			if restoreErr := os.Rename(tmp, webSettingsPath); restoreErr != nil {
+				return fmt.Errorf("%v; 回滚设置失败: %w", err, restoreErr)
+			}
+		} else {
+			return fmt.Errorf("%v; 回滚设置失败: %w", err, writeErr)
+		}
 		return err
 	}
 
 	webSettingsMu.Lock()
 	webSettingsCur = next
 	webSettingsMu.Unlock()
-	if err := saveWebSettings(); err != nil {
-		log.Printf("保存 Web 设置失败: %v", err)
-		return err
-	}
 	return nil
 }

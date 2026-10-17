@@ -957,7 +957,7 @@ textarea:focus{outline:none;border-color:var(--accent)}
         <div style="display:flex;flex-direction:column;gap:4px">
           <span style="font-size:11px;color:var(--dim)">测活数量</span>
           <select id="lsMax" style="padding:6px 8px;font-size:12px;min-width:125px;background:rgba(255,255,255,0.7);border:1px solid var(--line);color:var(--text);border-radius:4px;font-weight:600">
-            <option value="0" selected>⚡ 全部拉满 (全量测活)</option>
+            <option value="0" selected>全部候选 (限制并发测活)</option>
             <option value="5000">超大池 (5,000 个)</option>
             <option value="2000">深度池 (2,000 个)</option>
             <option value="1000">快速池 (1,000 个)</option>
@@ -1069,8 +1069,8 @@ async function api(path, opts = {}){
   opts.signal = controller.signal;
   try {
     const r = await fetch(apiPath(path), opts);
-    clearTimeout(timeoutId);
     const d = await r.json().catch(()=>({}));
+    clearTimeout(timeoutId);
     if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
     return d;
   } catch(err) {
@@ -1409,7 +1409,10 @@ async function poll(){
 let regions = [], region = '', regionsLoaded = false;
 
 function openModal(id){ $('#' + id).classList.add('open'); }
-function closeModal(id){ $('#' + id).classList.remove('open'); }
+function closeModal(id){
+  $('#' + id).classList.remove('open');
+  if(id === 'liveScanModal' && liveScanPollTimer){ clearInterval(liveScanPollTimer); liveScanPollTimer = null; }
+}
 
 document.addEventListener('click', e => {
   const c = e.target.closest('[data-close]');
@@ -2751,6 +2754,7 @@ document.addEventListener('click', async e => {
 
 // ---- 测活扫描器前端控制器 ----
 let liveScanPollTimer = null;
+let liveScanRequestPending = false;
 let currentLiveNodes = [];
 let selectedLiveHosts = new Set();
 
@@ -2785,6 +2789,8 @@ async function loadLiveScanTemplates(){
 }
 
 async function fetchAndRenderLiveNodes(isBackgroundPoll = false){
+  if(liveScanRequestPending) return;
+  liveScanRequestPending = true;
   const source = $('#lsSource') ? $('#lsSource').value : 'all';
   const region = $('#lsRegion') ? $('#lsRegion').value : 'all';
   const search = $('#lsSearch') ? ($('#lsSearch').value || '').trim() : '';
@@ -2809,7 +2815,7 @@ async function fetchAndRenderLiveNodes(isBackgroundPoll = false){
     }
     
     if(statusText){
-      if(isScanning){
+      if(isScanning && $('#liveScanModal').classList.contains('open')){
         statusText.textContent = '母机发包实测中: 进度 ' + (data.progress || 0) + ' / ' + (data.total || 0) + '，已验证 ' + (data.verified_count || 0) + ' 个有效节点';
       } else if(data.last_scan && data.last_scan !== '0001-01-01 00:00:00'){
         statusText.textContent = '探测完成！已筛选出 ' + (data.verified_count || 0) + ' 个母机 100% 实测通畅出网节点';
@@ -2838,7 +2844,7 @@ async function fetchAndRenderLiveNodes(isBackgroundPoll = false){
     if(!isBackgroundPoll){
       toast('获取测活数据失败: ' + e.message, true);
     }
-  }
+  }finally{ liveScanRequestPending = false; }
 }
 
 async function triggerStartLiveScan(){
@@ -2848,7 +2854,7 @@ async function triggerStartLiveScan(){
   const startBtn = $('#lsStartScanBtn');
   if(startBtn) startBtn.disabled = true;
 
-  toast('正在启动母机并发真实测活 (100协程并发拉满)...');
+  toast('正在启动真实测活，系统会根据资源限制并发...');
   try{
     await api('/api/nodes/live_scan?source=' + encodeURIComponent(source) + '&region=' + encodeURIComponent(region) + '&max=' + encodeURIComponent(max), {
       method: 'POST'
@@ -2885,7 +2891,7 @@ function renderLiveNodesTable(nodes){
     const flag = getFlagEmoji(n.country_code);
     const cc = esc(n.country_code || 'GLOBAL');
     const countryName = esc(n.country || '');
-    const ping = n.ping || 50;
+    const ping = n.ping > 0 ? n.ping : 0;
     const pingColor = ping < 80 ? 'var(--ok)' : (ping < 180 ? 'var(--accent)' : 'var(--warn)');
     
     let protoBadge = '<span class="tag-host" style="font-size:10px">OpenVPN</span>';
@@ -2912,7 +2918,7 @@ function renderLiveNodesTable(nodes){
         '<div style="font-weight:600;font-family:monospace;color:var(--text);display:flex;align-items:center">' + ip + eduBadge + '</div>' +
         '<div style="font-size:11px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:320px">' + isp + (countryName ? ' · ' + countryName : '') + '</div>' +
       '</td>' +
-      '<td style="padding:7px 10px;font-family:monospace;font-weight:600;color:' + pingColor + '">' + ping + ' ms</td>' +
+      '<td style="padding:7px 10px;font-family:monospace;font-weight:600;color:' + pingColor + '">' + (ping > 0 ? ping + ' ms' : '未知') + '</td>' +
       '<td style="padding:7px 10px"><span style="color:var(--ok);font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:3px">✔ 实测通畅</span></td>' +
       '<td style="padding:7px 10px;text-align:right">' +
         '<button class="btn-xs primary ls-start-one" data-host="' + hostName + '" style="padding:3px 10px;font-weight:600">' +
@@ -3038,13 +3044,14 @@ document.addEventListener('click', async e => {
 });
 
 const scanNodesBtn = $('#scanNodesBtn');
-if(scanNodesBtn) scanNodesBtn.onclick = openLiveScanModal;
+// The delegated click handler opens this modal once.
 const lsSrcEl = $('#lsSource');
 if(lsSrcEl) lsSrcEl.onchange = () => fetchAndRenderLiveNodes();
 const lsRgEl = $('#lsRegion');
 if(lsRgEl) lsRgEl.onchange = () => fetchAndRenderLiveNodes();
 const lsSearchEl = $('#lsSearch');
-if(lsSearchEl) lsSearchEl.oninput = () => fetchAndRenderLiveNodes();
+let liveSearchTimer;
+if(lsSearchEl) lsSearchEl.oninput = () => { clearTimeout(liveSearchTimer); liveSearchTimer = setTimeout(() => fetchAndRenderLiveNodes(), 300); };
 
 const subBtn = $('#subBtn');
 if(subBtn) subBtn.onclick = openSubModal;

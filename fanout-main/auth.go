@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -81,6 +82,9 @@ func NewAuth(dir string) (*Auth, bool, error) {
 		return nil, false, subErr
 	}
 
+	if strings.TrimSpace(string(blob)) == "" || strings.TrimSpace(string(subBlob)) == "" {
+		return nil, false, fmt.Errorf("口令或订阅密钥文件为空，请修复后重启")
+	}
 	return &Auth{
 		dir:      dir,
 		password: strings.TrimSpace(string(blob)),
@@ -118,6 +122,8 @@ func (a *Auth) SetPassword(pw string) error {
 	if len(pw) < 4 {
 		return fmt.Errorf("口令至少 4 位")
 	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	path := filepath.Join(a.dir, "password")
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, []byte(pw+"\n"), 0600); err != nil {
@@ -126,9 +132,7 @@ func (a *Auth) SetPassword(pw string) error {
 	if err := os.Rename(tmp, path); err != nil {
 		return fmt.Errorf("保存口令失败: %w", err)
 	}
-	a.mu.Lock()
 	a.password = pw
-	a.mu.Unlock()
 	return nil
 }
 
@@ -174,6 +178,8 @@ func (a *Auth) ResetSubscriptionToken() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	path := filepath.Join(a.dir, "subscription_token")
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, []byte(tok+"\n"), 0600); err != nil {
@@ -182,15 +188,24 @@ func (a *Auth) ResetSubscriptionToken() (string, error) {
 	if err := os.Rename(tmp, path); err != nil {
 		return "", fmt.Errorf("保存订阅密钥失败: %w", err)
 	}
-	a.mu.Lock()
 	a.subToken = tok
-	a.mu.Unlock()
 	return tok, nil
 }
 
 // Wrap 保护一个 handler，未登录时 API 返回 401、页面跳登录。
 func (a *Auth) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		r.Body = http.MaxBytesReader(w, r.Body, 8<<20)
+		// Legacy APIs include GET mutations, so protect every browser request.
+		origin := r.Header.Get("Origin")
+		if r.Header.Get("Sec-Fetch-Site") == "cross-site" || (origin != "" && !sameOrigin(origin, r.Host)) {
+			http.Error(w, "跨站请求被拒绝", http.StatusForbidden)
+			return
+		}
 		if r.URL.Path == "/login" {
 			a.handleLogin(w, r)
 			return
@@ -308,10 +323,16 @@ func (a *Auth) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Value:    tok,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   r.TLS != nil,
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   int(sessionTTL.Seconds()),
 	})
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "已登录"})
+}
+
+func sameOrigin(origin, host string) bool {
+	u, err := url.Parse(origin)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && strings.EqualFold(u.Host, host) && u.User == nil
 }
 
 const loginHTML = `<!DOCTYPE html>

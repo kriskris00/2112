@@ -248,7 +248,7 @@ func fetchVPNBookNodes(timeout time.Duration) []Node {
 		}
 		return nil
 	}
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 	resp.Body.Close()
 	if err != nil {
 		return nil
@@ -272,7 +272,7 @@ func fetchVPNBookNodes(timeout time.Duration) []Node {
 			}
 			continue
 		}
-		cfg, e := io.ReadAll(r.Body)
+		cfg, e := io.ReadAll(io.LimitReader(r.Body, 32<<20))
 		r.Body.Close()
 		if e != nil {
 			continue
@@ -305,7 +305,7 @@ func fetchVpngateScraperNodes(timeout time.Duration) []Node {
 		}
 		return nil
 	}
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 	resp.Body.Close()
 	if err != nil {
 		return nil
@@ -326,7 +326,7 @@ func fetchVpngateScraperNodes(timeout time.Duration) []Node {
 			}
 			continue
 		}
-		cfg, e := io.ReadAll(r.Body)
+		cfg, e := io.ReadAll(io.LimitReader(r.Body, 32<<20))
 		r.Body.Close()
 		if e != nil {
 			continue
@@ -360,7 +360,7 @@ func fetchPublicVPNListNodes(timeout time.Duration) []Node {
 		}
 		return nil
 	}
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 	resp.Body.Close()
 	if err != nil {
 		return nil
@@ -403,7 +403,7 @@ func fetchPublicVPNListNodes(timeout time.Duration) []Node {
 			}
 			continue
 		}
-		cfg, e := io.ReadAll(r.Body)
+		cfg, e := io.ReadAll(io.LimitReader(r.Body, 32<<20))
 		r.Body.Close()
 		if e != nil || !strings.Contains(strings.ToLower(string(cfg)), "client") {
 			continue

@@ -617,7 +617,7 @@ func fetchIPSpeedNodes(timeout time.Duration) []Node {
 		}
 		return nil
 	}
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 	resp.Body.Close()
 	if err != nil {
 		return nil
@@ -653,7 +653,7 @@ func fetchIPSpeedNodes(timeout time.Duration) []Node {
 			}
 			continue
 		}
-		cfgBytes, err := io.ReadAll(cfgResp.Body)
+		cfgBytes, err := io.ReadAll(io.LimitReader(cfgResp.Body, 32<<20))
 		cfgResp.Body.Close()
 		if err != nil || len(cfgBytes) < 100 {
 			continue
@@ -814,7 +814,7 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 				if err != nil || resp.StatusCode != http.StatusOK {
 					return
 				}
-				bodyBytes, err := io.ReadAll(resp.Body)
+				bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 				resp.Body.Close()
 				if err != nil || len(bodyBytes) == 0 {
 					return
@@ -1194,7 +1194,7 @@ func fetchRawCSVFrom(url, key string, timeout time.Duration) (string, error) {
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
-	raw, err := io.ReadAll(resp.Body)
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 	if err != nil {
 		return "", fmt.Errorf("读取失败: %w", err)
 	}

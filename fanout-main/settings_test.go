@@ -92,7 +92,7 @@ func TestAuthSetPassword(t *testing.T) {
 
 func TestWebServerReloadSwitchesPort(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := loadWebSettings(dir, 0, false); err != nil {
+	if _, err := loadWebSettings(dir, freePort(t), false); err != nil {
 		t.Fatalf("loadWebSettings: %v", err)
 	}
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -28,6 +28,12 @@ type udpSession struct {
 // serveUDPAssociate 处理 SOCKS5 UDP ASSOCIATE 请求。
 // client 是已完成认证的 TCP 控制连接；dial 负责在隧道内建连。
 func serveUDPAssociate(client net.Conn, dial func(network, addr string) (net.Conn, error)) {
+	peerHost, _, err := net.SplitHostPort(client.RemoteAddr().String())
+	peerIP := net.ParseIP(peerHost)
+	if err != nil || peerIP == nil {
+		_ = socksReply(client, repGenFail)
+		return
+	}
 	relay, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero})
 	if err != nil {
 		_ = socksReply(client, repGenFail)
@@ -69,6 +75,9 @@ func serveUDPAssociate(client net.Conn, dial func(network, addr string) (net.Con
 		if err != nil {
 			return
 		}
+		if !src.IP.Equal(peerIP) {
+			continue
+		}
 		atyp, addrBytes, host, port, payload, ok := parseUDPReqHeader(buf[:n])
 		if !ok {
 			continue
@@ -79,6 +88,10 @@ func serveUDPAssociate(client net.Conn, dial func(network, addr string) (net.Con
 		mu.Lock()
 		s := sessions[key]
 		if s == nil {
+			if len(sessions) >= 256 {
+				mu.Unlock()
+				continue
+			}
 			mu.Unlock()
 			conn, derr := dial("udp", dest)
 			if derr != nil {
@@ -142,6 +155,9 @@ func parseUDPReqHeader(b []byte) (atyp byte, addrBytes []byte, host string, port
 			return 0, nil, "", 0, nil, false
 		}
 		l := int(b[pos])
+		if l == 0 {
+			return 0, nil, "", 0, nil, false
+		}
 		pos++
 		if len(b) < pos+l+2 {
 			return 0, nil, "", 0, nil, false
@@ -166,6 +182,9 @@ func parseUDPReqHeader(b []byte) (atyp byte, addrBytes []byte, host string, port
 func buildUDPRespHeader(atyp byte, addrBytes []byte, port uint16, data []byte) []byte {
 	head := make([]byte, 0, 4+len(addrBytes)+2)
 	head = append(head, 0, 0, 0, atyp)
+	if atyp == atypDomain {
+		head = append(head, byte(len(addrBytes)))
+	}
 	head = append(head, addrBytes...)
 	head = append(head, byte(port>>8), byte(port))
 	return append(head, data...)

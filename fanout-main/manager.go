@@ -33,8 +33,11 @@ type Manager struct {
 }
 
 func NewManager(maxSlots int, workDir string) *Manager {
-	if maxSlots < 100 {
-		maxSlots = 150
+	if maxSlots <= 0 {
+		maxSlots = 40
+	}
+	if maxSlots > 254 {
+		maxSlots = 254
 	}
 	initial := dedupNodesByIP(loadInitialNodes(workDir))
 	return &Manager{
@@ -137,10 +140,17 @@ func nodeMatchesSource(n Node, source string) bool {
 }
 
 func nodeKey(n Node) string {
-	if n.IP != "" {
-		return strings.ToLower(strings.TrimSpace(n.IP)) + ":" + fmt.Sprint(n.Port)
+	proto := strings.ToLower(strings.TrimSpace(n.Proto))
+	if n.Config != "" || proto == "ovpn" {
+		proto = "ovpn"
 	}
-	return strings.ToLower(strings.TrimSpace(n.HostName)) + ":" + fmt.Sprint(n.Port)
+	if proto == "" {
+		proto = "socks5"
+	}
+	if n.IP != "" {
+		return proto + ":" + strings.ToLower(strings.TrimSpace(n.IP)) + ":" + fmt.Sprint(n.Port)
+	}
+	return proto + ":" + strings.ToLower(strings.TrimSpace(n.HostName)) + ":" + fmt.Sprint(n.Port)
 }
 
 func (m *Manager) markNodeFailed(n Node) {
@@ -179,10 +189,11 @@ func dedupNodesByIP(nodes []Node) []Node {
 			out = append(out, n)
 			continue
 		}
-		if seen[ip] {
+		key := nodeKey(n)
+		if seen[key] {
 			continue
 		}
-		seen[ip] = true
+		seen[key] = true
 		out = append(out, n)
 	}
 	return out
@@ -241,6 +252,14 @@ func (m *Manager) refreshNodesSource(source string, triggerOrchestrate bool) (in
 	}
 	nodes = dedupNodesByIP(nodes)
 	m.mu.Lock()
+	if source != "all" {
+		for _, old := range m.nodes {
+			if !nodeMatchesSource(old, source) {
+				nodes = append(nodes, old)
+			}
+		}
+		nodes = dedupNodesByIP(nodes)
+	}
 	m.nodes = nodes
 	m.fetched = time.Now()
 	m.mu.Unlock()
@@ -300,33 +319,24 @@ func (m *Manager) ImportNodes(rawText string) (int, error) {
 	m.mu.Lock()
 	existing := map[string]bool{}
 	for _, n := range m.nodes {
-		if n.IP != "" {
-			existing[n.IP] = true
-		}
-		if n.HostName != "" {
-			existing[n.HostName] = true
-		}
+		existing[nodeKey(n)] = true
 	}
 	var added int
 	for _, n := range newNodes {
-		if !existing[n.IP] && !existing[n.HostName] {
+		if !existing[nodeKey(n)] {
 			m.nodes = append(m.nodes, n)
-			if n.IP != "" {
-				existing[n.IP] = true
-			}
-			if n.HostName != "" {
-				existing[n.HostName] = true
-			}
+			existing[nodeKey(n)] = true
 			added++
 		}
 	}
+	cachedNodes := append([]Node(nil), m.nodes...)
 	m.fetched = time.Now()
 	total := len(m.nodes)
 	m.mu.Unlock()
 
 	// 保存持久化离线缓存
 	if m.workDir != "" {
-		saveNodesToCache(m.workDir, m.nodes)
+		saveNodesToCache(m.workDir, cachedNodes)
 	}
 
 	sourceInfoMu.Lock()

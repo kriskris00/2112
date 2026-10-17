@@ -54,6 +54,11 @@ func normalizeInboundSpec(spec NewInboundSpec, used map[int]bool) (*normalizedSp
 	// vmess+ws+tls 是很常见的组合，不该拦。
 
 	port := spec.Port
+	if port != 0 {
+		if err := validatePort(port); err != nil {
+			return nil, err
+		}
+	}
 	if port == 0 {
 		p, err := freeRandomPort(used)
 		if err != nil {

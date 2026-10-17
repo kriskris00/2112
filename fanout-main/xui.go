@@ -387,7 +387,7 @@ func (x *XUI) call(method, path string, form url.Values) ([]byte, error) {
 		return nil, fmt.Errorf("调用 %s 失败: %w", path, err)
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 	if err != nil {
 		return nil, err
 	}
@@ -1134,7 +1134,7 @@ func (x *XUI) addInbound(payload map[string]any) (int, error) {
 		return 0, err
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 	var envelope struct {
 		Success bool   `json:"success"`
 		Msg     string `json:"msg"`
@@ -1237,7 +1237,7 @@ func (x *XUI) jsonRequest(method, endpoint string, body []byte) ([]byte, error) 
 		return nil, err
 	}
 	defer resp.Body.Close()
-	return io.ReadAll(resp.Body)
+	return io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 }
 
 func isDuplicateEmail(err error) bool {
@@ -1616,7 +1616,7 @@ func (x *XUI) postJSON(path string, payload any, what string) error {
 		return err
 	}
 	defer resp.Body.Close()
-	blob, _ := io.ReadAll(resp.Body)
+	blob, _ := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 	var envelope struct {
 		Success bool   `json:"success"`
 		Msg     string `json:"msg"`

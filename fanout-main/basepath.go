@@ -74,9 +74,7 @@ func LoadBasePath(dir string) (string, bool, error) {
 
 	blob, err := os.ReadFile(path)
 	if err == nil {
-		if bp := strings.TrimSpace(string(blob)); bp != "" {
-			return normalizeBasePath(bp), false, nil
-		}
+		return normalizeBasePath(strings.TrimSpace(string(blob))), false, nil
 	} else if !os.IsNotExist(err) {
 		return "", false, err
 	}

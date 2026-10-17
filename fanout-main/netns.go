@@ -1,3 +1,5 @@
+//go:build linux
+
 package main
 
 import (
@@ -148,6 +150,16 @@ func dialerInNetns(nsName string) func(network, addr string) (net.Conn, error) {
 
 			d := net.Dialer{
 				Timeout: 12 * time.Second,
+				// If tun0 disappears, fail closed instead of using the host NAT route.
+				Control: func(network, address string, c syscall.RawConn) error {
+					var bindErr error
+					if err := c.Control(func(fd uintptr) {
+						bindErr = syscall.SetsockoptString(int(fd), syscall.SOL_SOCKET, syscall.SO_BINDTODEVICE, "tun0")
+					}); err != nil {
+						return err
+					}
+					return bindErr
+				},
 			}
 			conn, dialErr := d.Dial(forceIPv4Network(network), resolvedAddr)
 

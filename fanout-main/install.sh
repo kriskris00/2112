@@ -127,21 +127,6 @@ if [[ "${FANOUT_CLEAN:-0}" == 1 ]]; then
   find "$WORK_DIR" -maxdepth 1 -type f -name 'state.json.tmp.*' -delete 2>/dev/null || true
 fi
 
-# ---------- stop service ----------
-log "停止旧 fanout 服务"
-if [[ "$INIT" == systemd ]]; then
-  systemctl stop fanout 2>/dev/null || true
-else
-  rc-service fanout stop 2>/dev/null || true
-fi
-
-# 杀掉异常遗留的同名 fanout，避免 8899 被旧进程占用。
-if pgrep -x fanout >/dev/null 2>&1; then
-  pkill -TERM -x fanout 2>/dev/null || true
-  for _ in {1..10}; do pgrep -x fanout >/dev/null 2>&1 || break; sleep 1; done
-  pgrep -x fanout >/dev/null 2>&1 && pkill -KILL -x fanout 2>/dev/null || true
-fi
-
 # ---------- temporary swap for tiny VPS ----------
 setup_build_swap(){
   local mem_kb swap_kb
@@ -170,12 +155,17 @@ install_go(){
     zypper) pkg_install go || true;;
   esac
   if ! command -v go >/dev/null 2>&1; then
-    local gv="1.22.6" gt="$TMP_ROOT/go.tar.gz"
+    local gv="1.27.2" gt="$TMP_ROOT/go.tar.gz" expected
+    case "$GOARCH" in
+      amd64) expected="ecbadb99091a3f46e31f5f934b068b1864eafa7995211b39eaddf76996045fe5";;
+      arm64) expected="94f3e30b8e374bc285e7dadc11e0865726b9bc6e85b841ccceaabc0214c6b7c8";;
+    esac
     mkdir -p "$TMP_ROOT"
     for u in \
       "https://go.dev/dl/go${gv}.linux-${GOARCH}.tar.gz" \
       "https://golang.google.cn/dl/go${gv}.linux-${GOARCH}.tar.gz"; do
       if curl -fL --connect-timeout 10 --max-time 120 "$u" -o "$gt" 2>/dev/null; then
+        printf '%s  %s\n' "$expected" "$gt" | sha256sum -c - >/dev/null || die "Go 校验失败"
         rm -rf /usr/local/go
         tar -C /usr/local -xzf "$gt"
         export PATH="/usr/local/go/bin:$PATH"
@@ -188,6 +178,13 @@ install_go(){
 TMP_ROOT="$(mktemp -d /tmp/fanout-install.XXXXXX)"
 install_go
 
+# Prefer the reviewed source beside this installer. Piped installs still use GitHub.
+LOCAL_SRC="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
+if [[ -f "$LOCAL_SRC/main.go" && -f "$LOCAL_SRC/go.mod" ]]; then
+  APP_SRC="$LOCAL_SRC"
+  SRC="$TMP_ROOT/src"
+  log "使用本地修复源码：$APP_SRC"
+else
 # ---------- fetch GitHub source ----------
 # 不使用当前目录源码，避免“从 GitHub 执行却实际编译服务器旧源码”的问题。
 log "从 GitHub 拉取 ${REPO}@${BRANCH} 最新完整源码"
@@ -226,6 +223,8 @@ else
   die "GitHub 仓库中未找到 fanout-main/main.go。请确认源码确实已上传到 main 分支。"
 fi
 
+fi
+
 [[ -f "$APP_SRC/go.mod" ]] || die "源码缺少 go.mod：$APP_SRC"
 [[ -f "$APP_SRC/main.go" ]] || die "源码缺少 main.go：$APP_SRC"
 
@@ -236,7 +235,7 @@ if [[ -d "$SRC/repo/.git" ]]; then
 fi
 
 # ---------- build ----------
-log "编译 GitHub 最新源码"
+log "编译已选择的源码"
 cd "$APP_SRC"
 export GOPROXY="${GOPROXY:-https://proxy.golang.org,direct}"
 export GOMAXPROCS=1
@@ -247,9 +246,24 @@ mkdir -p "$GOCACHE"
 # 不执行 go mod tidy，避免安装脚本修改用户上传源码；只下载并编译。
 go mod download
 NEW_BIN="$TMP_ROOT/fanout"
-go build -p 1 -trimpath -ldflags "-s -w -X main.version=v3.1.0-fanout -X main.buildRevision=${BUILD_REVISION}" -o "$NEW_BIN" .
+go build -p 1 -trimpath -ldflags "-s -w -X main.version=v3.1.1-repair20261018 -X main.buildRevision=${BUILD_REVISION}" -o "$NEW_BIN" .
 chmod 755 "$NEW_BIN"
 "$NEW_BIN" --help >/dev/null 2>&1 || true
+
+# ---------- stop service ----------
+log "停止旧 fanout 服务"
+if [[ "$INIT" == systemd ]]; then
+  systemctl stop fanout 2>/dev/null || true
+else
+  rc-service fanout stop 2>/dev/null || true
+fi
+
+# 杀掉异常遗留的同名 fanout，避免 8899 被旧进程占用。
+if pgrep -x fanout >/dev/null 2>&1; then
+  pkill -TERM -x fanout 2>/dev/null || true
+  for _ in {1..10}; do pgrep -x fanout >/dev/null 2>&1 || break; sleep 1; done
+  pgrep -x fanout >/dev/null 2>&1 && pkill -KILL -x fanout 2>/dev/null || true
+fi
 
 # ---------- Xray ----------
 log "准备 Xray 核心"

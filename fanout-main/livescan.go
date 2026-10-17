@@ -1,13 +1,11 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -26,194 +24,48 @@ type LiveProbeResult struct {
 	Err       string `json:"err,omitempty"`
 }
 
-var openvpnRemoteRe = regexp.MustCompile(`(?m)^\s*remote\s+([^\s]+)\s+(\d+)(?:\s+(tcp|udp))?`)
-
 // probeNodeLive 从母机真实发包探测该节点是否真正连通并能出网
 func probeNodeLive(n Node, timeout time.Duration) (bool, int64, string, error) {
 	if timeout <= 0 {
 		timeout = 1800 * time.Millisecond
 	}
 
-	// 1. OpenVPN 节点探测
 	if n.Config != "" || n.Proto == "ovpn" {
-		targetHost := n.IP
-		targetPort := 443
-		proto := "tcp"
-
-		if n.Config != "" {
-			matches := openvpnRemoteRe.FindStringSubmatch(n.Config)
-			if len(matches) >= 3 {
-				targetHost = matches[1]
-				if p, err := strconv.Atoi(matches[2]); err == nil && p > 0 {
-					targetPort = p
-				}
-				if len(matches) >= 4 && strings.ToLower(matches[3]) == "udp" {
-					proto = "udp"
-				}
-			}
-		}
-
-		if targetHost == "" {
-			return false, 0, "", fmt.Errorf("无有效远程目标")
-		}
-
-		addr := net.JoinHostPort(targetHost, strconv.Itoa(targetPort))
 		start := time.Now()
-
-		// 优先尝试 TCP 探测
-		if proto == "tcp" || n.Config == "" {
-			conn, err := net.DialTimeout("tcp", addr, timeout)
-			if err == nil {
-				_ = conn.Close()
-				rtt := time.Since(start).Milliseconds()
-				return true, rtt, n.IP, nil
-			}
+		if err := probeOpenVPNHandshake(n.Config, timeout); err != nil {
+			return false, 0, "", err
 		}
-
-		// UDP 握手测试 (发送 OpenVPN Client Reset 包)
-		uconn, err := net.DialTimeout("udp", addr, timeout)
-		if err == nil {
-			defer uconn.Close()
-			_ = uconn.SetDeadline(time.Now().Add(timeout))
-			resetPkt := []byte{0x38, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00}
-			_, _ = uconn.Write(resetPkt)
-			buf := make([]byte, 128)
-			nBytes, rerr := uconn.Read(buf)
-			if rerr == nil && nBytes > 0 {
-				rtt := time.Since(start).Milliseconds()
-				return true, rtt, n.IP, nil
-			}
-		}
-
-		// 不能仅凭 VPN Gate 的 Ping/会话元数据放行：那只是列表信息，
-		// 不代表当前服务器真的能建立 OpenVPN。自动编排必须以真实探测为准。
-		return false, 0, "", fmt.Errorf("OpenVPN 服务端口不可达")
+		return true, time.Since(start).Milliseconds(), "", nil
 	}
-
-	// 2. SOCKS5 代理全链路实测 (TCP握手 ➔ SOCKS5协商 ➔ CONNECT ➔ HTTP请求)
-	if n.Proto == "socks5" || (n.Proto == "" && n.Port > 0) {
-		if n.IP == "" || n.Port <= 0 {
-			return false, 0, "", fmt.Errorf("IP 或端口无效")
-		}
-		addr := net.JoinHostPort(n.IP, strconv.Itoa(n.Port))
-		start := time.Now()
-
-		conn, err := net.DialTimeout("tcp", addr, timeout)
-		if err != nil {
-			return false, 0, "", err
-		}
-		defer conn.Close()
-		_ = conn.SetDeadline(time.Now().Add(timeout))
-
-		// a. SOCKS5 协商无认证
-		if _, err := conn.Write([]byte{0x05, 0x01, 0x00}); err != nil {
-			return false, 0, "", err
-		}
-		greeting := make([]byte, 2)
-		if _, err := io.ReadFull(conn, greeting); err != nil || greeting[0] != 0x05 || greeting[1] != 0x00 {
-			return false, 0, "", fmt.Errorf("SOCKS5 认证协商拒绝")
-		}
-
-		// b. SOCKS5 CONNECT 请求连接 1.1.1.1:80
-		connectReq := []byte{0x05, 0x01, 0x00, 0x01, 1, 1, 1, 1, 0x00, 0x50}
-		if _, err := conn.Write(connectReq); err != nil {
-			return false, 0, "", err
-		}
-		repHead := make([]byte, 10)
-		if _, err := io.ReadFull(conn, repHead); err != nil || repHead[1] != 0x00 {
-			return false, 0, "", fmt.Errorf("SOCKS5 远端 CONNECT 失败: %d", repHead[1])
-		}
-
-		// c. 发起轻量 HTTP GET 请求，彻底验证公网出口是否真正流通
-		httpReq := "GET /cdn-cgi/trace HTTP/1.1\r\nHost: 1.1.1.1\r\nConnection: close\r\n\r\n"
-		if _, err := conn.Write([]byte(httpReq)); err != nil {
-			return false, 0, "", err
-		}
-		buf := make([]byte, 512)
-		nBytes, err := conn.Read(buf)
-		if err != nil || nBytes == 0 {
-			return false, 0, "", fmt.Errorf("SOCKS5 数据流未能正常回传")
-		}
-		content := string(buf[:nBytes])
-		if !strings.Contains(content, "HTTP/") && !strings.Contains(content, "ip=") {
-			return false, 0, "", fmt.Errorf("SOCKS5 响应异常")
-		}
-
-		exitIP := n.IP
-		for _, line := range strings.Split(content, "\n") {
-			if strings.HasPrefix(line, "ip=") {
-				parsedIP := strings.TrimSpace(strings.TrimPrefix(line, "ip="))
-				if net.ParseIP(parsedIP) != nil {
-					exitIP = parsedIP
-				}
-			}
-		}
-
-		rtt := time.Since(start).Milliseconds()
-		return true, rtt, exitIP, nil
+	if n.Proto != "socks5" && n.Proto != "http" && n.Proto != "https" && !(n.Proto == "" && n.Port > 0) {
+		return false, 0, "", fmt.Errorf("不支持的协议: %s", n.Proto)
 	}
-
-	// 3. HTTP 代理全链路实测 (CONNECT 隧道验证)
-	if n.Proto == "http" || n.Proto == "https" {
-		if n.IP == "" || n.Port <= 0 {
-			return false, 0, "", fmt.Errorf("IP 或端口无效")
-		}
-		addr := net.JoinHostPort(n.IP, strconv.Itoa(n.Port))
-		start := time.Now()
-
-		conn, err := net.DialTimeout("tcp", addr, timeout)
-		if err != nil {
-			return false, 0, "", err
-		}
-		defer conn.Close()
-		_ = conn.SetDeadline(time.Now().Add(timeout))
-
-		req := "CONNECT 1.1.1.1:80 HTTP/1.1\r\nHost: 1.1.1.1:80\r\nProxy-Connection: Keep-Alive\r\n\r\n"
-		if _, err := conn.Write([]byte(req)); err != nil {
-			return false, 0, "", err
-		}
-		br := bufio.NewReader(conn)
-		statusLine, err := br.ReadString('\n')
-		if err != nil || !strings.Contains(statusLine, "200") {
-			return false, 0, "", fmt.Errorf("HTTP 代理隧道建立失败")
-		}
-		for {
-			line, err := br.ReadString('\n')
-			if err != nil || strings.TrimSpace(line) == "" {
-				break
-			}
-		}
-
-		// 发起实际 GET 请求，验证隧道是否真正通畅并能够回传 HTTP 数据
-		httpReq := "GET /cdn-cgi/trace HTTP/1.1\r\nHost: 1.1.1.1\r\nConnection: close\r\n\r\n"
-		if _, err := conn.Write([]byte(httpReq)); err != nil {
-			return false, 0, "", err
-		}
-		buf := make([]byte, 512)
-		nBytes, err := br.Read(buf)
-		if err != nil || nBytes == 0 {
-			return false, 0, "", fmt.Errorf("HTTP 代理数据传输失败")
-		}
-		content := string(buf[:nBytes])
-		if !strings.Contains(content, "HTTP/") && !strings.Contains(content, "ip=") {
-			return false, 0, "", fmt.Errorf("HTTP 代理回包异常")
-		}
-
-		exitIP := n.IP
-		for _, line := range strings.Split(content, "\n") {
-			if strings.HasPrefix(line, "ip=") {
-				parsedIP := strings.TrimSpace(strings.TrimPrefix(line, "ip="))
-				if net.ParseIP(parsedIP) != nil {
-					exitIP = parsedIP
-				}
-			}
-		}
-
-		rtt := time.Since(start).Milliseconds()
-		return true, rtt, exitIP, nil
+	if n.IP == "" || n.Port < 1 || n.Port > 65535 {
+		return false, 0, "", fmt.Errorf("IP 或端口无效")
 	}
-
-	return false, 0, "", fmt.Errorf("不支持的协议类型: %s", n.Proto)
+	start := time.Now()
+	dial := makeUpstreamDialer(n.Proto, net.JoinHostPort(n.IP, strconv.Itoa(n.Port)), timeout)
+	transport := &http.Transport{Dial: dial, DisableKeepAlives: true}
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Transport: transport, Timeout: timeout}
+	resp, err := client.Get("http://1.1.1.1/cdn-cgi/trace")
+	if err != nil {
+		return false, 0, "", err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		return false, 0, "", fmt.Errorf("出口验证 HTTP %d: %v", resp.StatusCode, err)
+	}
+	for _, line := range strings.Split(string(body), "\n") {
+		if strings.HasPrefix(line, "ip=") {
+			ip := strings.TrimSpace(strings.TrimPrefix(line, "ip="))
+			if net.ParseIP(ip) != nil {
+				return true, time.Since(start).Milliseconds(), ip, nil
+			}
+		}
+	}
+	return false, 0, "", fmt.Errorf("出口未返回有效 IP")
 }
 
 // liveNodeCache 避免新建出口页面反复点击国家时重复打同一批节点。
@@ -250,14 +102,16 @@ func probeNodesLive(nodes []Node, timeout time.Duration) []Node {
 			if cached.alive {
 				n.Ping = int(cached.latency)
 
+				mu.Lock()
 				out = append(out, n)
+				mu.Unlock()
 			}
 			continue
 		}
+		sem <- struct{}{}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			sem <- struct{}{}
 			alive, rtt, exitIP, _ := probeNodeLive(n, timeout)
 			<-sem
 			liveNodeCache.Lock()
@@ -427,6 +281,7 @@ func (ls *LiveScanner) StartScan(source, region string, maxCandidates int) error
 	ls.progress = 0
 	ls.total = 0
 	ls.verifiedCount = 0
+	ls.verified = nil
 	ls.mu.Unlock()
 
 	go ls.runScan(source, region, maxCandidates)
@@ -461,7 +316,7 @@ func (ls *LiveScanner) runScan(source, region string, maxCandidates int) {
 	isEduTarget := strings.EqualFold(source, "edu")
 
 	for _, n := range raw {
-		if n.IP == "" || seen[n.IP] {
+		if n.IP == "" || seen[nodeKey(n)] {
 			continue
 		}
 		if isFakeDummyNode(n) {
@@ -496,7 +351,7 @@ func (ls *LiveScanner) runScan(source, region string, maxCandidates int) {
 				continue
 			}
 		} else if source != "" && source != "all" {
-			if !strings.EqualFold(n.Source, source) {
+			if !nodeMatchesSource(n, source) {
 				continue
 			}
 		}
@@ -507,7 +362,7 @@ func (ls *LiveScanner) runScan(source, region string, maxCandidates int) {
 			}
 		}
 
-		seen[n.IP] = true
+		seen[nodeKey(n)] = true
 		candidates = append(candidates, n)
 		if len(candidates) >= maxCandidates {
 			break
@@ -599,9 +454,7 @@ func (ls *LiveScanner) runScan(source, region string, maxCandidates int) {
 				} else {
 					node.SpeedMbps = 35.0
 				}
-				if exitIP != "" {
-					node.IP = exitIP
-				}
+				_ = exitIP // Preserve the upstream connection address.
 				EnrichNodeWithIntel(&node)
 
 				outMu.Lock()
