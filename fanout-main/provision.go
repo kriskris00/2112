@@ -316,13 +316,13 @@ func (m *Manager) runProvision(job *Job, picks []Node, modes []string, templateI
 		var err error
 		if strictHosts {
 			// Hosts 是用户明确选择的实时节点，必须严格启动这个节点，不允许静默换节点。
-			t, err = m.StartExact(node)
+			t, err = m.startWithResourceWait(node, "", true)
 		} else {
 			mode := ""
 			if i < len(modes) {
 				mode = modes[i]
 			}
-			t, err = m.StartWithPolicy(node, mode)
+			t, err = m.startWithResourceWait(node, mode, false)
 		}
 		if err != nil {
 			job.Set(i, "failed", err.Error())
@@ -351,7 +351,7 @@ func (m *Manager) runProvision(job *Job, picks []Node, modes []string, templateI
 		}
 	}
 	if len(hosts) == 0 {
-		if len(picks) > 0 {
+		if len(picks) > 0 && job.View().Steps[len(picks)-1].Status != "failed" {
 			job.Set(len(picks)-1, "failed", "没有连通的出口，跳过")
 		}
 		return
@@ -552,22 +552,8 @@ func (m *Manager) Regions(source ...string) []RegionStat {
 		if n.Config == "" && n.Proto != "socks5" && n.Proto != "http" {
 			continue
 		}
-		if src != "" && src != "all" {
-			if strings.EqualFold(src, "gov") {
-				if n.IPType != "gov" && n.Source != "gov" {
-					continue
-				}
-			} else if strings.EqualFold(src, "edu") {
-				if n.Source != "edu" && !isEduIP(n.IP) {
-					continue
-				}
-			} else if strings.EqualFold(src, "residential") {
-				if n.IPType != "residential" {
-					continue
-				}
-			} else if !strings.EqualFold(n.Source, src) {
-				continue
-			}
+		if !nodeMatchesSource(n, src) {
+			continue
 		}
 		cc := strings.ToUpper(strings.TrimSpace(n.CountryCode))
 		if cc == "" && n.Country != "" {
@@ -666,44 +652,9 @@ func orchestrateSourceAllowed(n Node, sources []string) bool {
 	if len(sources) == 0 {
 		return true
 	}
-	for _, raw := range sources {
-		s := strings.ToLower(strings.TrimSpace(raw))
-		if s == "" || s == "all" {
+	for _, source := range sources {
+		if nodeMatchesSource(n, source) {
 			return true
-		}
-		switch s {
-		case "vpngate":
-			if strings.EqualFold(n.Source, "vpngate") {
-				return true
-			}
-		case "edu":
-			if strings.EqualFold(n.Source, "edu") || strings.EqualFold(n.IPType, "edu") || isEduIP(n.IP) {
-				return true
-			}
-		case "gov":
-			if strings.EqualFold(n.Source, "gov") || strings.EqualFold(n.IPType, "gov") {
-				return true
-			}
-		case "residential":
-			if strings.EqualFold(n.Source, "residential") || strings.EqualFold(n.IPType, "residential") {
-				return true
-			}
-		case "proxy":
-			if strings.EqualFold(n.Source, "proxy") || n.Proto == "socks5" || n.Proto == "http" {
-				return true
-			}
-		case "ipspeed", "openvpn":
-			if strings.EqualFold(n.Source, "ipspeed") {
-				return true
-			}
-		case "custom":
-			if strings.EqualFold(n.Source, "custom") || strings.EqualFold(n.CountryCode, "CUSTOM") {
-				return true
-			}
-		default:
-			if strings.EqualFold(n.Source, s) {
-				return true
-			}
 		}
 	}
 	return false
@@ -721,7 +672,61 @@ func (m *Manager) AutoOrchestrate() {
 
 // AutoOrchestrateWithOptions 先筛选候选源，再逐个真实建立隧道并等待出网验证。
 // 只有 Status=up 的节点才会被绑定入站并进入正式出口池；失败节点进入冷却。
+// Reserve the task before returning to HTTP callers. Competing startup,
+// refresh and manual requests must not replace the active task's progress.
+func (m *Manager) tryBeginOrchestration() bool {
+	m.progressMu.Lock()
+	defer m.progressMu.Unlock()
+	if !m.orchestrateMu.TryLock() {
+		return false
+	}
+	now := time.Now()
+	m.orchProgress = AutoOrchestrateProgress{Running: true, Stage: "prepare", Message: "正在整理出口、节点池与候选源…", StartedAt: now, UpdatedAt: now}
+	return true
+}
+
+func (m *Manager) availableOrchestrationSlots() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if len(m.tunnels) >= m.maxSlots {
+		return 0
+	}
+	free := 0
+	for slot := 1; slot <= m.maxSlots; slot++ {
+		if _, used := m.tunnels[slot]; !used {
+			free++
+		}
+	}
+	if capacity := m.maxSlots - len(m.tunnels); free > capacity {
+		free = capacity
+	}
+	return free
+}
+
+const (
+	orchestrationProbeBudget   = 64
+	orchestrationCountryBudget = 16
+	orchestrationProbeWorkers  = 4
+)
+
+func (m *Manager) startAutoOrchestrate(opts AutoOrchestrateOptions) (AutoOrchestrateProgress, bool) {
+	if !m.tryBeginOrchestration() {
+		return m.OrchestrateProgress(), false
+	}
+	progress := m.OrchestrateProgress()
+	go m.runAutoOrchestrate(opts)
+	return progress, true
+}
+
 func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
+	if !m.tryBeginOrchestration() {
+		return
+	}
+	m.runAutoOrchestrate(opts)
+}
+
+// The caller owns orchestrateMu and has already published the initial state.
+func (m *Manager) runAutoOrchestrate(opts AutoOrchestrateOptions) {
 	if opts.HotTarget < 1 {
 		opts.HotTarget = 3
 	}
@@ -740,81 +745,33 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 	if len(opts.Sources) == 0 {
 		opts.Sources = []string{"all"}
 	}
-	if !m.orchestrateMu.TryLock() {
-		m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
-			p.Running = true
-			p.Stage = "busy"
-			p.Message = "已有智能编排正在运行，当前请求排队跳过"
-		})
-		return
-	}
-	m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
-		*p = AutoOrchestrateProgress{Running: true, Stage: "prepare", Message: "正在整理出口、节点池与候选源…", StartedAt: time.Now(), UpdatedAt: time.Now()}
-	})
 	defer func() {
 		m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
 			p.Running = false
 			p.Stage = "done"
 			p.FinishedAt = time.Now()
 			p.Message = fmt.Sprintf("完成：验证通过 %d 个，新增正式出口 %d 个，失败 %d 个", p.Verified, p.Added, p.Failed)
+			if p.StopReason != "" {
+				p.Message += "；" + p.StopReason
+			}
 		})
 		m.orchestrateMu.Unlock()
 	}()
+	if m.availableOrchestrationSlots() == 0 {
+		m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
+			p.StopReason = "槽位已满，请先停止不需要的出口，再启动编排"
+		})
+		return
+	}
+	if reason := m.admissionReason(); reason != "" {
+		m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) { p.StopReason = reason })
+		return
+	}
 
 	tunnels := m.Tunnels()
 
-	// 0. 严格执行 1 出口 = 1 节点：清理 3x-ui / native 面板中的重复入站与废弃孤儿入站
-	if p, err := openPanel(); err == nil && p != nil {
-		inbounds, _ := p.Inbounds(nil)
-		byExitInbounds := make(map[string][]int) // host -> []inboundID
-		existingTunnelHosts := make(map[string]bool)
-		for _, t := range tunnels {
-			existingTunnelHosts[t.Node.HostName] = true
-			existingTunnelHosts[sanitizeTag(t.Node.HostName)] = true
-			if t.Node.IP != "" {
-				existingTunnelHosts[t.Node.IP] = true
-			}
-			if t.ExitIP != "" {
-				existingTunnelHosts[t.ExitIP] = true
-			}
-		}
-
-		var orphanIDs []int
-		for _, ib := range inbounds {
-			bTo := strings.TrimSpace(ib.BoundTo)
-			if bTo == "" || strings.EqualFold(bTo, "direct") || strings.EqualFold(bTo, "none") {
-				continue
-			}
-			matchedHost := ""
-			for _, t := range tunnels {
-				if bTo == t.Node.HostName || sanitizeTag(bTo) == sanitizeTag(t.Node.HostName) ||
-					(t.Node.IP != "" && bTo == t.Node.IP) || (t.ExitIP != "" && bTo == t.ExitIP) ||
-					bTo == fmt.Sprintf("exit-%d", t.Slot) || bTo == fmt.Sprintf("slot-%d", t.Slot) {
-					matchedHost = t.Node.HostName
-					break
-				}
-			}
-			if matchedHost != "" {
-				byExitInbounds[matchedHost] = append(byExitInbounds[matchedHost], ib.ID)
-			} else {
-				orphanIDs = append(orphanIDs, ib.ID)
-			}
-		}
-
-		var duplicateIDs []int
-		for _, ids := range byExitInbounds {
-			if len(ids) > 1 {
-				// 严格 1:1，只保留第 1 个正常入站，多余的全部删除
-				duplicateIDs = append(duplicateIDs, ids[1:]...)
-			}
-		}
-		toDelete := append(duplicateIDs, orphanIDs...)
-		if len(toDelete) > 0 {
-			log.Printf("[1出口1节点] 正在清理面板中 %d 个冗余/孤儿入站...", len(toDelete))
-			_ = p.DeleteInbounds(toDelete, tunnels)
-			invalidateInbounds()
-		}
-	}
+	// Preserve existing inbounds during restore/reconnect. Orchestration
+	// does not own user configurations and must never delete them implicitly.
 
 	// 1. 统计当前运行中或启动中的各国家出口数量并收集按国家分组的隧道
 	activeTunnelsByCountry := make(map[string][]*Tunnel)
@@ -879,6 +836,21 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 		p.Message = fmt.Sprintf("已找到 %d 个国家、%d 个候选，开始逐个测活…", len(countryCandidates), candidateTotal)
 	})
 
+	m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
+		count := 0
+		for _, list := range countryCandidates {
+			n := len(list)
+			if n > orchestrationCountryBudget {
+				n = orchestrationCountryBudget
+			}
+			count += n
+		}
+		if count > orchestrationProbeBudget {
+			count = orchestrationProbeBudget
+		}
+		p.CandidatesTotal = count
+	})
+
 	// 4. 收集并按热门程度与可用节点数排序国家列表
 	allCountries := make(map[string]bool)
 	for cc := range countryCandidates {
@@ -909,8 +881,24 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 	// 必须逐个启动并完成真实出网验证；失败立即停止并冷却。
 	var verifiedStarted []*Tunnel
 	startsUsed := 0
+	probesUsed := 0
+countryLoop:
 	for _, cc := range sortedCountries {
+		if reason := m.admissionReason(); reason != "" {
+			m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) { p.StopReason = reason })
+			break
+		}
 		if startsUsed >= opts.MaxStarts {
+			break
+		}
+		if m.availableOrchestrationSlots() == 0 {
+			m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) { p.StopReason = "槽位已满，已停止继续扫描" })
+			break
+		}
+		if probesUsed >= orchestrationProbeBudget {
+			m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
+				p.StopReason = "本轮候选预算已用尽，可再次运行以检测其他候选"
+			})
 			break
 		}
 		m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
@@ -982,9 +970,15 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 			return cands[i].SpeedMbps > cands[j].SpeedMbps
 		})
 
-		// 第一阶段并发快速预检：只做远端可达性/真实代理 CONNECT，不启动 VPN。
-		// 预检并发上限固定为 8，显著缩短“逐个测活”的等待，同时避免压垮 1G VPS。
-		// 测活全部候选，不再因为国家配额提前截断；并发固定 8，避免 VPS 被探测流量压垮。
+		// Bound each run and publish completed probes immediately.
+		limit := orchestrationCountryBudget
+		if remaining := orchestrationProbeBudget - probesUsed; limit > remaining {
+			limit = remaining
+		}
+		if len(cands) > limit {
+			cands = cands[:limit]
+		}
+		probesUsed += len(cands)
 
 		type probeResult struct {
 			node  Node
@@ -994,15 +988,19 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 		}
 		results := make(chan probeResult, len(cands))
 		var probeWG sync.WaitGroup
-		sem := make(chan struct{}, 8)
+		sem := make(chan struct{}, orchestrationProbeWorkers)
 		for _, pick := range cands {
 			pick := pick
+			sem <- struct{}{}
 			probeWG.Add(1)
 			go func() {
 				defer probeWG.Done()
-				sem <- struct{}{}
 				defer func() { <-sem }()
 				alive, rtt, _, err := probeNodeLive(pick, 1800*time.Millisecond)
+				m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
+					p.CandidatesTested++
+					p.Message = fmt.Sprintf("正在测活 %s，已完成 %d 个候选", countryNameForCode(cc), p.CandidatesTested)
+				})
 				results <- probeResult{node: pick, alive: alive, rtt: rtt, err: err}
 			}()
 		}
@@ -1010,7 +1008,6 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 		close(results)
 		passed := make([]probeResult, 0, len(cands))
 		for r := range results {
-			m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) { p.CandidatesTested++ })
 			if !r.alive {
 				m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) { p.Failed++; p.LastError = firstLine(fmt.Sprint(r.err)) })
 				m.markNodeFailed(r.node)
@@ -1036,6 +1033,14 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 
 			t, err := m.StartExact(pick)
 			if err != nil {
+				if _, limited := err.(*admissionError); limited {
+					m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) { p.StopReason = err.Error() })
+					break countryLoop
+				}
+				if strings.Contains(err.Error(), "槽位已满") {
+					m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) { p.StopReason = "槽位已满，已停止继续扫描" })
+					break countryLoop
+				}
 				m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) { p.Failed++; p.LastError = firstLine(fmt.Sprint(err)) })
 				m.markNodeFailed(pick)
 				log.Printf("[智能编排] 启动失败，跳过 %s (%s): %v", pick.HostName, cc, err)

@@ -316,6 +316,14 @@ textarea:focus{outline:none;border-color:var(--accent)}
   transition:all .2s cubic-bezier(0.16, 1, 0.3, 1)}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(-4px)}
 .toast.bad{border-color:rgba(220,38,38,.5);color:var(--bad)}
+.resource-card{padding:16px;margin-bottom:16px;border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.72)}
+.resource-top{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.resource-top #syncStatus{font-size:11px;color:var(--dim)}
+.resource-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:12px 0;color:var(--dim)}.resource-grid b{float:right;color:var(--text)}
+.resource-track{height:6px;border-radius:6px;background:#dbe3ee;margin-top:6px;overflow:hidden}.resource-track i{height:100%;display:block;width:0;background:var(--accent);transition:width .2s}
+.feed-row{padding:14px;border:1px solid var(--line);border-radius:12px;margin:12px 0;background:rgba(255,255,255,.45)}
+@media(max-width:560px){.resource-grid{grid-template-columns:1fr;gap:10px}.resource-top button{flex:1}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+@supports not (backdrop-filter:blur(1px)){.sheet,.resource-card,.exit{background:#f8fafc}}
 </style>
 </head>
 <body>
@@ -351,6 +359,11 @@ textarea:focus{outline:none;border-color:var(--accent)}
 </header>
 
 <main>
+<section class="resource-card" aria-label="服务器资源与出口容量">
+ <div class="resource-top"><b id="capacityCount">出口容量加载中…</b><span id="syncStatus" role="status" aria-live="polite"></span><span class="spacer"></span><button id="capacityOpen">容量与资源保护</button><button id="feedOpen">授权来源</button></div>
+ <div class="resource-grid"><div>CPU <b id="cpuValue">采样中</b><div class="resource-track"><i id="cpuMeter"></i></div></div><div>内存 <b id="memoryValue">采样中</b><div class="resource-track"><i id="memoryMeter"></i></div></div></div>
+ <div id="capacityReason" class="hint" role="status">新增出口会按资源占用自动暂停。</div>
+</section>
   <div class="jobs" id="jobs"></div>
 
   <div id="globalExitLimitBar" style="margin:0 0 12px;padding:12px 14px;border:1px solid rgba(99,102,241,.30);border-radius:14px;background:rgba(255,255,255,.58);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 6px 20px rgba(15,23,42,.05);display:flex;align-items:center;gap:12px;flex-wrap:wrap">
@@ -435,7 +448,9 @@ textarea:focus{outline:none;border-color:var(--accent)}
           <option value="proxy">🔌 自定义 SOCKS5 / HTTP（默认不拉公共垃圾源）</option>
           <option value="edu">🎓 海外高校学术科研网</option>
           <option value="residential">🏡 已识别住宅 / 家宽</option>
-          <option value="gov">🏛️ 已识别公共机构</option>
+          <option value="gov">🏛️ 政府/公共机构（含疑似）</option>
+          <option value="gov_suspected">🏛️ 仅疑似政府/公共机构</option>
+          <option value="gov_authorized">🏛️ 仅管理员声明授权来源</option>
           <option value="custom">📁 本地导入与自定义节点</option>
         </select>
       </label>
@@ -702,7 +717,7 @@ textarea:focus{outline:none;border-color:var(--accent)}
         <div style="margin-top:12px;padding:12px 14px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:12px;font-size:12px;color:var(--dim);line-height:1.6">
           <div style="font-weight:600;color:var(--text);margin-bottom:4px">🌟 项目致谢与开发信息</div>
           <div>原版架构与作者：<b>Joey</b>（<a href="https://youtube.com/@joeyblog" target="_blank" rel="noopener" style="color:var(--accent)">@joeyblog</a> / <a href="https://github.com/byJoey/fanout" target="_blank" rel="noopener" style="color:var(--accent)">GitHub</a>）</div>
-          <div>深度魔改升级版：<b style="color:#70b8ff">Jesee</b>（独家：10秒同国自愈轮换、全网智能编排、纯净住宅/政府专网原生支持、苹果液态玻璃 UI）</div>
+          <div>深度魔改升级版：<b style="color:#70b8ff">Jesee</b>（智能编排、资源保护、授权来源与响应式面板）</div>
         </div>
         <div class="updnotes" id="updNotes" hidden></div>
       </div>
@@ -723,14 +738,15 @@ textarea:focus{outline:none;border-color:var(--accent)}
     </div>
     <div class="body">
       <div class="hint" style="margin-bottom:12px">严格模式：<b>先测活 → 再真实建立隧道 → 再验证出口 IP → 验证通过才进入正式出口</b>。失败节点自动冷却，不会一上来批量塞一堆未经验证的节点。</div>
-      <div class="hint" style="margin-bottom:12px"><b>不限国家、不限单国数量：</b>哪个节点真实测活、真实建隧道、真实 Exit-IP 验证通过，就自动加入；直到当前隧道容量用完。
+      <div class="hint" style="margin-bottom:12px"><b>按预算逐轮增加：</b>只加入真实验证通过的出口；同时遵守总容量、每国限额、来源筛选与资源保护。
       </div>
-      <label class="f" style="margin-top:10px"><span>本轮最多启动数量（留空=按服务器隧道容量）</span><input id="orchMax" type="number" min="1" max="150" value="40"></label>
+      <label class="f" style="margin-top:10px"><span>本轮最多启动数量（1–20；最多测活 64 个候选）</span><input id="orchMax" type="number" min="1" max="20" value="8"></label>
       <div style="margin-top:14px">
         <div style="font-weight:700;margin-bottom:8px">候选节点源（可多选）</div>
         <div class="orch-source-grid">
           <label class="orch-source"><input type="checkbox" class="orch-src" value="vpngate" checked> 🇯🇵 VPN Gate（筑波大学官方源）</label>
           <label class="orch-source"><input type="checkbox" class="orch-src" value="ipspeed" checked> 🌐 IPSpeed OpenVPN</label>
+          <label class="orch-source"><input type="checkbox" class="orch-src" value="riseupvpn" checked> RiseupVPN（官方公开 API）</label>
           <label class="orch-source"><input type="checkbox" class="orch-src" value="vpnbook" checked> 📘 VPNBook OpenVPN</label>
           <label class="orch-source"><input type="checkbox" class="orch-src" value="vpngate_scraper" checked> 🧪 Vpngate-Scraper</label>
           <label class="orch-source"><input type="checkbox" class="orch-src" value="publicvpnlist" checked> 🌐 PublicVPNList</label>
@@ -738,7 +754,7 @@ textarea:focus{outline:none;border-color:var(--accent)}
           <label class="orch-source"><input type="checkbox" class="orch-src" value="proxy"> 🔌 自定义 SOCKS5 / HTTP</label>
           <label class="orch-source"><input type="checkbox" class="orch-src" value="edu" checked> 🎓 海外高校学术</label>
           <label class="orch-source"><input type="checkbox" class="orch-src" value="residential" checked> 🏠 已识别住宅</label>
-          <label class="orch-source"><input type="checkbox" class="orch-src" value="gov"> 🏛️ 已识别公共机构</label>
+          <label class="orch-source"><input type="checkbox" class="orch-src" value="gov"> 🏛️ 政府/公共机构（含疑似，未核验）</label>
           <label class="orch-source"><input type="checkbox" class="orch-src" value="custom" checked> 🧩 自定义 / 本地</label>
           <label class="orch-source"><input type="checkbox" id="orchAll" value="all"> 🌍 全部候选源</label>
         </div>
@@ -789,16 +805,17 @@ textarea:focus{outline:none;border-color:var(--accent)}
       </div>
 
       <div style="margin-bottom:16px">
-        <h3 style="margin-bottom:8px;font-size:14px">优质节点池（日本筑波大学官方/镜像 + 海外高校学术科研网 + 住宅家宽原生）</h3>
+        <h3 style="margin-bottom:8px;font-size:14px">公开候选池与管理员授权来源</h3>
         <div style="font-size:12px;color:var(--dim);line-height:1.6;background:var(--card-bg);padding:10px;border-radius:6px;border:1px solid var(--border);margin-bottom:8px">
-          <div>• <b>日本筑波大学官方及全量高防镜像池</b>：150.40.105.19 / 119.195.163.98 等多镜像并发聚合</div>
-          <div>• <b>海外高校学术科研网专项</b>：日本 (SINET/筑波) / 韩国 (KOREN) / 台湾 (TANet) / 欧美名校学术专网（不含国内）</div>
-          <div>• <b>住宅家宽原生优质 IP</b>：纯净家庭宽带与移动网络原生节点，低风控、极速防封</div>
-          <div>• <b>全自动容灾与并发测速</b>：自动并发拉取、剔除不可用死节点、按纯净度与网络速度降序排序</div>
+          <div>• <b>VPN Gate 官方与内置镜像</b>：汇总志愿者公开节点，来源标签不等于机构身份认证</div>
+          <div>• <b>学术网络分类</b>：网络信息推测与管理员声明的授权来源，连接前仍需测活</div>
+          <div>• <b>住宅与移动网络分类</b>：分类和评分仅供参考，不保证原生属性、匿名性或平台可用性</div>
+          <div>• <b>全自动容灾与并发测速</b>：自动并发拉取、剔除不可用死节点、按参考评分与网络速度降序排序</div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="primary" id="refreshMirrors" data-src="all">🔄 刷新全部优质源</button>
+          <button class="primary" id="refreshMirrors" data-src="all">🔄 刷新全部候选源</button>
           <button id="refreshVpnGate" data-src="vpngate">🇯🇵 仅拉取筑波大学源</button>
+          <button id="refreshGov" data-src="gov">🏛️ 刷新政府/公共机构候选（含疑似）</button>
           <button id="refreshEdu" data-src="edu">🎓 仅拉取海外学术网</button>
           <button id="refreshResidential" data-src="residential">🏡 仅拉取住宅家宽源</button>
         </div>
@@ -822,7 +839,7 @@ textarea:focus{outline:none;border-color:var(--accent)}
         <div class="hint" style="margin-bottom:8px">
           您可以把任意商业/私有 VPN 的 <code>.ovpn</code> 配置文件上传到服务器目录：<br>
           <code id="srcCustomDir" style="color:var(--accent)">/var/lib/fanout/custom_nodes</code><br>
-          （支持以国家码命名如 <code>US_server1.ovpn</code>、<code>JP_fast.ovpn</code>，扫描后将直接加入节点池，自动识别纯净度与机房/住宅）
+          （支持以国家码命名如 <code>US_server1.ovpn</code>、<code>JP_fast.ovpn</code>，扫描后将直接加入节点池，自动识别参考评分与机房/住宅）
         </div>
         <button id="scanLocalOvpn">📁 扫描本地 .ovpn 目录</button>
       </div>
@@ -922,7 +939,7 @@ textarea:focus{outline:none;border-color:var(--accent)}
     </div>
     <div class="body" style="padding:14px">
       <div style="font-size:12px;color:var(--text);margin-bottom:12px;line-height:1.6;background:rgba(2,132,199,0.08);border:1px solid rgba(2,132,199,0.22);border-radius:6px;padding:10px 12px;backdrop-filter:blur(10px)">
-        ⚡ <b>真实出网验证标准</b>：直接从本机 VPS 发起真实 TCP+SOCKS5/OpenVPN 握手并向 <code>1.1.1.1/cdn-cgi/trace</code> 校验出口，<b>只有母机实测 100% 能连通、有回包的节点才会列出</b>！杜绝任何失效死节点与假节点。
+        <b>分阶段验证</b>：OpenVPN 候选先通过真实握手，代理候选验证 HTTPS 出口。正式启动后还会再次检查出口与健康状态；通过预检不保证长期可用。
       </div>
 
       <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px;background:var(--panel);border:1px solid var(--line);padding:10px;border-radius:6px">
@@ -930,7 +947,9 @@ textarea:focus{outline:none;border-color:var(--accent)}
           <span style="font-size:11px;color:var(--dim)">扫描来源</span>
           <select id="lsSource" style="padding:6px 8px;font-size:12px;min-width:140px;background:rgba(255,255,255,0.7);border:1px solid var(--line);color:var(--text);border-radius:4px">
             <option value="all">🌐 全部优质源 (全量并发实测)</option>
-            <option value="gov">🏛️ 全球政府公共机构网 (政务专网)</option>
+            <option value="gov">🏛️ 政府/公共机构（含疑似，未核验）</option>
+            <option value="gov_suspected">🏛️ 仅疑似政府/公共机构（未核验）</option>
+            <option value="gov_authorized">🏛️ 仅管理员声明授权来源</option>
             <option value="edu" selected>🎓 海外高校学术网 (日本筑波/韩国/台湾/欧美)</option>
             <option value="vpngate">🇯🇵 日本筑波大学 (VPN Gate)</option>
             <option value="residential">🏡 住宅家宽原生节点</option>
@@ -994,7 +1013,7 @@ textarea:focus{outline:none;border-color:var(--accent)}
           <span id="lsStatusText" style="font-weight:500">准备就绪，点击上方按钮从 VPS 本机并发探测</span>
         </span>
         <span class="spacer"></span>
-        <span>实测有效：<b id="lsVerifiedCount" style="color:var(--ok);font-size:13px">0</b> 个</span>
+        <span>预检通过：<b id="lsVerifiedCount" style="color:var(--ok);font-size:13px">0</b> 个</span>
         <span id="lsLastScanTime" style="margin-left:8px;color:var(--dim)"></span>
       </div>
 
@@ -1022,7 +1041,7 @@ textarea:focus{outline:none;border-color:var(--accent)}
       </div>
     </div>
     <div class="foot">
-      <span class="count" id="lsFootInfo">实测通畅节点启动后自动挂接出网</span>
+      <span class="count" id="lsFootInfo">预检候选启动后再次验证出口</span>
       <span class="spacer"></span>
       <button data-close="liveScanModal">关闭</button>
     </div>
@@ -1030,6 +1049,22 @@ textarea:focus{outline:none;border-color:var(--accent)}
 </div>
 
 <div class="toast" id="toast"></div>
+
+
+<div class="modal" id="capacityModal"><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="capacityTitle"><div class="head"><h2 id="capacityTitle">容量与资源保护</h2><span class="spacer"></span><button data-close="capacityModal" aria-label="关闭">关闭</button></div><div class="body">
+ <label class="f"><span>数量模式</span><select id="capMode"><option value="auto">自动扩容（受资源保护，技术上限 254）</option><option value="custom">自定义总出口数量</option></select></label>
+ <label class="f"><span>自定义总数（1–254）</span><input id="capMax" type="number" min="1" max="254" value="80"></label>
+ <label class="f"><span><input id="capGuard" type="checkbox" checked> 启用资源保护</span></label>
+ <label class="f"><span>CPU 或内存暂停阈值（50–95%）</span><input id="capThreshold" type="number" min="50" max="95" value="80"></label>
+ <p class="hint">达到阈值即暂停新增，已有出口继续保留。资源下降后，后续编排与排队恢复会再次尝试。降低数量不会主动删除已有出口。</p>
+ <p class="hint">监测优先遵守更严格的服务器/服务内存限额。采样有延迟，无法保证占用永远不超过阈值；启动会限速。</p>
+ <div id="capSaveStatus" role="status" aria-live="polite"></div>
+ </div><div class="foot"><button data-close="capacityModal">取消</button><button class="primary" id="capSave">保存并立即生效</button></div></div></div>
+<div class="modal" id="feedsModal"><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="feedsTitle"><div class="head"><h2 id="feedsTitle">授权来源</h2><span class="spacer"></span><button data-close="feedsModal">关闭</button></div><div class="body">
+ <p class="hint">接入官方发布或你有权使用的 OpenVPN 配置。支持单个配置、配置压缩包、VPN Gate CSV 与配置清单；不自动扫描机构网络。</p>
+ <p class="hint">政府来源需提供政府官方域名上的公开授权说明。分类由管理员声明，不表示已独立核验身份、稳定性或安全性。</p>
+ <div id="feedRows"></div><button id="feedAdd">添加来源</button><div id="feedSaveStatus" role="status" aria-live="polite"></div>
+ </div><div class="foot"><button data-close="feedsModal">取消</button><button class="primary" id="feedSave">保存来源</button></div></div></div>
 
 <script>
 const $ = s => document.querySelector(s);
@@ -1071,7 +1106,11 @@ async function api(path, opts = {}){
     const r = await fetch(apiPath(path), opts);
     const d = await r.json().catch(()=>({}));
     clearTimeout(timeoutId);
-    if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+    if(!r.ok){
+      // Compatibility with servers that still return 409 for an active task.
+      if(r.status === 409 && path === '/api/auto/orchestrate' && d.status === 'busy' && d.progress && d.progress.running) return d;
+      throw new Error(d.error || d.message || ('HTTP ' + r.status));
+    }
     return d;
   } catch(err) {
     clearTimeout(timeoutId);
@@ -1085,6 +1124,7 @@ function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 let toastTimer;
+let orchestrateProgressTimer = null;
 function toast(msg, bad){
   const el = $('#toast');
   el.textContent = msg;
@@ -1144,7 +1184,7 @@ function getFlagEmoji(countryCode) {
 }
 
 const COUNTRY_ZH = {
-  GOV: '政府公共网络', EDU: '海外高校学术网络', GLOBAL: '全球公网', CUSTOM: '自定义',
+  GOV: '政府/公共机构（含疑似）', EDU: '海外高校学术网络', GLOBAL: '全球公网', CUSTOM: '自定义',
   // 亚太地区
   JP: '日本', KR: '韩国', HK: '中国香港', TW: '中国台湾', SG: '新加坡',
   MY: '马来西亚', TH: '泰国', VN: '越南', PH: '菲律宾', ID: '印尼',
@@ -1174,7 +1214,7 @@ const COUNTRY_ZH = {
 
 function formatCountry(code, name) {
   if (!code || code === 'CUSTOM') return '🌐 ' + (name || '自定义');
-  if (code === 'GOV') return '🏛️ 全球政府公共机构专网' + (name && name !== 'GOV' && name !== '政府公共网络' ? ' · ' + name : '');
+  if (code === 'GOV') return '🏛️ 政府/公共机构（含疑似）' + (name && name !== 'GOV' && name !== '授权政府来源' ? ' · ' + name : '');
   if (code === 'EDU') return '🎓 海外高校学术科研网' + (name && name !== 'EDU' && name !== '教育网高校' && name !== '海外高校学术网络' ? ' · ' + name : '');
   const flag = getFlagEmoji(code);
   const zh = COUNTRY_ZH[code.toUpperCase()] || '';
@@ -1184,6 +1224,12 @@ function formatCountry(code, name) {
   return flag + ' ' + code + (name ? ' · ' + name : '');
 }
 
+function governmentBadge(n){
+ const state=n.government_status||(n.ip_type==='gov'||n.source==='gov'?'suspected':'');
+ if(!state)return '';
+ return '<span class="tag-gov" title="'+esc(n.government_evidence||'元数据推测，机构身份与授权未核验')+'">🏛️ '+(state==='declared'?'管理员声明授权':'疑似机构 · 未核验')+'</span>';
+}
+
 function renderExits(){
   const list = $('#list');
   const n = view.exits.filter(e => e.status === 'up').length;
@@ -1191,9 +1237,9 @@ function renderExits(){
   $('#ecount').textContent = n ? n + ' 个' + (total !== n ? '（总计 ' + total + '）' : '') : (total ? '0 个可用' : '');
   const hasInboundsOrExits = view.exits.some(e => (e.inbounds && e.inbounds.length) || e.status === 'up');
   $('#exportAll').disabled = !hasInboundsOrExits;
-  $('#stopall').disabled = !n;
+  $('#stopall').disabled = !total && !(capacityView && capacityView.pending_restore);
 
-  const govCount = view.exits.filter(e => e.ip_type === 'gov').length;
+  const govCount = view.exits.filter(e => e.government_status || e.ip_type === 'gov').length;
   const eduCount = view.exits.filter(e => e.ip_type === 'edu').length;
   const resCount = view.exits.filter(e => e.ip_type === 'residential').length;
   const purities = view.exits.map(e => e.purity_score || 55);
@@ -1201,10 +1247,10 @@ function renderExits(){
 
   const summaryBar = '<div class="stats-summary">'
     + '<span class="stat-pill">健康出口<b>' + n + '</b></span>'
-    + (govCount ? '<span class="stat-pill">🏛️ 政府专网<b style="color:#ebb237">' + govCount + '</b></span>' : '')
+    + (govCount ? '<span class="stat-pill">🏛️ 政府类（推测）<b style="color:#ebb237">' + govCount + '</b></span>' : '')
     + (eduCount ? '<span class="stat-pill">🎓 学术科研<b style="color:#a855f7">' + eduCount + '</b></span>' : '')
     + '<span class="stat-pill">🏡 住宅家宽<b style="color:#3fa66b">' + resCount + '</b></span>'
-    + '<span class="stat-pill">平均纯净度<b style="color:' + (avgPurity>=80?'#3fa66b':'#c9903a') + '">' + (n ? avgPurity + '%' : '—') + '</b></span>'
+    + '<span class="stat-pill">平均参考评分<b style="color:' + (avgPurity>=80?'#3fa66b':'#c9903a') + '">' + (n ? avgPurity + '%' : '—') + '</b></span>'
     + '<span class="stat-pill">联动后端<b>' + esc(backendName()) + '</b></span>'
     + '</div>';
 
@@ -1218,10 +1264,10 @@ function renderExits(){
 
   list.innerHTML = summaryBar + view.exits.map(e => {
     const label = e.exit_ip || (e.status === 'starting' ? '连接中…' : '—');
-    const isGov = e.ip_type === 'gov';
+    const isGov = !!e.government_status || e.ip_type === 'gov';
     const isEdu = e.ip_type === 'edu';
     const isRes = e.ip_type === 'residential';
-    const typeTag = isGov ? '<span class="tag-gov" title="政府/公共机构专网">🏛️ 政府</span>'
+    const typeTag = isGov ? governmentBadge(e)
       : (isEdu ? '<span class="tag-edu" title="海外高校学术科研网络">🎓 学术</span>'
       : (isRes ? '<span class="tag-res" title="家庭宽带住宅 IP">🏡 住宅</span>'
       : (e.ip_type === 'mobile' ? '<span class="tag-mob" title="移动蜂窝网络 IP">📱 移动</span>'
@@ -1232,7 +1278,7 @@ function renderExits(){
     if(purity >= 85) pColor = '#3fa66b';
     else if(purity >= 70) pColor = '#4a9eda';
     else if(purity >= 50) pColor = '#c9903a';
-    const purityTag = '<span class="tag-purity" style="color:' + pColor + '" title="IP 纯净度评分">' + purity + '%</span>';
+    const purityTag = '<span class="tag-purity" style="color:' + pColor + '" title="IP 参考评分，不代表安全或匿名保证">' + purity + '%</span>';
 
     const activeInbounds = (e.inbounds || []).slice(0, 1);
     const chips = activeInbounds.length
@@ -1388,8 +1434,11 @@ $('#saveGlobalExitLimit').onclick = async () => {
   }finally{ btn.disabled = false; }
 };
 
+let dashboardPolling = false;
 async function poll(){
-  if(document.hidden) return;
+  if(document.hidden || dashboardPolling) return;
+  dashboardPolling = true;
+  try {
   try{
     view = await api('/api/exits');
     $('#panel').textContent = view.panel
@@ -1401,16 +1450,22 @@ async function poll(){
     $('#exportAll').hidden = isXCL();
     renderExits();
     renderOrphans();
-  }catch(e){}
+    $('#syncStatus').textContent = '已同步 ' + new Date().toLocaleTimeString();
+  }catch(e){ $('#syncStatus').textContent = '同步失败：' + e.message; }
   try{ renderJobs(await api('/api/jobs') || []); }catch(e){}
+  await refreshCapacity();
+  }finally{ dashboardPolling = false; }
 }
 
 // ---- 新建向导 ----
 let regions = [], region = '', regionsLoaded = false;
 
-function openModal(id){ $('#' + id).classList.add('open'); }
+const modalFocus = new Map();
+function openModal(id){const m=$('#'+id);modalFocus.set(id,document.activeElement);m.classList.add('open');m.setAttribute('role','dialog');m.setAttribute('aria-modal','true');const first=m.querySelector('button,input,select,textarea');if(first)first.focus();}
 function closeModal(id){
   $('#' + id).classList.remove('open');
+  const previous=modalFocus.get(id);if(previous&&previous.isConnected&&previous.focus)previous.focus();modalFocus.delete(id);
+  if(id === 'orchestrateModal' && orchestrateProgressTimer){ clearInterval(orchestrateProgressTimer); orchestrateProgressTimer = null; }
   if(id === 'liveScanModal' && liveScanPollTimer){ clearInterval(liveScanPollTimer); liveScanPollTimer = null; }
 }
 
@@ -1420,10 +1475,10 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('keydown', e => {
   if(e.key === 'Escape') document.querySelectorAll('.modal.open')
-    .forEach(m => m.classList.remove('open'));
+    .forEach(m => closeModal(m.id));
 });
 document.querySelectorAll('.modal').forEach(m => {
-  m.onclick = e => { if(e.target === m) m.classList.remove('open'); };
+  m.onclick = e => { if(e.target === m) closeModal(m.id); };
 });
 
 
@@ -1782,7 +1837,7 @@ function renderWizardCandidates(){
       + '<span style="font-size:11px;color:var(--dim);width:24px;text-align:right">#' + (idx + 1) + '</span>'
       + '<span style="font-size:14px">' + flag + '</span>'
       + '<span style="flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(n.ip + ' ' + isp) + '">'
-      + '<b style="color:var(--text)">' + esc(n.ip || n.hostname) + '</b> '
+      + '<b style="color:var(--text)">' + esc(n.ip || n.hostname) + '</b> ' + governmentBadge(n)
       + '<span style="color:var(--dim);font-size:11px">' + esc(isp) + '</span>' + inUseBadge
       + '</span>'
       + (speed ? '<span style="font-size:11px;color:var(--dim)">' + speed + '</span>' : '')
@@ -1980,12 +2035,10 @@ document.addEventListener('click', async e => {
 });
 
 $('#stopall').onclick = async e => {
-  if(!confirm('停止全部 ' + view.exits.length + ' 个出口？')) return;
+  if(!confirm('停止当前全部出口并清空待恢复队列？启用的自动策略仍可在后续创建出口。')) return;
   e.target.disabled = true;
-  for(const x of view.exits){
-    try{ await api('/api/stop?slot=' + x.slot, {method:'POST'}); }catch(err){}
-  }
-  poll();
+  try{ await api('/api/stop-all', {method:'POST'}); toast('已停止当前出口并清空恢复队列'); }catch(err){toast(err.message,true);}
+  finally{poll();}
 };
 
 const pruneBtn = $('#prunefailed');
@@ -2635,20 +2688,19 @@ document.addEventListener('click', async e => {
   }
   if(e.target.closest('#runOrchestrate')){
     const btn = e.target.closest('#runOrchestrate');
-    const sources = Array.from(document.querySelectorAll('.orch-src:checked')).map(x => x.value);
-    const maxStarts = Math.max(1, Math.min(150, parseInt($('#orchMax').value || '40', 10)));
-    const hot = 1;
-    const cold = 1;
+    const sources = $('#orchAll').checked ? ['all'] : Array.from(document.querySelectorAll('.orch-src:checked')).map(x => x.value);
+    const maxStarts = Math.max(1, Math.min(20, parseInt($('#orchMax').value || '8', 10)));
     if(!sources.length){ toast('至少选择一个节点源', true); return; }
     btn.disabled = true;
     $('#orchProgress').style.display = 'block';
     $('#orchProgressStage').textContent = '启动中';
     $('#orchProgressMsg').textContent = '正在启动智能编排…';
-    let progressTimer = null;
+    if(orchestrateProgressTimer){ clearInterval(orchestrateProgressTimer); orchestrateProgressTimer = null; }
+    let pollPending = false;
     const renderOrchProgress = (p) => {
       if(!p) return;
       const tested = Number(p.candidates_tested || 0), total = Number(p.candidates_total || 0);
-      const pct = total ? Math.min(100, Math.round(tested * 100 / total)) : (p.running ? 8 : 100);
+      const pct = !p.running ? 100 : (total ? Math.min(100, Math.round(tested * 100 / total)) : 8);
       $('#orchProgressBar').style.width = pct + '%';
       const stageMap = {prepare:'准备',collect:'整理候选',probe:'测活',start:'建立隧道',verify:'真实出网验证',bind:'绑定节点',done:'完成',busy:'已有任务'};
       $('#orchProgressStage').textContent = stageMap[p.stage] || p.stage || '处理中';
@@ -2656,10 +2708,14 @@ document.addEventListener('click', async e => {
       $('#orchProgressMsg').textContent = p.message || '处理中…';
       $('#orchProgressStats').textContent = '测活通过 ' + (p.live_passed||0) + ' · 已启动 ' + (p.started||0) + ' · 验证通过 ' + (p.verified||0) + ' · 新增 ' + (p.added||0) + ' · 失败 ' + (p.failed||0);
       if(p.current_node) $('#orchProgressMsg').textContent += '（当前：' + p.current_node + '）';
-      if(!p.running && progressTimer){ clearInterval(progressTimer); progressTimer = null; }
+      if(!p.running && orchestrateProgressTimer){ clearInterval(orchestrateProgressTimer); orchestrateProgressTimer = null; }
     };
     const pollOrch = async () => {
-      try { renderOrchProgress(await api('/api/auto/orchestrate/status')); } catch(err) {}
+      if(pollPending || document.hidden || !$('#orchestrateModal').classList.contains('open')) return;
+      pollPending = true;
+      try { renderOrchProgress(await api('/api/auto/orchestrate/status')); }
+      catch(err) { $('#orchProgressMsg').textContent = '读取进度失败：' + err.message; }
+      finally { pollPending = false; }
     };
     try {
       const res = await api('/api/auto/orchestrate', {
@@ -2670,7 +2726,8 @@ document.addEventListener('click', async e => {
       toast(res.message || '智能编排已启动');
       openModal('orchestrateModal');
       $('#orchProgress').style.display = 'block';
-      progressTimer = setInterval(pollOrch, 1000);
+      renderOrchProgress(res.progress);
+      orchestrateProgressTimer = setInterval(pollOrch, 1000);
       await pollOrch();
       setTimeout(poll, 1200); setTimeout(poll, 5000); setTimeout(poll, 12000);
     } catch(err) {
@@ -2686,8 +2743,8 @@ document.addEventListener('click', async e => {
     loadSources();
     return;
   }
-  if(e.target.closest('#wzRefreshBtn') || e.target.closest('#refreshMirrors') || e.target.closest('#refreshVpnGate') || e.target.closest('#refreshEdu') || e.target.closest('#refreshResidential') || e.target.closest('#refreshProxy')){
-    const btn = e.target.closest('#wzRefreshBtn') || e.target.closest('#refreshMirrors') || e.target.closest('#refreshVpnGate') || e.target.closest('#refreshEdu') || e.target.closest('#refreshResidential') || e.target.closest('#refreshProxy');
+  if(e.target.closest('#wzRefreshBtn') || e.target.closest('#refreshMirrors') || e.target.closest('#refreshVpnGate') || e.target.closest('#refreshGov') || e.target.closest('#refreshEdu') || e.target.closest('#refreshResidential') || e.target.closest('#refreshProxy')){
+    const btn = e.target.closest('#wzRefreshBtn') || e.target.closest('#refreshMirrors') || e.target.closest('#refreshVpnGate') || e.target.closest('#refreshGov') || e.target.closest('#refreshEdu') || e.target.closest('#refreshResidential') || e.target.closest('#refreshProxy');
     const src = btn.dataset.src || ($('#wzSource') ? $('#wzSource').value : 'all');
     await refreshSources(btn, src);
     return;
@@ -2818,7 +2875,7 @@ async function fetchAndRenderLiveNodes(isBackgroundPoll = false){
       if(isScanning && $('#liveScanModal').classList.contains('open')){
         statusText.textContent = '母机发包实测中: 进度 ' + (data.progress || 0) + ' / ' + (data.total || 0) + '，已验证 ' + (data.verified_count || 0) + ' 个有效节点';
       } else if(data.last_scan && data.last_scan !== '0001-01-01 00:00:00'){
-        statusText.textContent = '探测完成！已筛选出 ' + (data.verified_count || 0) + ' 个母机 100% 实测通畅出网节点';
+        statusText.textContent = '探测完成！已筛选出 ' + (data.verified_count || 0) + ' 个通过预检的候选，启动后仍需出口验证';
       } else {
         statusText.textContent = '就绪：点击【开始测活扫描】从 VPS 真实发包探测';
       }
@@ -2915,11 +2972,11 @@ function renderLiveNodesTable(nodes){
       '<td style="padding:7px 10px;white-space:nowrap"><span style="font-size:14px;margin-right:4px">' + flag + '</span><b>' + cc + '</b></td>' +
       '<td style="padding:7px 10px">' + protoBadge + '</td>' +
       '<td style="padding:7px 10px">' +
-        '<div style="font-weight:600;font-family:monospace;color:var(--text);display:flex;align-items:center">' + ip + eduBadge + '</div>' +
+        '<div style="font-weight:600;font-family:monospace;color:var(--text);display:flex;align-items:center">' + ip + governmentBadge(n) + eduBadge + '</div>' +
         '<div style="font-size:11px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:320px">' + isp + (countryName ? ' · ' + countryName : '') + '</div>' +
       '</td>' +
       '<td style="padding:7px 10px;font-family:monospace;font-weight:600;color:' + pingColor + '">' + (ping > 0 ? ping + ' ms' : '未知') + '</td>' +
-      '<td style="padding:7px 10px"><span style="color:var(--ok);font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:3px">✔ 实测通畅</span></td>' +
+      '<td style="padding:7px 10px"><span style="color:var(--ok);font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:3px">✔ 预检通过</span></td>' +
       '<td style="padding:7px 10px;text-align:right">' +
         '<button class="btn-xs primary ls-start-one" data-host="' + hostName + '" style="padding:3px 10px;font-weight:600">' +
           '<svg viewBox="0 0 24 24" style="width:12px;height:12px"><polygon points="5 3 19 12 5 21 5 3"/></svg> 启动' +
@@ -2982,8 +3039,9 @@ async function startBatchLiveNodes(){
     const res = await api('/api/nodes/batch_start', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({hosts: hosts, template: tpl})
+      body: JSON.stringify({hosts: hosts, template: tpl, queue: true})
     });
+    if(res.job){ toast('已加入资源保护启动队列，请查看任务进度'); selectedLiveHosts.clear(); closeModal('liveScanModal'); poll(); return; }
     const started = (res.started || []).length;
     const errCount = (res.errors || []).length;
     if(started > 0){
@@ -3059,6 +3117,48 @@ const srcBtn = $('#sourcesBtn');
 if(srcBtn) srcBtn.onclick = () => { openModal('sourcesModal'); loadSources(); };
 const nExitBtn = $('#newexit');
 if(nExitBtn) nExitBtn.onclick = () => { openModal('wizard'); if(!regionsLoaded) loadWizard(); else { renderRegions(); loadWizard(); } };
+
+
+function formatBytes(value){const n=Number(value);if(!Number.isFinite(n)||n<0)return '未知';return n>=1073741824?(n/1073741824).toFixed(2)+' GiB':(n/1048576).toFixed(0)+' MiB';}
+let capacityView = null;
+async function refreshCapacity(){
+ try{const d=await api('/api/capacity');capacityView=d;$('#stopall').disabled=!d.active&&!d.pending_restore;
+  $('#capacityCount').textContent='占用槽位 '+d.active+' / '+d.max_exits+(d.pending_restore?' · 待恢复 '+d.pending_restore:'');
+  const r=d.resources||{};
+  $('#cpuValue').textContent=r.cpu_ready?Number(r.cpu_percent).toFixed(1)+'%':'采样中';
+  $('#memoryValue').textContent=r.available?Number(r.memory_percent).toFixed(1)+'% · '+formatBytes(r.memory_used)+' / '+formatBytes(r.memory_total):'监测不可用';
+  $('#cpuMeter').style.width=Math.min(100,Math.max(0,r.cpu_percent||0))+'%';$('#memoryMeter').style.width=Math.min(100,Math.max(0,r.memory_percent||0))+'%';
+  $('#capacityReason').textContent=d.reason||('可新增 · 资源阈值 '+d.settings.resource_limit_percent+'% · '+(r.scope==='cgroup'?'已计入服务内存限额':'服务器采样'));
+  $('#capacityReason').style.color=d.blocked?'var(--warn)':'var(--dim)';
+ }catch(e){$('#capacityReason').textContent='读取资源状态失败：'+e.message;}
+}
+$('#capacityOpen').onclick=async()=>{await refreshCapacity();if(!capacityView)return;const c=capacityView.settings;$('#capMode').value=c.max_exits?'custom':'auto';$('#capMax').value=c.max_exits||80;$('#capMax').disabled=!c.max_exits;$('#capGuard').checked=c.guard_enabled;$('#capThreshold').value=c.resource_limit_percent;$('#capSaveStatus').textContent='';openModal('capacityModal');};
+$('#capMode').onchange=()=>{$('#capMax').disabled=$('#capMode').value==='auto';};
+$('#capSave').onclick=async()=>{const btn=$('#capSave');btn.disabled=true;try{const max=$('#capMode').value==='auto'?0:Number($('#capMax').value);const threshold=Number($('#capThreshold').value);if(!Number.isInteger(max)||max<0||max>254||($('#capMode').value==='custom'&&max<1))throw Error('数量须为 1–254 的整数');if(!Number.isInteger(threshold)||threshold<50||threshold>95)throw Error('资源阈值须为 50–95 的整数');await api('/api/capacity',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({max_exits:max,resource_limit_percent:threshold,guard_enabled:$('#capGuard').checked})});$('#capSaveStatus').textContent='已保存，立即生效';await refreshCapacity();toast('容量与资源保护已保存');}catch(e){$('#capSaveStatus').textContent=e.message;toast(e.message,true);}finally{btn.disabled=false;}};
+let feedDraft=[],feedHealth={};
+function renderFeedRows(){
+ $('#feedRows').innerHTML=feedDraft.map((f,i)=>'<div class="feed-row" data-feed-row="'+i+'"><label><input type="checkbox" data-feed="enabled" '+(f.enabled?'checked':'')+'> 启用</label> <button data-feed-remove="'+i+'">移除来源</button>'+
+ '<label class="f"><span>名称</span><input data-feed="name" value="'+esc(f.name||'')+'"></label>'+
+ '<label class="f"><span>官方配置地址（HTTPS）</span><input data-feed="url" type="url" value="'+esc(f.url||'')+'"></label>'+
+ '<div class="setrow"><label class="f"><span>格式</span><select data-feed="format">'+[['ovpn','OpenVPN 单配置'],['zip','配置压缩包'],['csv','VPN Gate CSV'],['json','配置清单']].map(x=>'<option value="'+x[0]+'" '+(f.format===x[0]?'selected':'')+'>'+x[1]+'</option>').join('')+'</select></label><label class="f"><span>分类</span><select data-feed="category">'+[['custom','自有或授权来源'],['edu','授权学术来源'],['gov','授权政府来源']].map(x=>'<option value="'+x[0]+'" '+(f.category===x[0]?'selected':'')+'>'+x[1]+'</option>').join('')+'</select></label></div>'+
+ '<label class="f"><span>国家代码（可选，如 US、JP）</span><input data-feed="country_code" maxlength="2" value="'+esc(f.country_code||'')+'"></label>'+
+ '<label class="f"><span>公开授权说明链接（政府分类必填）</span><input data-feed="authorization_url" type="url" value="'+esc(f.authorization_url||'')+'"></label>'+
+ '<div class="setrow"><label class="f"><span>VPN 用户名（可选）</span><input data-feed="username" autocomplete="off" value="'+esc(f.username||'')+'"></label><label class="f"><span>VPN 口令（可选）</span><input data-feed="password" type="password" autocomplete="new-password" placeholder="'+(f.has_password?'已保存，留空不改':'无口令可留空')+'" value="'+esc(f.password||'')+'"></label></div>'+
+ '<label><input type="checkbox" data-feed="clear_password" '+(f.clear_password?'checked':'')+'> 清除已保存的来源口令</label>'+
+ '<p class="hint">'+esc(feedHealth[f.id]?(feedHealth[f.id].error||('最近读取 '+feedHealth[f.id].count+' 个候选，仍需测活')):'尚未刷新；保存后在节点源面板刷新')+'</p></div>').join('')||'<p class="hint">尚未添加授权来源。原有公开来源仍可使用。</p>';
+}
+$('#feedOpen').onclick=async()=>{try{const d=await api('/api/source-feeds');feedDraft=d.feeds||[];feedHealth=d.status||{};renderFeedRows();$('#feedSaveStatus').textContent='';openModal('feedsModal');}catch(e){toast(e.message,true);}};
+$('#feedAdd').onclick=()=>{feedDraft.push({id:'source_'+Date.now().toString(36)+'_'+feedDraft.length,name:'',url:'',format:'ovpn',category:'custom',enabled:true});renderFeedRows();};
+$('#feedRows').addEventListener('input',e=>{const row=e.target.closest('[data-feed-row]');if(!row||!e.target.dataset.feed)return;feedDraft[Number(row.dataset.feedRow)][e.target.dataset.feed]=e.target.type==='checkbox'?e.target.checked:e.target.value;});
+$('#feedRows').addEventListener('click',e=>{const btn=e.target.closest('[data-feed-remove]');if(!btn)return;feedDraft.splice(Number(btn.dataset.feedRemove),1);renderFeedRows();});
+$('#feedSave').onclick=async()=>{const btn=$('#feedSave');btn.disabled=true;try{const d=await api('/api/source-feeds',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(feedDraft)});feedDraft=d.feeds||[];feedHealth=d.status||{};renderFeedRows();$('#feedSaveStatus').textContent='来源已保存；请刷新节点源以拉取候选';toast('来源已保存');}catch(e){$('#feedSaveStatus').textContent=e.message;toast(e.message,true);}finally{btn.disabled=false;}};
+
+
+document.addEventListener('keydown',e=>{
+ if(e.key!=='Tab')return;const modal=Array.from(document.querySelectorAll('.modal.open')).pop();if(!modal)return;
+ const fields=Array.from(modal.querySelectorAll('button,input,select,textarea,a[href]')).filter(x=>!x.disabled&&x.offsetParent!==null);
+ if(!fields.length)return;const first=fields[0],last=fields[fields.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}
+});
 
 loadGlobalExitLimit();
 poll();

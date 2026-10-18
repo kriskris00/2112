@@ -159,8 +159,12 @@ func (t *Tunnel) startOpenVPN(dir string) error {
 	if err := os.WriteFile(cfgPath, []byte(t.Node.Config), 0600); err != nil {
 		return fmt.Errorf("写配置失败: %w", err)
 	}
-	authPath := filepath.Join(dir, "auth.txt")
-	if err := os.WriteFile(authPath, []byte("vpn\nvpn\n"), 0600); err != nil {
+	authPath := filepath.Join(dir, ns+".auth")
+	user, pass := vpnCredentials(t.Node)
+	if strings.ContainsAny(user+pass, "\r\n\x00") {
+		return fmt.Errorf("VPN 凭据包含无效字符")
+	}
+	if err := os.WriteFile(authPath, []byte(user+"\n"+pass+"\n"), 0600); err != nil {
 		return fmt.Errorf("写凭据失败: %w", err)
 	}
 
@@ -278,7 +282,7 @@ func (t *Tunnel) probeExitIP() (string, error) {
 	if t.Node.Config != "" {
 		// 1. 在 netns 内执行 curl（独立进程，直接走 tun0，抗干扰）
 		out, err := exec.Command("ip", "netns", "exec", t.nsName(),
-			"curl", "--interface", "tun0", "-fsS", "--max-time", "8", "http://1.1.1.1/cdn-cgi/trace").Output()
+			"curl", "--interface", "tun0", "-fsS", "--max-time", "8", "https://1.1.1.1/cdn-cgi/trace").Output()
 		if err == nil {
 			for _, line := range strings.Split(string(out), "\n") {
 				if strings.HasPrefix(line, "ip=") {
@@ -291,7 +295,7 @@ func (t *Tunnel) probeExitIP() (string, error) {
 		}
 
 		out2, err2 := exec.Command("ip", "netns", "exec", t.nsName(),
-			"curl", "--interface", "tun0", "-fsS", "--max-time", "8", "http://api.ipify.org").Output()
+			"curl", "--interface", "tun0", "-fsS", "--max-time", "8", "https://api.ipify.org").Output()
 		if err2 == nil {
 			ip := strings.TrimSpace(string(out2))
 			if net.ParseIP(ip) != nil {
@@ -314,7 +318,7 @@ func (t *Tunnel) probeExitIP() (string, error) {
 		}
 
 		// 1. 直连 IP 接口
-		resp, err := client.Get("http://1.1.1.1/cdn-cgi/trace")
+		resp, err := client.Get("https://1.1.1.1/cdn-cgi/trace")
 		if err == nil && resp.StatusCode == http.StatusOK {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 			resp.Body.Close()
@@ -332,7 +336,7 @@ func (t *Tunnel) probeExitIP() (string, error) {
 		}
 
 		// 2. 备用接口：api.ipify.org
-		resp2, err2 := client.Get("http://api.ipify.org")
+		resp2, err2 := client.Get("https://api.ipify.org")
 		if err2 == nil && resp2.StatusCode == http.StatusOK {
 			body, _ := io.ReadAll(io.LimitReader(resp2.Body, 64<<10))
 			resp2.Body.Close()

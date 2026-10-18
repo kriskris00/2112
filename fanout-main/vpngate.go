@@ -231,20 +231,26 @@ func mirrorAccessKey() string {
 
 // Node 是一个 VPN Gate 或全网公开节点。
 type Node struct {
-	HostName    string  `json:"hostname"`
-	IP          string  `json:"ip"`
-	Port        int     `json:"port,omitempty"`
-	Proto       string  `json:"proto,omitempty"` // "ovpn", "socks5", "http"
-	Country     string  `json:"country"`
-	CountryCode string  `json:"country_code"`
-	Ping        int     `json:"ping"`
-	SpeedMbps   float64 `json:"speed_mbps"`
-	Sessions    int     `json:"sessions"`
-	Config      string  `json:"-"`                      // 解码后的 .ovpn 内容
-	IPType      string  `json:"ip_type,omitempty"`      // residential / hosting / mobile / edu
-	PurityScore int     `json:"purity_score,omitempty"` // 0-100
-	ISP         string  `json:"isp,omitempty"`
-	Source      string  `json:"source,omitempty"` // vpngate / edu / proxy / custom
+	GovernmentStatus   string  `json:"government_status,omitempty"`
+	GovernmentEvidence string  `json:"government_evidence,omitempty"`
+	VPNUser            string  `json:"-"`
+	VPNPass            string  `json:"-"`
+	FeedCategory       string  `json:"feed_category,omitempty"`
+	AuthorizationURL   string  `json:"authorization_url,omitempty"`
+	HostName           string  `json:"hostname"`
+	IP                 string  `json:"ip"`
+	Port               int     `json:"port,omitempty"`
+	Proto              string  `json:"proto,omitempty"` // "ovpn", "socks5", "http"
+	Country            string  `json:"country"`
+	CountryCode        string  `json:"country_code"`
+	Ping               int     `json:"ping"`
+	SpeedMbps          float64 `json:"speed_mbps"`
+	Sessions           int     `json:"sessions"`
+	Config             string  `json:"-"`                      // 解码后的 .ovpn 内容
+	IPType             string  `json:"ip_type,omitempty"`      // residential / hosting / mobile / edu
+	PurityScore        int     `json:"purity_score,omitempty"` // 0-100
+	ISP                string  `json:"isp,omitempty"`
+	Source             string  `json:"source,omitempty"` // vpngate / edu / proxy / custom
 }
 
 // parseProxyList 解析全网公开的代理列表，支持多种常见格式：
@@ -424,20 +430,24 @@ func saveNodesToCache(workDir string, nodes []Node) {
 	}
 	var sb strings.Builder
 	sb.WriteString("*vpn_servers\r\n")
-	sb.WriteString("#HostName,IP,Score,Ping,Speed,CountryLong,CountryShort,NumVpnSessions,Uptime,TotalUsers,TotalTraffic,LogType,Operator,Message,OpenVPN_ConfigData_Base64\r\n")
+	w := csv.NewWriter(&sb)
+	_ = w.Write([]string{"#HostName", "IP", "Score", "Ping", "Speed", "CountryLong", "CountryShort", "NumVpnSessions", "Uptime", "TotalUsers", "TotalTraffic", "LogType", "Operator", "Message", "OpenVPN_ConfigData_Base64", "Port", "Proto", "Source", "FeedCategory", "AuthorizationURL", "VPNUser", "VPNPass", "IPType", "ISP", "GovernmentStatus", "GovernmentEvidence"})
 	for _, n := range nodes[:limit] {
-		var b64 string
-		if n.Config != "" {
-			b64 = base64.StdEncoding.EncodeToString([]byte(n.Config))
-		}
-		speedInt := int64(n.SpeedMbps * 1e6)
-		line := fmt.Sprintf("%s,%s,0,%d,%d,%s,%s,%d,0,0,0,2,,,%s\r\n",
-			n.HostName, n.IP, n.Ping, speedInt, n.Country, n.CountryCode, n.Sessions, b64)
-		sb.WriteString(line)
+		annotateGovernment(&n)
+		b64 := base64.StdEncoding.EncodeToString([]byte(n.Config))
+		_ = w.Write([]string{n.HostName, n.IP, "0", strconv.Itoa(n.Ping), strconv.FormatInt(int64(n.SpeedMbps*1e6), 10), n.Country, n.CountryCode, strconv.Itoa(n.Sessions), "0", "0", "0", "2", "", "", b64, strconv.Itoa(n.Port), n.Proto, n.Source, n.FeedCategory, n.AuthorizationURL, n.VPNUser, n.VPNPass, n.IPType, n.ISP, n.GovernmentStatus, n.GovernmentEvidence})
+	}
+	w.Flush()
+	if w.Error() != nil {
+		return
 	}
 	sb.WriteString("*\r\n")
-	cachePath := filepath.Join(workDir, "cached_nodes.csv")
-	_ = os.WriteFile(cachePath, []byte(sb.String()), 0644)
+	path := filepath.Join(workDir, "cached_nodes.csv")
+	tmp := path + fmt.Sprint(".tmp.", time.Now().UnixNano())
+	if os.WriteFile(tmp, []byte(sb.String()), 0600) == nil {
+		_ = os.Rename(tmp, path)
+	}
+
 }
 
 // isFakeDummyNode 检测是否为历史残留的硬编码假假节点
@@ -579,7 +589,7 @@ func loadInitialNodes(workDir string) []Node {
 	nodeMap := make(map[string]Node)
 	for _, n := range builtinSeedNodes {
 		if n.IP != "" {
-			nodeMap[n.IP] = n
+			nodeMap[nodeKey(n)] = retainGovernmentEvidence(n, nodeMap[nodeKey(n)])
 		}
 	}
 	if workDir != "" {
@@ -588,7 +598,7 @@ func loadInitialNodes(workDir string) []Node {
 			if list, pErr := parseNodeCSV(string(data)); pErr == nil {
 				for _, node := range list {
 					if node.IP != "" && !isFakeDummyNode(node) {
-						nodeMap[node.IP] = node
+						nodeMap[nodeKey(node)] = node
 					}
 				}
 			}
@@ -710,11 +720,11 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 	// 1. 先读历史离线缓存或内建种子底池（保留之前有效积累的节点，绝不给空列表）
 	for _, n := range loadInitialNodes(workDir) {
 		if n.IP != "" {
-			if sourceFilter == "" || sourceFilter == "all" || strings.EqualFold(n.Source, sourceFilter) || (sourceFilter == "edu" && (isEduIP(n.IP) || n.IPType == "edu")) || (sourceFilter == "gov" && (n.Source == "gov" || n.IPType == "gov")) || (sourceFilter == "residential" && n.IPType == "residential") {
+			if sourceFilter == "" || sourceFilter == "all" || strings.EqualFold(n.Source, sourceFilter) || (sourceFilter == "edu" && (isEduIP(n.IP) || n.IPType == "edu")) || (sourceFilter == "gov" && nodeMatchesSource(n, "gov")) || (sourceFilter == "residential" && n.IPType == "residential") {
 				if sourceFilter == "edu" && (strings.EqualFold(n.CountryCode, "CN") || strings.Contains(strings.ToLower(n.Country), "china") || strings.HasSuffix(strings.ToLower(n.HostName), ".cn")) {
 					continue
 				}
-				nodeMap[n.IP] = n
+				nodeMap[nodeKey(n)] = retainGovernmentEvidence(n, nodeMap[nodeKey(n)])
 			}
 		}
 	}
@@ -784,10 +794,10 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 					if sourceFilter == "residential" && n.IPType != "residential" {
 						continue
 					}
-					if sourceFilter == "gov" && n.IPType != "gov" && n.Source != "gov" {
+					if sourceFilter == "gov" && !nodeMatchesSource(n, "gov") {
 						continue
 					}
-					nodeMap[n.IP] = n
+					nodeMap[nodeKey(n)] = retainGovernmentEvidence(n, nodeMap[nodeKey(n)])
 				}
 			}
 			mu.Unlock()
@@ -839,16 +849,16 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 						if sourceFilter == "residential" && n.IPType != "residential" {
 							continue
 						}
-						if sourceFilter == "gov" && n.IPType != "gov" && n.Source != "gov" {
+						if sourceFilter == "gov" && !nodeMatchesSource(n, "gov") {
 							continue
 						}
 						// 如果已有带 OpenVPN 配置的节点，优先保留
-						if existing, ok := nodeMap[n.IP]; ok && existing.Config != "" {
-							freshKeys[n.IP] = true
+						if existing, ok := nodeMap[nodeKey(n)]; ok && existing.Config != "" {
+							freshKeys[nodeKey(n)] = true
 							continue
 						}
-						nodeMap[n.IP] = n
-						freshKeys[n.IP] = true
+						nodeMap[nodeKey(n)] = retainGovernmentEvidence(n, nodeMap[nodeKey(n)])
+						freshKeys[nodeKey(n)] = true
 					}
 				}
 				mu.Unlock()
@@ -864,7 +874,7 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 			nodes := fetchGitHubOVPNArchiveNodes(timeout, "9xN/auto-ovpn", "main", "autoovpn")
 			mu.Lock()
 			for _, n := range nodes {
-				key := n.IP + ":" + strconv.Itoa(n.Port)
+				key := nodeKey(n)
 				if _, exists := nodeMap[key]; !exists {
 					nodeMap[key] = n
 					freshKeys[key] = true
@@ -888,7 +898,7 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 			nodes := fetchGitHubOVPNArchiveNodes(timeout, "Zoult/.ovpn", "master", "zoultovpn")
 			mu.Lock()
 			for _, n := range nodes {
-				key := n.IP + ":" + strconv.Itoa(n.Port)
+				key := nodeKey(n)
 				if _, exists := nodeMap[key]; !exists {
 					nodeMap[key] = n
 					freshKeys[key] = true
@@ -913,7 +923,7 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 			nodes := fetchGitHubOVPNArchiveNodes(timeout, "6Kmfi6HP/vpngate-meridian", "gh-pages", "meridian")
 			mu.Lock()
 			for _, n := range nodes {
-				key := n.IP + ":" + strconv.Itoa(n.Port)
+				key := nodeKey(n)
 				if _, exists := nodeMap[key]; !exists {
 					nodeMap[key] = n
 					freshKeys[key] = true
@@ -937,7 +947,7 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 			nodes := fetchGitHubOVPNArchiveNodes(timeout, "AlexSwanRu/ovpn", "master", "alexovpn")
 			mu.Lock()
 			for _, n := range nodes {
-				key := n.IP + ":" + strconv.Itoa(n.Port)
+				key := nodeKey(n)
 				if _, exists := nodeMap[key]; !exists {
 					nodeMap[key] = n
 					freshKeys[key] = true
@@ -961,7 +971,7 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 			nodes := fetchRiseupVPNNodes(timeout)
 			mu.Lock()
 			for _, n := range nodes {
-				key := n.IP + ":" + strconv.Itoa(n.Port)
+				key := nodeKey(n)
 				if _, exists := nodeMap[key]; !exists {
 					nodeMap[key] = n
 					freshKeys[key] = true
@@ -982,11 +992,11 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			nodes := fetchVPNBookNodes(timeout)
+			nodes := fetchVPNBookCurrent(timeout)
 			mu.Lock()
 			for _, n := range nodes {
-				nodeMap[n.IP+":"+strconv.Itoa(n.Port)] = n
-				freshKeys[n.IP+":"+strconv.Itoa(n.Port)] = true
+				nodeMap[nodeKey(n)] = retainGovernmentEvidence(n, nodeMap[nodeKey(n)])
+				freshKeys[nodeKey(n)] = true
 			}
 			if len(nodes) > 0 {
 				successCount++
@@ -1006,8 +1016,8 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 			nodes := fetchVpngateScraperNodes(timeout)
 			mu.Lock()
 			for _, n := range nodes {
-				nodeMap[n.IP+":"+strconv.Itoa(n.Port)] = n
-				freshKeys[n.IP+":"+strconv.Itoa(n.Port)] = true
+				nodeMap[nodeKey(n)] = retainGovernmentEvidence(n, nodeMap[nodeKey(n)])
+				freshKeys[nodeKey(n)] = true
 			}
 			if len(nodes) > 0 {
 				successCount++
@@ -1027,8 +1037,8 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 			nodes := fetchPublicVPNListNodes(timeout)
 			mu.Lock()
 			for _, n := range nodes {
-				nodeMap[n.IP+":"+strconv.Itoa(n.Port)] = n
-				freshKeys[n.IP+":"+strconv.Itoa(n.Port)] = true
+				nodeMap[nodeKey(n)] = retainGovernmentEvidence(n, nodeMap[nodeKey(n)])
+				freshKeys[nodeKey(n)] = true
 			}
 			if len(nodes) > 0 {
 				successCount++
@@ -1055,7 +1065,7 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 				}
 				mu.Lock()
 				if len(nodeMap) < 25000 {
-					key := n.IP + ":" + strconv.Itoa(n.Port)
+					key := nodeKey(n)
 					if _, exists := nodeMap[key]; !exists {
 						nodeMap[key] = n
 						freshKeys[key] = true
@@ -1140,12 +1150,12 @@ func fetchNodes(workDir string, sourceFilter string, timeout time.Duration) ([]N
 	case "edu":
 		globalSourceInfo.ActiveSource = fmt.Sprintf("海外高校学术科研网 (日本筑波/韩国/台湾/欧美 · 原生骨干) (%d 节点)", len(nodes))
 	case "gov":
-		globalSourceInfo.ActiveSource = fmt.Sprintf("全球政府公共机构专网节点 (%d 节点)", len(nodes))
+		globalSourceInfo.ActiveSource = fmt.Sprintf("政府/公共机构候选（含疑似，身份未核验）(%d 节点)", len(nodes))
 	case "residential":
 		globalSourceInfo.ActiveSource = fmt.Sprintf("全球住宅家宽优质原生节点 (%d 节点)", len(nodes))
 	default:
 		if activeSrc != "" {
-			globalSourceInfo.ActiveSource = fmt.Sprintf("高质量原生节点池 (%d 个在线源, 住宅家宽+学术+政府 · %d 纯净节点)", successCount, len(nodes))
+			globalSourceInfo.ActiveSource = fmt.Sprintf("候选节点池 (%d 个响应来源 · %d 个候选，仍需实测)", successCount, len(nodes))
 		} else {
 			globalSourceInfo.ActiveSource = "本地优质离线缓存池"
 		}
@@ -1261,8 +1271,8 @@ func parseNodeCSV(body string) ([]Node, error) {
 		}
 
 		get := func(k string) string {
-			i := idx[k]
-			if i >= len(rec) {
+			i, present := idx[k]
+			if !present || i >= len(rec) {
 				return ""
 			}
 			return strings.TrimSpace(rec[i])
@@ -1276,7 +1286,13 @@ func parseNodeCSV(body string) ([]Node, error) {
 		if ip == "" {
 			continue
 		}
-		proto := "ovpn"
+		proto := strings.ToLower(get("Proto"))
+		if proto == "" {
+			proto = "ovpn"
+		}
+		if proto != "ovpn" && proto != "socks5" && proto != "http" && proto != "https" {
+			continue
+		}
 		port := 0
 		if p, err := strconv.Atoi(get("Port")); err == nil && p > 0 {
 			port = p
@@ -1294,11 +1310,11 @@ func parseNodeCSV(body string) ([]Node, error) {
 				cfgStr = string(cfg)
 			}
 		}
-		if cfgStr == "" && ip != "" {
+		if cfgStr == "" && ip != "" && proto == "ovpn" {
 			cfgStr = buildVPNGateConfig(ip, port, "udp")
 		}
-		if cfgStr == "" {
-			continue // 必须是真实有效的原生 OpenVPN 节点
+		if cfgStr == "" && proto == "ovpn" {
+			continue // OpenVPN requires a configuration
 		}
 
 		ping, _ := strconv.Atoi(get("Ping"))
@@ -1370,35 +1386,11 @@ func parseNodeCSV(body string) ([]Node, error) {
 		if isGov {
 			ipType = "gov"
 			src = "gov"
-			purityScore = 99
-			if strings.Contains(hostLower, ".go.jp") || strings.Contains(strings.ToLower(get("Operator")), "japan") || countryCode == "JP" {
-				isp = "日本自治体政府网络"
-				if countryCode == "" {
-					countryCode = "JP"
-				}
-			} else if strings.Contains(hostLower, ".gov.tw") || countryCode == "TW" {
-				isp = "台湾公部门政务专网"
-				if countryCode == "" {
-					countryCode = "TW"
-				}
-			} else if strings.Contains(hostLower, ".gov.kr") || countryCode == "KR" {
-				isp = "韩国政府公共网络"
-				if countryCode == "" {
-					countryCode = "KR"
-				}
-			} else if strings.Contains(hostLower, ".gov.uk") || countryCode == "GB" {
-				isp = "英国政府公共事务网"
-				if countryCode == "" {
-					countryCode = "GB"
-				}
-			} else if countryCode == "US" {
-				isp = "美国联邦公共政务网"
-			} else {
-				if zh, ok := countryNameZH[countryCode]; ok && zh != "" {
-					isp = zh + " 政府公共机构网络"
-				} else {
-					isp = "政府公共政务专网"
-				}
+			if isp == "优质网络" {
+				isp = strings.TrimSpace(get("Operator"))
+			}
+			if isp == "" {
+				isp = "公开来源自报机构信息（未核验）"
 			}
 		} else if isAcademic {
 			ipType = "edu"
@@ -1439,7 +1431,21 @@ func parseNodeCSV(body string) ([]Node, error) {
 				isp = "VPN Gate 公共中继"
 			}
 		}
+		if cachedType := get("IPType"); cachedType != "" {
+			ipType = cachedType
+		}
+		if cachedISP := get("ISP"); cachedISP != "" {
+			isp = cachedISP
+		}
+		if source := get("Source"); source != "" {
+			src = source
+		}
+		if port == 0 && cfgStr != "" {
+			_, port = firstRemote(cfgStr)
+		}
 		nodes = append(nodes, Node{
+			GovernmentStatus: get("GovernmentStatus"), GovernmentEvidence: get("GovernmentEvidence"),
+			VPNUser: get("VPNUser"), VPNPass: get("VPNPass"), FeedCategory: get("FeedCategory"), AuthorizationURL: get("AuthorizationURL"),
 			HostName:    hostName,
 			IP:          ip,
 			Port:        port,
@@ -1455,6 +1461,12 @@ func parseNodeCSV(body string) ([]Node, error) {
 			ISP:         isp,
 			Source:      src,
 		})
+		last := &nodes[len(nodes)-1]
+		if isGov && last.GovernmentStatus == "" {
+			last.GovernmentStatus = "suspected"
+			last.GovernmentEvidence = "公开源自报主机名、Operator 或 Message 含机构关键词；疑似，未核验"
+		}
+		annotateGovernment(last)
 	}
 	if len(nodes) == 0 {
 		return nil, fmt.Errorf("未能成功解析出任何有效节点")

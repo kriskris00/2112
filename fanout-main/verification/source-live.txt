@@ -1,0 +1,5 @@
+=== RUN   TestVPNBookOfficialFeedLive
+    source_live_test.go:25: downloaded and validated 10 official profiles; no live VPN handshake performed
+--- PASS: TestVPNBookOfficialFeedLive (2.45s)
+PASS
+ok  	fanout	3.326s

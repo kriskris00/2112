@@ -246,7 +246,7 @@ mkdir -p "$GOCACHE"
 # 不执行 go mod tidy，避免安装脚本修改用户上传源码；只下载并编译。
 go mod download
 NEW_BIN="$TMP_ROOT/fanout"
-go build -p 1 -trimpath -ldflags "-s -w -X main.version=v3.1.1-repair20261018 -X main.buildRevision=${BUILD_REVISION}" -o "$NEW_BIN" .
+go build -p 1 -trimpath -ldflags "-s -w -X main.version=v3.2.0-resource20261018 -X main.buildRevision=${BUILD_REVISION}" -o "$NEW_BIN" .
 chmod 755 "$NEW_BIN"
 "$NEW_BIN" --help >/dev/null 2>&1 || true
 

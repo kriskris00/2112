@@ -18,13 +18,13 @@ import (
 )
 
 // version 由构建时通过 -ldflags 注入。
-var version = "v3.1.1-repair20261018"
+var version = "v3.2.1-gov20261018"
 var buildRevision = ""
 
 func main() {
 	var (
 		webPort  = flag.Int("web", 8899, "Web 管理端口")
-		maxSlots = flag.Int("max", 40, "最多同时运行的隧道数（自动编排另有健康出口上限）")
+		maxSlots = flag.Int("max", 0, "总出口上限，0 为自动（最多 254，受资源阈值保护）；也可在面板设置")
 		workDir  = flag.String("dir", "/var/lib/fanout", "工作目录")
 	)
 	panelMode := flag.String("panel", "", "节点链接后端: 留空按界面设置/自动探测, 3x-ui, native, xray-cf-lite")
@@ -68,6 +68,21 @@ func main() {
 	}
 
 	mgr := NewManager(*maxSlots, *workDir)
+	var explicitMax *int
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "max" {
+			explicitMax = maxSlots
+		}
+	})
+	if err := mgr.configureCapacity(explicitMax); err != nil {
+		log.Fatalf("容量设置加载失败（保留原文件）: %v", err)
+	}
+	if err := mgr.loadFeeds(); err != nil {
+		log.Fatalf("授权源设置无效（保留原文件）: %v", err)
+	}
+	if err := mgr.loadLegacySources(); err != nil {
+		log.Printf("自定义源加载失败: %v", err)
+	}
 	// 服务刚启动就保证存在一个真正不走任何出口的“服务器直连 · 本机”节点，
 	// 不必等智能编排跑完几十个候选后才出现。
 	go mgr.reconcilePanelBindings()
@@ -84,7 +99,7 @@ func main() {
 	}
 	go mgr.reconcilePanelBindings()
 
-	// 先恢复并稳定现有状态，再拉取新源和自动编排，避免重启时“旧隧道恢复”和“新隧道编排”同时抢 40 个槽位。
+	// 先恢复并稳定现有状态，再拉取新源和自动编排，避免重启时“旧隧道恢复”和“新隧道编排”同时争抢出口额度。
 	go func() {
 		log.Printf("后台开始并发拉取最新官方节点源...")
 		if n, err := mgr.RefreshNodes(); err != nil {
@@ -112,12 +127,15 @@ func main() {
 	mux.HandleFunc("/", handleIndex)
 	liveScanner := GetLiveScanner(mgr)
 	mux.HandleFunc("/api/nodes/live", apiLiveNodes(liveScanner))
+	mux.HandleFunc("/api/capacity", mgr.apiCapacity())
+	mux.HandleFunc("/api/source-feeds", mgr.apiFeeds())
 	mux.HandleFunc("/api/nodes/live_scan", apiLiveScan(liveScanner, mgr))
 	mux.HandleFunc("/api/nodes/batch_start", apiBatchStart(mgr, liveScanner))
 	mux.HandleFunc("/api/nodes", apiNodes(mgr))
 	mux.HandleFunc("/api/tunnels", apiTunnels(mgr))
 	mux.HandleFunc("/api/start", apiStart(mgr))
 	mux.HandleFunc("/api/stop", apiStop(mgr))
+	mux.HandleFunc("/api/stop-all", apiStopAll(mgr))
 	mux.HandleFunc("/api/swap", apiSwap(mgr))
 	mux.HandleFunc("/api/cred", apiCred(mgr))
 	mux.HandleFunc("/api/refresh", apiRefresh(mgr))
@@ -305,6 +323,7 @@ func apiNodes(m *Manager) http.HandlerFunc {
 		}
 		views := make([]NodeView, len(filtered))
 		for i, n := range filtered {
+			annotateGovernment(&n)
 			views[i] = NodeView{
 				Node:  n,
 				InUse: usedHosts[n.HostName],
@@ -333,6 +352,10 @@ func apiAutoOrchestrateStatus(m *Manager) http.HandlerFunc {
 
 func apiAutoOrchestrate(m *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeJSON(w, 405, map[string]string{"error": "请使用 POST 启动智能编排"})
+			return
+		}
 		opts := DefaultAutoOrchestrateOptions()
 		if r.Method == http.MethodPost {
 			var body struct {
@@ -355,15 +378,16 @@ func apiAutoOrchestrate(m *Manager) http.HandlerFunc {
 				opts.MaxStarts = body.MaxStarts
 			}
 		}
-		if m.IsOrchestrating() {
-			writeJSON(w, http.StatusConflict, map[string]any{"status": "busy", "message": "已有智能编排正在运行，请查看实时进度", "progress": m.OrchestrateProgress()})
+		progress, started := m.startAutoOrchestrate(opts)
+		if !started {
+			writeJSON(w, http.StatusAccepted, map[string]any{"status": "busy", "message": "已有智能编排正在运行，已切换到当前任务进度；无需重复启动", "progress": progress})
 			return
 		}
-		go m.AutoOrchestrateWithOptions(opts)
 		writeJSON(w, http.StatusOK, map[string]any{
-			"status":  "ok",
-			"message": fmt.Sprintf("已启动智能编排：热门 %d / 冷门 %d；最多验证 %d 个候选", opts.HotTarget, opts.ColdTarget, opts.MaxStarts),
-			"options": opts,
+			"status":   "ok",
+			"message":  fmt.Sprintf("已启动智能编排：热门 %d / 冷门 %d；最多验证 %d 个候选", opts.HotTarget, opts.ColdTarget, opts.MaxStarts),
+			"options":  opts,
+			"progress": progress,
 		})
 	}
 }
@@ -425,6 +449,18 @@ func apiStop(m *Manager) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "已停止"})
+	}
+}
+
+func apiStopAll(m *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", "POST")
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "请使用 POST 停止出口"})
+			return
+		}
+		m.StopAll()
+		writeJSON(w, http.StatusOK, map[string]string{"ok": "已停止当前出口并清空待恢复队列"})
 	}
 }
 
@@ -497,7 +533,10 @@ func apiSources(m *Manager) http.HandlerFunc {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求格式错误"})
 				return
 			}
-			SetCustomSourceURL(body.CustomURL)
+			if err := m.setLegacySources(body.CustomURL); err != nil {
+				writeJSON(w, 400, map[string]string{"error": err.Error()})
+				return
+			}
 			n, err := m.RefreshNodes()
 			if err != nil {
 				writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error(), "info": GetSourceInfo()})
@@ -584,6 +623,42 @@ func apiSettings(auth *Auth, srv *webServer) http.HandlerFunc {
 			}
 
 			// 改口令
+			// Validate every requested value before mutating any setting.
+			if in.Port != nil {
+				if err := validatePort(*in.Port); err != nil {
+					writeJSON(w, 400, map[string]string{"error": err.Error()})
+					return
+				}
+			}
+			if in.ListenAddr != nil {
+				if _, err := normalizeListenAddr(*in.ListenAddr); err != nil {
+					writeJSON(w, 400, map[string]string{"error": err.Error()})
+					return
+				}
+			}
+			if in.Password != nil && *in.Password != "" && len(strings.TrimSpace(*in.Password)) < 4 {
+				writeJSON(w, 400, map[string]string{"error": "口令至少 4 位"})
+				return
+			}
+			if in.ExitLimit != nil && (*in.ExitLimit < 1 || *in.ExitLimit > 1000) {
+				writeJSON(w, 400, map[string]string{"error": "节点限额必须在 1–1000 之间"})
+				return
+			}
+			if in.ExitLimitMode != nil {
+				mode := strings.ToLower(strings.TrimSpace(*in.ExitLimitMode))
+				if mode != "isp" && mode != "random" {
+					writeJSON(w, 400, map[string]string{"error": "运营商策略必须是 isp 或 random"})
+					return
+				}
+			}
+			if in.BasePath != nil {
+				for _, c := range strings.TrimPrefix(normalizeBasePath(*in.BasePath), "/") {
+					if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
+						writeJSON(w, 400, map[string]string{"error": "访问路径只能用字母、数字、- 和 _"})
+						return
+					}
+				}
+			}
 			if in.Password != nil && *in.Password != "" {
 				if err := auth.SetPassword(*in.Password); err != nil {
 					writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -597,7 +672,7 @@ func apiSettings(auth *Auth, srv *webServer) http.HandlerFunc {
 					return
 				}
 			}
-			if in.ExitLimitEnabled != nil || in.ExitLimit != nil {
+			if in.ExitLimitEnabled != nil || in.ExitLimit != nil || in.ExitLimitMode != nil {
 				next := getExitNodeLimitSettings()
 				if in.ExitLimitEnabled != nil {
 					next.Enabled = *in.ExitLimitEnabled

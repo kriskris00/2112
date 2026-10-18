@@ -14,27 +14,38 @@ import (
 
 // Manager 维护所有隧道，负责分配槽位与端口。
 type Manager struct {
-	mu            sync.RWMutex
-	tunnels       map[int]*Tunnel
-	nodes         []Node
-	fetched       time.Time
-	workDir       string
-	maxSlots      int
-	jobs          JobStore
-	refreshing    bool
-	orchestrateMu sync.Mutex
-	bindingMu     sync.Mutex
-	limitMu       sync.Mutex
-	stateMu       sync.Mutex
-	progressMu    sync.RWMutex
-	orchProgress  AutoOrchestrateProgress
-	cooldownMu    sync.RWMutex
-	cooldowns     map[string]time.Time
+	mu                 sync.RWMutex
+	tunnels            map[int]*Tunnel
+	nodes              []Node
+	fetched            time.Time
+	workDir            string
+	maxSlots           int
+	jobs               JobStore
+	refreshing         bool
+	orchestrateMu      sync.Mutex
+	bindingMu          sync.Mutex
+	limitMu            sync.Mutex
+	stateMu            sync.Mutex
+	progressMu         sync.RWMutex
+	orchProgress       AutoOrchestrateProgress
+	cooldownMu         sync.RWMutex
+	cooldowns          map[string]time.Time
+	capacityMu         sync.Mutex
+	capacity           CapacitySettings
+	capacityConfigured bool
+	resources          *resourceMonitor
+	pendingRestore     []persistedTunnel
+	lastAdmission      time.Time
+	stopCh             chan struct{}
+	stopOnce           sync.Once
+	feedsMu            sync.RWMutex
+	feeds              []SourceFeed
+	feedStatus         map[string]FeedStatus
 }
 
 func NewManager(maxSlots int, workDir string) *Manager {
 	if maxSlots <= 0 {
-		maxSlots = 40
+		maxSlots = absoluteExitLimit
 	}
 	if maxSlots > 254 {
 		maxSlots = 254
@@ -47,6 +58,7 @@ func NewManager(maxSlots int, workDir string) *Manager {
 		workDir:   workDir,
 		maxSlots:  maxSlots,
 		cooldowns: map[string]time.Time{},
+		stopCh:    make(chan struct{}),
 	}
 }
 
@@ -72,6 +84,7 @@ type AutoOrchestrateProgress struct {
 	CurrentCountry   string    `json:"current_country"`
 	CurrentNode      string    `json:"current_node"`
 	LastError        string    `json:"last_error,omitempty"`
+	StopReason       string    `json:"stop_reason,omitempty"`
 }
 
 func (m *Manager) setOrchestrateProgress(fn func(*AutoOrchestrateProgress)) {
@@ -105,7 +118,7 @@ type AutoOrchestrateOptions struct {
 
 func DefaultAutoOrchestrateOptions() AutoOrchestrateOptions {
 	return AutoOrchestrateOptions{
-		Sources:       []string{"vpngate", "ipspeed", "edu", "custom"},
+		Sources:       []string{"all"},
 		HotTarget:     3,
 		ColdTarget:    1,
 		MaxStarts:     8,
@@ -127,13 +140,20 @@ func nodeMatchesSource(n Node, source string) bool {
 	case "proxy":
 		return strings.EqualFold(n.Source, "proxy") || n.Proto == "socks5" || n.Proto == "http" || n.Proto == "https"
 	case "edu":
-		return strings.EqualFold(n.Source, "edu") || strings.EqualFold(n.IPType, "edu") || isEduIP(n.IP)
+		return n.FeedCategory == "edu" || strings.EqualFold(n.Source, "edu") || strings.EqualFold(n.IPType, "edu") || isEduIP(n.IP)
 	case "gov":
-		return strings.EqualFold(n.Source, "gov") || strings.EqualFold(n.IPType, "gov")
+		status, _ := governmentClassification(n)
+		return status != ""
+	case "gov_suspected":
+		status, _ := governmentClassification(n)
+		return status == "suspected"
+	case "gov_authorized":
+		status, _ := governmentClassification(n)
+		return status == "declared"
 	case "residential":
 		return strings.EqualFold(n.Source, "residential") || strings.EqualFold(n.IPType, "residential")
 	case "custom":
-		return strings.EqualFold(n.Source, "custom") || strings.HasPrefix(strings.ToLower(n.HostName), "custom_")
+		return strings.EqualFold(n.Source, "custom") || strings.EqualFold(n.CountryCode, "CUSTOM") || n.FeedCategory == "custom" || strings.HasPrefix(strings.ToLower(n.HostName), "custom_")
 	default:
 		return strings.EqualFold(n.Source, s)
 	}
@@ -181,7 +201,7 @@ func (m *Manager) nodeCooling(n Node) bool {
 }
 
 func dedupNodesByIP(nodes []Node) []Node {
-	seen := make(map[string]bool, len(nodes))
+	seen := make(map[string]int, len(nodes))
 	out := make([]Node, 0, len(nodes))
 	for _, n := range nodes {
 		ip := normalizeIP(n.IP)
@@ -190,10 +210,11 @@ func dedupNodesByIP(nodes []Node) []Node {
 			continue
 		}
 		key := nodeKey(n)
-		if seen[key] {
+		if index, exists := seen[key]; exists {
+			out[index] = retainGovernmentEvidence(out[index], n)
 			continue
 		}
-		seen[key] = true
+		seen[key] = len(out)
 		out = append(out, n)
 	}
 	return out
@@ -234,7 +255,17 @@ func (m *Manager) refreshNodesSource(source string, triggerOrchestrate bool) (in
 	}
 	_ = os.MkdirAll(customDir, 0755)
 
-	nodes, err := fetchNodes(m.workDir, source, 35*time.Second)
+	fetchSource := source
+	if source == "gov" || source == "gov_suspected" || source == "gov_authorized" {
+		// Government is a metadata category across providers, not one provider.
+		fetchSource = "all"
+	}
+	nodes, err := fetchNodes(m.workDir, fetchSource, 35*time.Second)
+	managed := m.fetchFeeds(fetchSource)
+	if len(managed) > 0 {
+		nodes = append(managed, nodes...)
+		err = nil
+	}
 	// 扫描加载本地自定义 .ovpn 节点并合并
 	customNodes := loadLocalOvpnNodes(customDir)
 	if len(customNodes) > 0 {
@@ -251,6 +282,16 @@ func (m *Manager) refreshNodesSource(source string, triggerOrchestrate bool) (in
 		return 0, err
 	}
 	nodes = dedupNodesByIP(nodes)
+	nodes = m.filterManagedCandidates(nodes)
+	if source == "gov" || source == "gov_suspected" || source == "gov_authorized" {
+		filtered := nodes[:0]
+		for _, n := range nodes {
+			if nodeMatchesSource(n, source) {
+				filtered = append(filtered, n)
+			}
+		}
+		nodes = filtered
+	}
 	m.mu.Lock()
 	if source != "all" {
 		for _, old := range m.nodes {
@@ -263,6 +304,10 @@ func (m *Manager) refreshNodesSource(source string, triggerOrchestrate bool) (in
 	m.nodes = nodes
 	m.fetched = time.Now()
 	m.mu.Unlock()
+	sourceInfoMu.Lock()
+	globalSourceInfo.TotalNodes = len(nodes)
+	sourceInfoMu.Unlock()
+	saveNodesToCache(m.workDir, nodes)
 
 	// 手动刷新才触发全网智能编排；故障自愈刷新只更新节点池，避免递归启动另一套编排。
 	if triggerOrchestrate {
@@ -371,11 +416,15 @@ func (m *Manager) Nodes() ([]Node, time.Time) {
 	globalIPIntel.mu.RLock()
 	for i, n := range m.nodes {
 		out[i] = n
+		// Retain source evidence even if a later generic IP lookup overwrites
+		// the display ISP/type. Classification remains explicitly uncertain.
+		annotateGovernment(&out[i])
 		if intel, ok := globalIPIntel.cache[n.IP]; ok {
 			out[i].IPType = intel.IPType
 			out[i].PurityScore = intel.PurityScore
 			out[i].ISP = intel.ISP
 		}
+		annotateGovernment(&out[i])
 	}
 	globalIPIntel.mu.RUnlock()
 	return out, m.fetched
@@ -426,6 +475,9 @@ func (m *Manager) Tunnels() []*Tunnel {
 
 // freeSlot 找一个未占用的槽位。槽位同时决定端口与网段。
 func (m *Manager) freeSlot() (int, error) {
+	if len(m.tunnels) >= m.maxSlots {
+		return 0, fmt.Errorf("槽位已满（上限 %d）", m.maxSlots)
+	}
 	for i := 1; i <= m.maxSlots; i++ {
 		if _, used := m.tunnels[i]; !used {
 			return i, nil
@@ -454,7 +506,22 @@ func (m *Manager) exitIPInUse(ip string, exceptSlot int) bool {
 }
 
 func (m *Manager) startTunnel(node Node, jpMode string, exact bool) (*Tunnel, error) {
+	if reason := m.admissionReason(); reason != "" {
+		return nil, &admissionError{reason}
+	}
 	m.mu.Lock()
+	if m.capacityConfigured && m.capacity.GuardEnabled {
+		starting := 0
+		for _, t := range m.tunnels {
+			if t.Status == "starting" {
+				starting++
+			}
+		}
+		if starting >= 2 || time.Since(m.lastAdmission) < time.Second {
+			m.mu.Unlock()
+			return nil, &admissionError{"正在建立其他出口，等待资源稳定后再新增"}
+		}
+	}
 	for _, other := range m.tunnels {
 		if other.Status != "stopped" && other.Status != "failed" &&
 			(other.Node.HostName == node.HostName || (node.IP != "" && normalizeIP(other.Node.IP) == normalizeIP(node.IP))) {
@@ -488,6 +555,7 @@ func (m *Manager) startTunnel(node Node, jpMode string, exact bool) (*Tunnel, er
 		Status:           "starting", Since: time.Now(), Cred: cred,
 	}
 	m.tunnels[slot] = t
+	m.lastAdmission = time.Now()
 	m.mu.Unlock()
 	if exact {
 		go m.bringUpExact(t, true)
@@ -985,8 +1053,14 @@ func (m *Manager) Swap(slot int) error {
 
 // StopAll 停掉所有隧道并清空状态文件。
 func (m *Manager) StopAll() {
+	m.mu.Lock()
+	m.pendingRestore = nil
+	m.mu.Unlock()
 	for _, t := range m.Tunnels() {
 		_ = m.Stop(t.Slot)
+	}
+	if err := m.saveState(); err != nil {
+		log.Printf("保存状态失败: %v", err)
 	}
 }
 
@@ -1074,6 +1148,11 @@ func (m *Manager) syncCred(t *Tunnel) {
 
 // Shutdown 停掉运行态但保留状态文件，让下次启动能恢复同样的隧道。
 func (m *Manager) Shutdown() {
+	m.stopOnce.Do(func() {
+		if m.stopCh != nil {
+			close(m.stopCh)
+		}
+	})
 	for _, t := range m.Tunnels() {
 		t.stop()
 	}

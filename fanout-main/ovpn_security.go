@@ -66,6 +66,10 @@ func validateOpenVPNConfig(config string) error {
 
 // Handshake only: dev=null and noexec prohibit host interface/route changes.
 func probeOpenVPNHandshake(config string, timeout time.Duration) error {
+	return probeOpenVPNWithCredentials(config, timeout, "vpn", "vpn")
+}
+
+func probeOpenVPNWithCredentials(config string, timeout time.Duration, user, pass string) error {
 	if err := validateOpenVPNConfig(config); err != nil {
 		return err
 	}
@@ -82,7 +86,10 @@ func probeOpenVPNHandshake(config string, timeout time.Duration) error {
 	if err = os.WriteFile(cfg, []byte(config), 0600); err != nil {
 		return err
 	}
-	if err = os.WriteFile(auth, []byte("vpn\nvpn\n"), 0600); err != nil {
+	if strings.ContainsAny(user+pass, "\r\n\x00") {
+		return fmt.Errorf("VPN 凭据包含无效字符")
+	}
+	if err = os.WriteFile(auth, []byte(user+"\n"+pass+"\n"), 0600); err != nil {
 		return err
 	}
 	if timeout < 8*time.Second {

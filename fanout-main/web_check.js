@@ -37,7 +37,11 @@ async function api(path, opts = {}){
     const r = await fetch(apiPath(path), opts);
     const d = await r.json().catch(()=>({}));
     clearTimeout(timeoutId);
-    if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+    if(!r.ok){
+      // Compatibility with servers that still return 409 for an active task.
+      if(r.status === 409 && path === '/api/auto/orchestrate' && d.status === 'busy' && d.progress && d.progress.running) return d;
+      throw new Error(d.error || d.message || ('HTTP ' + r.status));
+    }
     return d;
   } catch(err) {
     clearTimeout(timeoutId);
@@ -51,6 +55,7 @@ function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 let toastTimer;
+let orchestrateProgressTimer = null;
 function toast(msg, bad){
   const el = $('#toast');
   el.textContent = msg;
@@ -110,7 +115,7 @@ function getFlagEmoji(countryCode) {
 }
 
 const COUNTRY_ZH = {
-  GOV: '政府公共网络', EDU: '海外高校学术网络', GLOBAL: '全球公网', CUSTOM: '自定义',
+  GOV: '政府/公共机构（含疑似）', EDU: '海外高校学术网络', GLOBAL: '全球公网', CUSTOM: '自定义',
   // 亚太地区
   JP: '日本', KR: '韩国', HK: '中国香港', TW: '中国台湾', SG: '新加坡',
   MY: '马来西亚', TH: '泰国', VN: '越南', PH: '菲律宾', ID: '印尼',
@@ -140,7 +145,7 @@ const COUNTRY_ZH = {
 
 function formatCountry(code, name) {
   if (!code || code === 'CUSTOM') return '🌐 ' + (name || '自定义');
-  if (code === 'GOV') return '🏛️ 全球政府公共机构专网' + (name && name !== 'GOV' && name !== '政府公共网络' ? ' · ' + name : '');
+  if (code === 'GOV') return '🏛️ 政府/公共机构（含疑似）' + (name && name !== 'GOV' && name !== '授权政府来源' ? ' · ' + name : '');
   if (code === 'EDU') return '🎓 海外高校学术科研网' + (name && name !== 'EDU' && name !== '教育网高校' && name !== '海外高校学术网络' ? ' · ' + name : '');
   const flag = getFlagEmoji(code);
   const zh = COUNTRY_ZH[code.toUpperCase()] || '';
@@ -150,6 +155,12 @@ function formatCountry(code, name) {
   return flag + ' ' + code + (name ? ' · ' + name : '');
 }
 
+function governmentBadge(n){
+ const state=n.government_status||(n.ip_type==='gov'||n.source==='gov'?'suspected':'');
+ if(!state)return '';
+ return '<span class="tag-gov" title="'+esc(n.government_evidence||'元数据推测，机构身份与授权未核验')+'">🏛️ '+(state==='declared'?'管理员声明授权':'疑似机构 · 未核验')+'</span>';
+}
+
 function renderExits(){
   const list = $('#list');
   const n = view.exits.filter(e => e.status === 'up').length;
@@ -157,9 +168,9 @@ function renderExits(){
   $('#ecount').textContent = n ? n + ' 个' + (total !== n ? '（总计 ' + total + '）' : '') : (total ? '0 个可用' : '');
   const hasInboundsOrExits = view.exits.some(e => (e.inbounds && e.inbounds.length) || e.status === 'up');
   $('#exportAll').disabled = !hasInboundsOrExits;
-  $('#stopall').disabled = !n;
+  $('#stopall').disabled = !total && !(capacityView && capacityView.pending_restore);
 
-  const govCount = view.exits.filter(e => e.ip_type === 'gov').length;
+  const govCount = view.exits.filter(e => e.government_status || e.ip_type === 'gov').length;
   const eduCount = view.exits.filter(e => e.ip_type === 'edu').length;
   const resCount = view.exits.filter(e => e.ip_type === 'residential').length;
   const purities = view.exits.map(e => e.purity_score || 55);
@@ -167,10 +178,10 @@ function renderExits(){
 
   const summaryBar = '<div class="stats-summary">'
     + '<span class="stat-pill">健康出口<b>' + n + '</b></span>'
-    + (govCount ? '<span class="stat-pill">🏛️ 政府专网<b style="color:#ebb237">' + govCount + '</b></span>' : '')
+    + (govCount ? '<span class="stat-pill">🏛️ 政府类（推测）<b style="color:#ebb237">' + govCount + '</b></span>' : '')
     + (eduCount ? '<span class="stat-pill">🎓 学术科研<b style="color:#a855f7">' + eduCount + '</b></span>' : '')
     + '<span class="stat-pill">🏡 住宅家宽<b style="color:#3fa66b">' + resCount + '</b></span>'
-    + '<span class="stat-pill">平均纯净度<b style="color:' + (avgPurity>=80?'#3fa66b':'#c9903a') + '">' + (n ? avgPurity + '%' : '—') + '</b></span>'
+    + '<span class="stat-pill">平均参考评分<b style="color:' + (avgPurity>=80?'#3fa66b':'#c9903a') + '">' + (n ? avgPurity + '%' : '—') + '</b></span>'
     + '<span class="stat-pill">联动后端<b>' + esc(backendName()) + '</b></span>'
     + '</div>';
 
@@ -184,10 +195,10 @@ function renderExits(){
 
   list.innerHTML = summaryBar + view.exits.map(e => {
     const label = e.exit_ip || (e.status === 'starting' ? '连接中…' : '—');
-    const isGov = e.ip_type === 'gov';
+    const isGov = !!e.government_status || e.ip_type === 'gov';
     const isEdu = e.ip_type === 'edu';
     const isRes = e.ip_type === 'residential';
-    const typeTag = isGov ? '<span class="tag-gov" title="政府/公共机构专网">🏛️ 政府</span>'
+    const typeTag = isGov ? governmentBadge(e)
       : (isEdu ? '<span class="tag-edu" title="海外高校学术科研网络">🎓 学术</span>'
       : (isRes ? '<span class="tag-res" title="家庭宽带住宅 IP">🏡 住宅</span>'
       : (e.ip_type === 'mobile' ? '<span class="tag-mob" title="移动蜂窝网络 IP">📱 移动</span>'
@@ -198,7 +209,7 @@ function renderExits(){
     if(purity >= 85) pColor = '#3fa66b';
     else if(purity >= 70) pColor = '#4a9eda';
     else if(purity >= 50) pColor = '#c9903a';
-    const purityTag = '<span class="tag-purity" style="color:' + pColor + '" title="IP 纯净度评分">' + purity + '%</span>';
+    const purityTag = '<span class="tag-purity" style="color:' + pColor + '" title="IP 参考评分，不代表安全或匿名保证">' + purity + '%</span>';
 
     const activeInbounds = (e.inbounds || []).slice(0, 1);
     const chips = activeInbounds.length
@@ -354,8 +365,11 @@ $('#saveGlobalExitLimit').onclick = async () => {
   }finally{ btn.disabled = false; }
 };
 
+let dashboardPolling = false;
 async function poll(){
-  if(document.hidden) return;
+  if(document.hidden || dashboardPolling) return;
+  dashboardPolling = true;
+  try {
   try{
     view = await api('/api/exits');
     $('#panel').textContent = view.panel
@@ -367,16 +381,22 @@ async function poll(){
     $('#exportAll').hidden = isXCL();
     renderExits();
     renderOrphans();
-  }catch(e){}
+    $('#syncStatus').textContent = '已同步 ' + new Date().toLocaleTimeString();
+  }catch(e){ $('#syncStatus').textContent = '同步失败：' + e.message; }
   try{ renderJobs(await api('/api/jobs') || []); }catch(e){}
+  await refreshCapacity();
+  }finally{ dashboardPolling = false; }
 }
 
 // ---- 新建向导 ----
 let regions = [], region = '', regionsLoaded = false;
 
-function openModal(id){ $('#' + id).classList.add('open'); }
+const modalFocus = new Map();
+function openModal(id){const m=$('#'+id);modalFocus.set(id,document.activeElement);m.classList.add('open');m.setAttribute('role','dialog');m.setAttribute('aria-modal','true');const first=m.querySelector('button,input,select,textarea');if(first)first.focus();}
 function closeModal(id){
   $('#' + id).classList.remove('open');
+  const previous=modalFocus.get(id);if(previous&&previous.isConnected&&previous.focus)previous.focus();modalFocus.delete(id);
+  if(id === 'orchestrateModal' && orchestrateProgressTimer){ clearInterval(orchestrateProgressTimer); orchestrateProgressTimer = null; }
   if(id === 'liveScanModal' && liveScanPollTimer){ clearInterval(liveScanPollTimer); liveScanPollTimer = null; }
 }
 
@@ -386,10 +406,10 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('keydown', e => {
   if(e.key === 'Escape') document.querySelectorAll('.modal.open')
-    .forEach(m => m.classList.remove('open'));
+    .forEach(m => closeModal(m.id));
 });
 document.querySelectorAll('.modal').forEach(m => {
-  m.onclick = e => { if(e.target === m) m.classList.remove('open'); };
+  m.onclick = e => { if(e.target === m) closeModal(m.id); };
 });
 
 
@@ -748,7 +768,7 @@ function renderWizardCandidates(){
       + '<span style="font-size:11px;color:var(--dim);width:24px;text-align:right">#' + (idx + 1) + '</span>'
       + '<span style="font-size:14px">' + flag + '</span>'
       + '<span style="flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(n.ip + ' ' + isp) + '">'
-      + '<b style="color:var(--text)">' + esc(n.ip || n.hostname) + '</b> '
+      + '<b style="color:var(--text)">' + esc(n.ip || n.hostname) + '</b> ' + governmentBadge(n)
       + '<span style="color:var(--dim);font-size:11px">' + esc(isp) + '</span>' + inUseBadge
       + '</span>'
       + (speed ? '<span style="font-size:11px;color:var(--dim)">' + speed + '</span>' : '')
@@ -946,12 +966,10 @@ document.addEventListener('click', async e => {
 });
 
 $('#stopall').onclick = async e => {
-  if(!confirm('停止全部 ' + view.exits.length + ' 个出口？')) return;
+  if(!confirm('停止当前全部出口并清空待恢复队列？启用的自动策略仍可在后续创建出口。')) return;
   e.target.disabled = true;
-  for(const x of view.exits){
-    try{ await api('/api/stop?slot=' + x.slot, {method:'POST'}); }catch(err){}
-  }
-  poll();
+  try{ await api('/api/stop-all', {method:'POST'}); toast('已停止当前出口并清空恢复队列'); }catch(err){toast(err.message,true);}
+  finally{poll();}
 };
 
 const pruneBtn = $('#prunefailed');
@@ -1601,20 +1619,19 @@ document.addEventListener('click', async e => {
   }
   if(e.target.closest('#runOrchestrate')){
     const btn = e.target.closest('#runOrchestrate');
-    const sources = Array.from(document.querySelectorAll('.orch-src:checked')).map(x => x.value);
-    const maxStarts = Math.max(1, Math.min(150, parseInt($('#orchMax').value || '40', 10)));
-    const hot = 1;
-    const cold = 1;
+    const sources = $('#orchAll').checked ? ['all'] : Array.from(document.querySelectorAll('.orch-src:checked')).map(x => x.value);
+    const maxStarts = Math.max(1, Math.min(20, parseInt($('#orchMax').value || '8', 10)));
     if(!sources.length){ toast('至少选择一个节点源', true); return; }
     btn.disabled = true;
     $('#orchProgress').style.display = 'block';
     $('#orchProgressStage').textContent = '启动中';
     $('#orchProgressMsg').textContent = '正在启动智能编排…';
-    let progressTimer = null;
+    if(orchestrateProgressTimer){ clearInterval(orchestrateProgressTimer); orchestrateProgressTimer = null; }
+    let pollPending = false;
     const renderOrchProgress = (p) => {
       if(!p) return;
       const tested = Number(p.candidates_tested || 0), total = Number(p.candidates_total || 0);
-      const pct = total ? Math.min(100, Math.round(tested * 100 / total)) : (p.running ? 8 : 100);
+      const pct = !p.running ? 100 : (total ? Math.min(100, Math.round(tested * 100 / total)) : 8);
       $('#orchProgressBar').style.width = pct + '%';
       const stageMap = {prepare:'准备',collect:'整理候选',probe:'测活',start:'建立隧道',verify:'真实出网验证',bind:'绑定节点',done:'完成',busy:'已有任务'};
       $('#orchProgressStage').textContent = stageMap[p.stage] || p.stage || '处理中';
@@ -1622,10 +1639,14 @@ document.addEventListener('click', async e => {
       $('#orchProgressMsg').textContent = p.message || '处理中…';
       $('#orchProgressStats').textContent = '测活通过 ' + (p.live_passed||0) + ' · 已启动 ' + (p.started||0) + ' · 验证通过 ' + (p.verified||0) + ' · 新增 ' + (p.added||0) + ' · 失败 ' + (p.failed||0);
       if(p.current_node) $('#orchProgressMsg').textContent += '（当前：' + p.current_node + '）';
-      if(!p.running && progressTimer){ clearInterval(progressTimer); progressTimer = null; }
+      if(!p.running && orchestrateProgressTimer){ clearInterval(orchestrateProgressTimer); orchestrateProgressTimer = null; }
     };
     const pollOrch = async () => {
-      try { renderOrchProgress(await api('/api/auto/orchestrate/status')); } catch(err) {}
+      if(pollPending || document.hidden || !$('#orchestrateModal').classList.contains('open')) return;
+      pollPending = true;
+      try { renderOrchProgress(await api('/api/auto/orchestrate/status')); }
+      catch(err) { $('#orchProgressMsg').textContent = '读取进度失败：' + err.message; }
+      finally { pollPending = false; }
     };
     try {
       const res = await api('/api/auto/orchestrate', {
@@ -1636,7 +1657,8 @@ document.addEventListener('click', async e => {
       toast(res.message || '智能编排已启动');
       openModal('orchestrateModal');
       $('#orchProgress').style.display = 'block';
-      progressTimer = setInterval(pollOrch, 1000);
+      renderOrchProgress(res.progress);
+      orchestrateProgressTimer = setInterval(pollOrch, 1000);
       await pollOrch();
       setTimeout(poll, 1200); setTimeout(poll, 5000); setTimeout(poll, 12000);
     } catch(err) {
@@ -1652,8 +1674,8 @@ document.addEventListener('click', async e => {
     loadSources();
     return;
   }
-  if(e.target.closest('#wzRefreshBtn') || e.target.closest('#refreshMirrors') || e.target.closest('#refreshVpnGate') || e.target.closest('#refreshEdu') || e.target.closest('#refreshResidential') || e.target.closest('#refreshProxy')){
-    const btn = e.target.closest('#wzRefreshBtn') || e.target.closest('#refreshMirrors') || e.target.closest('#refreshVpnGate') || e.target.closest('#refreshEdu') || e.target.closest('#refreshResidential') || e.target.closest('#refreshProxy');
+  if(e.target.closest('#wzRefreshBtn') || e.target.closest('#refreshMirrors') || e.target.closest('#refreshVpnGate') || e.target.closest('#refreshGov') || e.target.closest('#refreshEdu') || e.target.closest('#refreshResidential') || e.target.closest('#refreshProxy')){
+    const btn = e.target.closest('#wzRefreshBtn') || e.target.closest('#refreshMirrors') || e.target.closest('#refreshVpnGate') || e.target.closest('#refreshGov') || e.target.closest('#refreshEdu') || e.target.closest('#refreshResidential') || e.target.closest('#refreshProxy');
     const src = btn.dataset.src || ($('#wzSource') ? $('#wzSource').value : 'all');
     await refreshSources(btn, src);
     return;
@@ -1784,7 +1806,7 @@ async function fetchAndRenderLiveNodes(isBackgroundPoll = false){
       if(isScanning && $('#liveScanModal').classList.contains('open')){
         statusText.textContent = '母机发包实测中: 进度 ' + (data.progress || 0) + ' / ' + (data.total || 0) + '，已验证 ' + (data.verified_count || 0) + ' 个有效节点';
       } else if(data.last_scan && data.last_scan !== '0001-01-01 00:00:00'){
-        statusText.textContent = '探测完成！已筛选出 ' + (data.verified_count || 0) + ' 个母机 100% 实测通畅出网节点';
+        statusText.textContent = '探测完成！已筛选出 ' + (data.verified_count || 0) + ' 个通过预检的候选，启动后仍需出口验证';
       } else {
         statusText.textContent = '就绪：点击【开始测活扫描】从 VPS 真实发包探测';
       }
@@ -1881,11 +1903,11 @@ function renderLiveNodesTable(nodes){
       '<td style="padding:7px 10px;white-space:nowrap"><span style="font-size:14px;margin-right:4px">' + flag + '</span><b>' + cc + '</b></td>' +
       '<td style="padding:7px 10px">' + protoBadge + '</td>' +
       '<td style="padding:7px 10px">' +
-        '<div style="font-weight:600;font-family:monospace;color:var(--text);display:flex;align-items:center">' + ip + eduBadge + '</div>' +
+        '<div style="font-weight:600;font-family:monospace;color:var(--text);display:flex;align-items:center">' + ip + governmentBadge(n) + eduBadge + '</div>' +
         '<div style="font-size:11px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:320px">' + isp + (countryName ? ' · ' + countryName : '') + '</div>' +
       '</td>' +
       '<td style="padding:7px 10px;font-family:monospace;font-weight:600;color:' + pingColor + '">' + (ping > 0 ? ping + ' ms' : '未知') + '</td>' +
-      '<td style="padding:7px 10px"><span style="color:var(--ok);font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:3px">✔ 实测通畅</span></td>' +
+      '<td style="padding:7px 10px"><span style="color:var(--ok);font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:3px">✔ 预检通过</span></td>' +
       '<td style="padding:7px 10px;text-align:right">' +
         '<button class="btn-xs primary ls-start-one" data-host="' + hostName + '" style="padding:3px 10px;font-weight:600">' +
           '<svg viewBox="0 0 24 24" style="width:12px;height:12px"><polygon points="5 3 19 12 5 21 5 3"/></svg> 启动' +
@@ -1948,8 +1970,9 @@ async function startBatchLiveNodes(){
     const res = await api('/api/nodes/batch_start', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({hosts: hosts, template: tpl})
+      body: JSON.stringify({hosts: hosts, template: tpl, queue: true})
     });
+    if(res.job){ toast('已加入资源保护启动队列，请查看任务进度'); selectedLiveHosts.clear(); closeModal('liveScanModal'); poll(); return; }
     const started = (res.started || []).length;
     const errCount = (res.errors || []).length;
     if(started > 0){
@@ -2025,6 +2048,48 @@ const srcBtn = $('#sourcesBtn');
 if(srcBtn) srcBtn.onclick = () => { openModal('sourcesModal'); loadSources(); };
 const nExitBtn = $('#newexit');
 if(nExitBtn) nExitBtn.onclick = () => { openModal('wizard'); if(!regionsLoaded) loadWizard(); else { renderRegions(); loadWizard(); } };
+
+
+function formatBytes(value){const n=Number(value);if(!Number.isFinite(n)||n<0)return '未知';return n>=1073741824?(n/1073741824).toFixed(2)+' GiB':(n/1048576).toFixed(0)+' MiB';}
+let capacityView = null;
+async function refreshCapacity(){
+ try{const d=await api('/api/capacity');capacityView=d;$('#stopall').disabled=!d.active&&!d.pending_restore;
+  $('#capacityCount').textContent='占用槽位 '+d.active+' / '+d.max_exits+(d.pending_restore?' · 待恢复 '+d.pending_restore:'');
+  const r=d.resources||{};
+  $('#cpuValue').textContent=r.cpu_ready?Number(r.cpu_percent).toFixed(1)+'%':'采样中';
+  $('#memoryValue').textContent=r.available?Number(r.memory_percent).toFixed(1)+'% · '+formatBytes(r.memory_used)+' / '+formatBytes(r.memory_total):'监测不可用';
+  $('#cpuMeter').style.width=Math.min(100,Math.max(0,r.cpu_percent||0))+'%';$('#memoryMeter').style.width=Math.min(100,Math.max(0,r.memory_percent||0))+'%';
+  $('#capacityReason').textContent=d.reason||('可新增 · 资源阈值 '+d.settings.resource_limit_percent+'% · '+(r.scope==='cgroup'?'已计入服务内存限额':'服务器采样'));
+  $('#capacityReason').style.color=d.blocked?'var(--warn)':'var(--dim)';
+ }catch(e){$('#capacityReason').textContent='读取资源状态失败：'+e.message;}
+}
+$('#capacityOpen').onclick=async()=>{await refreshCapacity();if(!capacityView)return;const c=capacityView.settings;$('#capMode').value=c.max_exits?'custom':'auto';$('#capMax').value=c.max_exits||80;$('#capMax').disabled=!c.max_exits;$('#capGuard').checked=c.guard_enabled;$('#capThreshold').value=c.resource_limit_percent;$('#capSaveStatus').textContent='';openModal('capacityModal');};
+$('#capMode').onchange=()=>{$('#capMax').disabled=$('#capMode').value==='auto';};
+$('#capSave').onclick=async()=>{const btn=$('#capSave');btn.disabled=true;try{const max=$('#capMode').value==='auto'?0:Number($('#capMax').value);const threshold=Number($('#capThreshold').value);if(!Number.isInteger(max)||max<0||max>254||($('#capMode').value==='custom'&&max<1))throw Error('数量须为 1–254 的整数');if(!Number.isInteger(threshold)||threshold<50||threshold>95)throw Error('资源阈值须为 50–95 的整数');await api('/api/capacity',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({max_exits:max,resource_limit_percent:threshold,guard_enabled:$('#capGuard').checked})});$('#capSaveStatus').textContent='已保存，立即生效';await refreshCapacity();toast('容量与资源保护已保存');}catch(e){$('#capSaveStatus').textContent=e.message;toast(e.message,true);}finally{btn.disabled=false;}};
+let feedDraft=[],feedHealth={};
+function renderFeedRows(){
+ $('#feedRows').innerHTML=feedDraft.map((f,i)=>'<div class="feed-row" data-feed-row="'+i+'"><label><input type="checkbox" data-feed="enabled" '+(f.enabled?'checked':'')+'> 启用</label> <button data-feed-remove="'+i+'">移除来源</button>'+
+ '<label class="f"><span>名称</span><input data-feed="name" value="'+esc(f.name||'')+'"></label>'+
+ '<label class="f"><span>官方配置地址（HTTPS）</span><input data-feed="url" type="url" value="'+esc(f.url||'')+'"></label>'+
+ '<div class="setrow"><label class="f"><span>格式</span><select data-feed="format">'+[['ovpn','OpenVPN 单配置'],['zip','配置压缩包'],['csv','VPN Gate CSV'],['json','配置清单']].map(x=>'<option value="'+x[0]+'" '+(f.format===x[0]?'selected':'')+'>'+x[1]+'</option>').join('')+'</select></label><label class="f"><span>分类</span><select data-feed="category">'+[['custom','自有或授权来源'],['edu','授权学术来源'],['gov','授权政府来源']].map(x=>'<option value="'+x[0]+'" '+(f.category===x[0]?'selected':'')+'>'+x[1]+'</option>').join('')+'</select></label></div>'+
+ '<label class="f"><span>国家代码（可选，如 US、JP）</span><input data-feed="country_code" maxlength="2" value="'+esc(f.country_code||'')+'"></label>'+
+ '<label class="f"><span>公开授权说明链接（政府分类必填）</span><input data-feed="authorization_url" type="url" value="'+esc(f.authorization_url||'')+'"></label>'+
+ '<div class="setrow"><label class="f"><span>VPN 用户名（可选）</span><input data-feed="username" autocomplete="off" value="'+esc(f.username||'')+'"></label><label class="f"><span>VPN 口令（可选）</span><input data-feed="password" type="password" autocomplete="new-password" placeholder="'+(f.has_password?'已保存，留空不改':'无口令可留空')+'" value="'+esc(f.password||'')+'"></label></div>'+
+ '<label><input type="checkbox" data-feed="clear_password" '+(f.clear_password?'checked':'')+'> 清除已保存的来源口令</label>'+
+ '<p class="hint">'+esc(feedHealth[f.id]?(feedHealth[f.id].error||('最近读取 '+feedHealth[f.id].count+' 个候选，仍需测活')):'尚未刷新；保存后在节点源面板刷新')+'</p></div>').join('')||'<p class="hint">尚未添加授权来源。原有公开来源仍可使用。</p>';
+}
+$('#feedOpen').onclick=async()=>{try{const d=await api('/api/source-feeds');feedDraft=d.feeds||[];feedHealth=d.status||{};renderFeedRows();$('#feedSaveStatus').textContent='';openModal('feedsModal');}catch(e){toast(e.message,true);}};
+$('#feedAdd').onclick=()=>{feedDraft.push({id:'source_'+Date.now().toString(36)+'_'+feedDraft.length,name:'',url:'',format:'ovpn',category:'custom',enabled:true});renderFeedRows();};
+$('#feedRows').addEventListener('input',e=>{const row=e.target.closest('[data-feed-row]');if(!row||!e.target.dataset.feed)return;feedDraft[Number(row.dataset.feedRow)][e.target.dataset.feed]=e.target.type==='checkbox'?e.target.checked:e.target.value;});
+$('#feedRows').addEventListener('click',e=>{const btn=e.target.closest('[data-feed-remove]');if(!btn)return;feedDraft.splice(Number(btn.dataset.feedRemove),1);renderFeedRows();});
+$('#feedSave').onclick=async()=>{const btn=$('#feedSave');btn.disabled=true;try{const d=await api('/api/source-feeds',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(feedDraft)});feedDraft=d.feeds||[];feedHealth=d.status||{};renderFeedRows();$('#feedSaveStatus').textContent='来源已保存；请刷新节点源以拉取候选';toast('来源已保存');}catch(e){$('#feedSaveStatus').textContent=e.message;toast(e.message,true);}finally{btn.disabled=false;}};
+
+
+document.addEventListener('keydown',e=>{
+ if(e.key!=='Tab')return;const modal=Array.from(document.querySelectorAll('.modal.open')).pop();if(!modal)return;
+ const fields=Array.from(modal.querySelectorAll('button,input,select,textarea,a[href]')).filter(x=>!x.disabled&&x.offsetParent!==null);
+ if(!fields.length)return;const first=fields[0],last=fields[fields.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}
+});
 
 loadGlobalExitLimit();
 poll();

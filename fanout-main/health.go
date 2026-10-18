@@ -18,7 +18,23 @@ const (
 func (m *Manager) WatchHealth() {
 	fails := map[int]int{}
 
-	for range time.Tick(healthInterval) {
+	ticker := time.NewTicker(healthInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-m.stopCh:
+			return
+		case <-ticker.C:
+		}
+		aliveSlots := map[int]bool{}
+		for _, t := range m.Tunnels() {
+			aliveSlots[t.Slot] = true
+		}
+		for slot := range fails {
+			if !aliveSlots[slot] {
+				delete(fails, slot)
+			}
+		}
 		for _, t := range m.Tunnels() {
 			if t.Status != "up" {
 				continue
@@ -60,7 +76,7 @@ func (m *Manager) tunnelHealthy(t *Tunnel) bool {
 	// 直连 IP 探测（无需域名解析，抗限流）
 	out, err := exec.Command("ip", "netns", "exec", t.nsName(),
 		"curl", "--interface", "tun0", "-fsS", "--max-time", strconv.Itoa(int(healthTimeout.Seconds())),
-		"http://1.1.1.1/cdn-cgi/trace").Output()
+		"https://1.1.1.1/cdn-cgi/trace").Output()
 	if err == nil {
 		for _, line := range strings.Split(string(out), "\n") {
 			if strings.HasPrefix(line, "ip=") {
@@ -75,7 +91,7 @@ func (m *Manager) tunnelHealthy(t *Tunnel) bool {
 	// 备用通过 ipify 探测
 	out2, err2 := exec.Command("ip", "netns", "exec", t.nsName(),
 		"curl", "--interface", "tun0", "-fsS", "--max-time", strconv.Itoa(int(healthTimeout.Seconds())),
-		"http://api.ipify.org").Output()
+		"https://api.ipify.org").Output()
 	if err2 == nil {
 		got := strings.TrimSpace(string(out2))
 		if got != "" {

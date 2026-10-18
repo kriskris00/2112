@@ -23,7 +23,7 @@
 === RUN   TestInboundRejectsInvalidPort
 --- PASS: TestInboundRejectsInvalidPort (0.00s)
 === RUN   TestWebSettingsWriteFailurePreservesListener
-2026/10/18 06:20:45 管理界面监听已切换到 :65134
+2026/10/18 09:12:23 管理界面监听已切换到 :65203
 --- PASS: TestWebSettingsWriteFailurePreservesListener (0.02s)
 === RUN   TestLoginThrottleBlocksAfterMaxFails
 --- PASS: TestLoginThrottleBlocksAfterMaxFails (0.00s)
@@ -33,6 +33,36 @@
 --- PASS: TestLoginThrottleIsolatesIPs (0.00s)
 === RUN   TestLoginThrottleUnblocksAfterExpiry
 --- PASS: TestLoginThrottleUnblocksAfterExpiry (0.00s)
+=== RUN   TestResourceThresholdStopsAtEightyPercent
+--- PASS: TestResourceThresholdStopsAtEightyPercent (0.00s)
+=== RUN   TestResourceUnknownAndStaleFailClosed
+--- PASS: TestResourceUnknownAndStaleFailClosed (0.00s)
+=== RUN   TestResourceCgroupLimitAndCPUFixture
+--- PASS: TestResourceCgroupLimitAndCPUFixture (0.00s)
+=== RUN   TestCgroupCPUQuotaOverridesLowHostAverage
+--- PASS: TestCgroupCPUQuotaOverridesLowHostAverage (0.00s)
+=== RUN   TestCapacitySavePersistsAndDoesNotDeleteExits
+--- PASS: TestCapacitySavePersistsAndDoesNotDeleteExits (0.01s)
+=== RUN   TestCapacityWriteFailureDoesNotChangeRunningLimit
+--- PASS: TestCapacityWriteFailureDoesNotChangeRunningLimit (0.00s)
+=== RUN   TestCapacityLimitsValidate
+--- PASS: TestCapacityLimitsValidate (0.00s)
+=== RUN   TestEveryCreationPathRespectsResourceGuard
+--- PASS: TestEveryCreationPathRespectsResourceGuard (0.00s)
+=== RUN   TestQueuedRestoreIsPreservedInState
+--- PASS: TestQueuedRestoreIsPreservedInState (0.01s)
+=== RUN   TestSourcePasswordIsNotReturnedAndEmptyEditRetainsIt
+--- PASS: TestSourcePasswordIsNotReturnedAndEmptyEditRetainsIt (0.00s)
+=== RUN   TestGovernmentLabelRequiresOfficialAuthorizationLink
+--- PASS: TestGovernmentLabelRequiresOfficialAuthorizationLink (0.00s)
+=== RUN   TestSourceFormatsRejectUnsafeConfigAndZIP
+--- PASS: TestSourceFormatsRejectUnsafeConfigAndZIP (0.00s)
+=== RUN   TestCapacityAndFeedsRequireLogin
+--- PASS: TestCapacityAndFeedsRequireLogin (0.00s)
+=== RUN   TestLegacySourceURLsPersist
+--- PASS: TestLegacySourceURLsPersist (0.01s)
+=== RUN   TestNodeAPIDoesNotExposeProviderPassword
+--- PASS: TestNodeAPIDoesNotExposeProviderPassword (0.00s)
 === RUN   TestExitNodeLimitByCountry
 --- PASS: TestExitNodeLimitByCountry (0.00s)
 === RUN   TestExitNodeLimitIsGlobalPerCountry
@@ -40,11 +70,21 @@
 === RUN   TestExitNodeLimitDistinctISP
 --- PASS: TestExitNodeLimitDistinctISP (0.00s)
 === RUN   TestMergeXrayConfigPorts
---- PASS: TestMergeXrayConfigPorts (0.00s)
+--- PASS: TestMergeXrayConfigPorts (0.01s)
 === RUN   TestMergeXrayConfigPortsMissingFileIsSilent
 --- PASS: TestMergeXrayConfigPortsMissingFileIsSilent (0.00s)
 === RUN   TestMergeXrayConfigPortsBadJSONIsSilent
---- PASS: TestMergeXrayConfigPortsBadJSONIsSilent (0.00s)
+--- PASS: TestMergeXrayConfigPortsBadJSONIsSilent (0.01s)
+=== RUN   TestGovernmentClassificationKeepsSuspectsSeparate
+--- PASS: TestGovernmentClassificationKeepsSuspectsSeparate (0.00s)
+=== RUN   TestFourSuspectedGovernmentCandidatesAcrossViews
+--- PASS: TestFourSuspectedGovernmentCandidatesAcrossViews (0.00s)
+=== RUN   TestGovernmentEvidenceSurvivesRestartAndDistinctPorts
+--- PASS: TestGovernmentEvidenceSurvivesRestartAndDistinctPorts (0.01s)
+=== RUN   TestGovernmentParserDoesNotInventVerifiedProvider
+--- PASS: TestGovernmentParserDoesNotInventVerifiedProvider (0.00s)
+=== RUN   TestGovernmentEvidenceRetainedWhenDuplicateMetadataChanges
+--- PASS: TestGovernmentEvidenceRetainedWhenDuplicateMetadataChanges (0.00s)
 === RUN   TestNormalizeInboundSpecDefaults
 --- PASS: TestNormalizeInboundSpecDefaults (0.00s)
 === RUN   TestNormalizeInboundSpecGeneratesPath
@@ -55,6 +95,22 @@
 --- PASS: TestNormalizeInboundSpecVision (0.00s)
 === RUN   TestXUIStreamSettingsCarriesRealityShareFields
 --- PASS: TestXUIStreamSettingsCarriesRealityShareFields (0.00s)
+=== RUN   TestStopAllClearsPendingRestoreAndRejectsGet
+--- PASS: TestStopAllClearsPendingRestoreAndRejectsGet (0.00s)
+=== RUN   TestCacheRoundTripPreservesProviderAndProxy
+--- PASS: TestCacheRoundTripPreservesProviderAndProxy (0.01s)
+=== RUN   TestDisabledSourceIsExcludedWithoutDeletingLiveTunnel
+--- PASS: TestDisabledSourceIsExcludedWithoutDeletingLiveTunnel (0.00s)
+=== RUN   TestInvalidCombinedSettingsDoNotChangePassword
+--- PASS: TestInvalidCombinedSettingsDoNotChangePassword (0.00s)
+=== RUN   TestISPModeOnlySettingPersists
+--- PASS: TestISPModeOnlySettingPersists (0.00s)
+=== RUN   TestQueuedBatchStopsOnResourcePressure
+--- PASS: TestQueuedBatchStopsOnResourcePressure (0.00s)
+=== RUN   TestMutationEndpointsRejectGET
+--- PASS: TestMutationEndpointsRejectGET (0.00s)
+=== RUN   TestSourceSelectionConsistentAcrossOrchestrationAndLiveList
+--- PASS: TestSourceSelectionConsistentAcrossOrchestrationAndLiveList (0.00s)
 === RUN   TestPickJapanNodesRandomDedupsIP
 --- PASS: TestPickJapanNodesRandomDedupsIP (0.00s)
 === RUN   TestPickJapanNodesDifferentISP
@@ -83,26 +139,38 @@
 --- PASS: TestNodeKeySeparatesProtocolAndPort (0.00s)
 === RUN   TestNodeKeyOpenVPNProtocolDefault
 --- PASS: TestNodeKeyOpenVPNProtocolDefault (0.00s)
+=== RUN   TestOrchestrationReservationIsAtomic
+--- PASS: TestOrchestrationReservationIsAtomic (0.00s)
+=== RUN   TestBusyOrchestrationPreservesActiveProgress
+--- PASS: TestBusyOrchestrationPreservesActiveProgress (0.00s)
+=== RUN   TestOrchestrationBusyAttachesInsteadOf409
+--- PASS: TestOrchestrationBusyAttachesInsteadOf409 (0.00s)
+=== RUN   TestOrchestrationFullCapacityExitsWithoutProbing
+--- PASS: TestOrchestrationFullCapacityExitsWithoutProbing (0.00s)
+=== RUN   TestAvailableOrchestrationSlotsHonorsLegacyOccupancy
+--- PASS: TestAvailableOrchestrationSlotsHonorsLegacyOccupancy (0.00s)
+=== RUN   TestFreeSlotHonorsLegacyOccupancy
+--- PASS: TestFreeSlotHonorsLegacyOccupancy (0.00s)
 === RUN   TestXCLInboundsListsAllThree
---- PASS: TestXCLInboundsListsAllThree (0.00s)
+--- PASS: TestXCLInboundsListsAllThree (0.01s)
 === RUN   TestXCLBindAddsRoutingKeepsXCLOutbounds
---- PASS: TestXCLBindAddsRoutingKeepsXCLOutbounds (0.00s)
+--- PASS: TestXCLBindAddsRoutingKeepsXCLOutbounds (0.01s)
 === RUN   TestXCLBindEachInboundToDifferentExit
---- PASS: TestXCLBindEachInboundToDifferentExit (0.01s)
+--- PASS: TestXCLBindEachInboundToDifferentExit (0.03s)
 === RUN   TestXCLBindRebindMovesInsteadOfDuplicating
---- PASS: TestXCLBindRebindMovesInsteadOfDuplicating (0.01s)
+--- PASS: TestXCLBindRebindMovesInsteadOfDuplicating (0.02s)
 === RUN   TestXCLBindEmptyHostUnbinds
---- PASS: TestXCLBindEmptyHostUnbinds (0.01s)
+--- PASS: TestXCLBindEmptyHostUnbinds (0.02s)
 === RUN   TestXCLKeepsForeignRoutingRules
 --- PASS: TestXCLKeepsForeignRoutingRules (0.01s)
 === RUN   TestXCLBindRejectsUnknownInbound
 --- PASS: TestXCLBindRejectsUnknownInbound (0.00s)
 === RUN   TestXCLOnTunnelsChangedDropsDeadOutbounds
---- PASS: TestXCLOnTunnelsChangedDropsDeadOutbounds (0.01s)
+--- PASS: TestXCLOnTunnelsChangedDropsDeadOutbounds (0.02s)
 === RUN   TestXCLNodeOpsAreReadOnly
 --- PASS: TestXCLNodeOpsAreReadOnly (0.00s)
 === RUN   TestConfigurePanelReadsSavedMode
---- PASS: TestConfigurePanelReadsSavedMode (0.00s)
+--- PASS: TestConfigurePanelReadsSavedMode (0.01s)
 === RUN   TestPickNodesSkipsRunning
 --- PASS: TestPickNodesSkipsRunning (0.00s)
 === RUN   TestPickNodesRegionMismatch
@@ -128,15 +196,15 @@
 === RUN   TestValidatePort
 --- PASS: TestValidatePort (0.00s)
 === RUN   TestSetBasePathValidatesAndPersists
---- PASS: TestSetBasePathValidatesAndPersists (0.00s)
+--- PASS: TestSetBasePathValidatesAndPersists (0.01s)
 === RUN   TestAuthSetPassword
 --- PASS: TestAuthSetPassword (0.00s)
 === RUN   TestWebServerReloadSwitchesPort
-2026/10/18 06:20:45 管理界面监听已切换到 127.0.0.1:65139
-2026/10/18 06:20:45 管理界面监听已切换到 127.0.0.1:65141
+2026/10/18 09:12:23 管理界面监听已切换到 127.0.0.1:65208
+2026/10/18 09:12:23 管理界面监听已切换到 127.0.0.1:65210
 --- PASS: TestWebServerReloadSwitchesPort (1.51s)
 === RUN   TestLoadWebSettingsExplicitFlagWins
---- PASS: TestLoadWebSettingsExplicitFlagWins (0.01s)
+--- PASS: TestLoadWebSettingsExplicitFlagWins (0.04s)
 === RUN   TestSocksAuthAcceptsCorrect
 --- PASS: TestSocksAuthAcceptsCorrect (0.00s)
 === RUN   TestSocksAuthRejectsWrong
@@ -147,6 +215,9 @@
 --- PASS: TestValidateCred (0.00s)
 === RUN   TestSocksURL
 --- PASS: TestSocksURL (0.00s)
+=== RUN   TestVPNBookOfficialFeedLive
+    source_live_test.go:11: opt-in external official-source test
+--- SKIP: TestVPNBookOfficialFeedLive (0.00s)
 === RUN   TestParseUDPReqHeaderIPv4
 --- PASS: TestParseUDPReqHeaderIPv4 (0.00s)
 === RUN   TestParseUDPReqHeaderDomain
@@ -162,11 +233,11 @@
 === RUN   TestParseSemver
 --- PASS: TestParseSemver (0.00s)
 === RUN   TestExtractBinary
---- PASS: TestExtractBinary (0.02s)
+--- PASS: TestExtractBinary (0.04s)
 === RUN   TestSha256FromList
---- PASS: TestSha256FromList (0.01s)
+--- PASS: TestSha256FromList (0.02s)
 === RUN   TestFetchNodesUsesDirectWhenHealthy
---- PASS: TestFetchNodesUsesDirectWhenHealthy (0.01s)
+--- PASS: TestFetchNodesUsesDirectWhenHealthy (0.00s)
 === RUN   TestFetchNodesFallsBackToMirror
 --- PASS: TestFetchNodesFallsBackToMirror (0.01s)
 === RUN   TestFetchNodesFallsBackOnGarbageBody
@@ -190,5 +261,5 @@
 === RUN   TestLinkForPortHandlesURIStyle
 --- PASS: TestLinkForPortHandlesURIStyle (0.00s)
 PASS
-coverage: 15.5% of statements
-ok  	fanout	3.097s	coverage: 15.5% of statements
+coverage: 22.0% of statements
+ok  	fanout	3.520s	coverage: 22.0% of statements

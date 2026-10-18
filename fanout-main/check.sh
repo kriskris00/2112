@@ -5,6 +5,7 @@ go test -count=1 -timeout=120s ./...
 go vet ./...
 bash -n install.sh
 bash -n f.sh
+bash -n upgrade-local.sh
 node --check web_check.js
 node --check worker/worker.js
 node frontend_test.cjs

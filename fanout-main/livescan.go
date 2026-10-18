@@ -32,7 +32,8 @@ func probeNodeLive(n Node, timeout time.Duration) (bool, int64, string, error) {
 
 	if n.Config != "" || n.Proto == "ovpn" {
 		start := time.Now()
-		if err := probeOpenVPNHandshake(n.Config, timeout); err != nil {
+		user, pass := vpnCredentials(n)
+		if err := probeOpenVPNWithCredentials(n.Config, timeout, user, pass); err != nil {
 			return false, 0, "", err
 		}
 		return true, time.Since(start).Milliseconds(), "", nil
@@ -48,7 +49,7 @@ func probeNodeLive(n Node, timeout time.Duration) (bool, int64, string, error) {
 	transport := &http.Transport{Dial: dial, DisableKeepAlives: true}
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, Timeout: timeout}
-	resp, err := client.Get("http://1.1.1.1/cdn-cgi/trace")
+	resp, err := client.Get("https://1.1.1.1/cdn-cgi/trace")
 	if err != nil {
 		return false, 0, "", err
 	}
@@ -331,7 +332,7 @@ func (ls *LiveScanner) runScan(source, region string, maxCandidates int) {
 				continue
 			}
 			hostLower := strings.ToLower(n.HostName)
-			isEdu := n.Source == "edu" ||
+			isEdu := n.FeedCategory == "edu" || n.Source == "edu" ||
 				n.IPType == "edu" ||
 				isEduIP(n.IP) ||
 				isEduISP(n.ISP) ||
@@ -493,10 +494,10 @@ func (ls *LiveScanner) GetVerifiedNodes(source, region, search string) []Node {
 				if strings.EqualFold(n.CountryCode, "CN") || strings.Contains(strings.ToLower(n.Country), "china") || strings.HasSuffix(strings.ToLower(n.HostName), ".cn") {
 					continue
 				}
-				if n.Source != "edu" && !isEduIP(n.IP) && !strings.Contains(strings.ToLower(n.HostName), "tsukuba") {
+				if n.FeedCategory != "edu" && n.Source != "edu" && !isEduIP(n.IP) && !strings.Contains(strings.ToLower(n.HostName), "tsukuba") {
 					continue
 				}
-			} else if !strings.EqualFold(n.Source, source) {
+			} else if !nodeMatchesSource(n, source) {
 				continue
 			}
 		}
@@ -519,6 +520,7 @@ func (ls *LiveScanner) GetVerifiedNodes(source, region, search string) []Node {
 			}
 		}
 
+		annotateGovernment(&n)
 		out = append(out, n)
 	}
 
@@ -583,6 +585,14 @@ func apiLiveNodes(scanner *LiveScanner) http.HandlerFunc {
 // HTTP 接口：触发母机实时测活扫描
 func apiLiveScan(scanner *LiveScanner, mgr *Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeJSON(w, 405, map[string]string{"error": "请使用 POST 启动测活"})
+			return
+		}
+		if reason := mgr.admissionReason(); reason != "" {
+			writeJSON(w, 409, map[string]string{"error": reason})
+			return
+		}
 		q := r.URL.Query()
 		source := q.Get("source")
 		region := q.Get("region")
@@ -608,9 +618,14 @@ func apiLiveScan(scanner *LiveScanner, mgr *Manager) http.HandlerFunc {
 // HTTP 接口：批量启动实测有效的节点
 func apiBatchStart(mgr *Manager, scanner *LiveScanner) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeJSON(w, 405, map[string]string{"error": "请使用 POST 批量启动"})
+			return
+		}
 		var in struct {
 			Hosts    []string `json:"hosts"`
 			Template int      `json:"template"`
+			Queue    bool     `json:"queue"`
 		}
 		if r.Body != nil {
 			_ = json.NewDecoder(r.Body).Decode(&in)
@@ -638,6 +653,15 @@ func apiBatchStart(mgr *Manager, scanner *LiveScanner) http.HandlerFunc {
 		}
 
 		var started []*Tunnel
+		if in.Queue {
+			job, err := mgr.Provision(ProvisionRequest{Hosts: in.Hosts, TemplateID: tpl})
+			if err != nil {
+				writeJSON(w, 400, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusAccepted, map[string]any{"queued": len(in.Hosts), "job": job.View()})
+			return
+		}
 		var errs []string
 
 		for _, h := range in.Hosts {

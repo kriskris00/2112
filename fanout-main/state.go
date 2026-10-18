@@ -21,6 +21,11 @@ type persistedTunnel struct {
 	TargetPolicyMode   string `json:"target_policy_mode,omitempty"`
 	LegacyTargetJPMode string `json:"target_jp_mode,omitempty"`
 	Config             string `json:"config"`
+	IP                 string `json:"ip,omitempty"`
+	Proto              string `json:"proto,omitempty"`
+	UpstreamPort       int    `json:"upstream_port,omitempty"`
+	VPNUser            string `json:"vpn_user,omitempty"`
+	VPNPass            string `json:"vpn_pass,omitempty"`
 	// SOCKS5 凭据要存盘：用户已经把它分发给客户端了，重启后变掉等于全断
 	SocksUser string `json:"socks_user,omitempty"`
 	SocksPass string `json:"socks_pass,omitempty"`
@@ -37,7 +42,8 @@ func (m *Manager) saveState() error {
 	m.stateMu.Lock()
 	defer m.stateMu.Unlock()
 	var st persistedState
-	for _, t := range m.Tunnels() {
+	m.mu.RLock()
+	for _, t := range m.tunnels {
 		// 只跳过用户主动停掉的。starting/failed 的隧道也要存：
 		// 它们正在重连或等着重试，漏存会让重启后凭空少几个出口。
 		if t.Status == "stopped" {
@@ -51,11 +57,14 @@ func (m *Manager) saveState() error {
 			Country:          t.Node.Country,
 			TargetPolicyMode: t.TargetPolicyMode,
 			Config:           t.Node.Config,
-			SocksUser:        t.Cred.User,
-			SocksPass:        t.Cred.Pass,
+			IP:               t.Node.IP, Proto: t.Node.Proto, UpstreamPort: t.Node.Port, VPNUser: t.Node.VPNUser, VPNPass: t.Node.VPNPass,
+			SocksUser: t.Cred.User,
+			SocksPass: t.Cred.Pass,
 		})
 	}
 
+	st.Tunnels = append(st.Tunnels, m.pendingRestore...)
+	m.mu.RUnlock()
 	blob, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
 		return err
@@ -83,55 +92,88 @@ func (m *Manager) restoreState() (int, error) {
 		return 0, fmt.Errorf("解析状态文件失败: %w", err)
 	}
 
-	// 从当前节点列表补回地区、延迟等元数据；节点已下线时退回存盘的最小信息
-	known := map[string]Node{}
-	for _, n := range m.nodes {
-		known[n.HostName] = n
+	// Retain all saved exits, including entries above a newly lowered limit.
+	m.mu.Lock()
+	m.pendingRestore = append([]persistedTunnel(nil), st.Tunnels...)
+	m.mu.Unlock()
+	if len(st.Tunnels) > 0 {
+		go m.restoreQueued()
 	}
+	return len(st.Tunnels), nil
+}
 
-	maxRestore := len(st.Tunnels)
-	if maxRestore > m.maxSlots {
-		maxRestore = m.maxSlots
-		log.Printf("状态文件里有 %d 条旧隧道，只恢复前 %d 条，避免重启瞬间拉起大量旧出口", len(st.Tunnels), maxRestore)
-	}
-	for _, p := range st.Tunnels[:maxRestore] {
-		node, ok := known[p.HostName]
-		if !ok {
-			// 节点已从 VPN Gate 列表消失，用存盘的信息重建
-			node = Node{
-				HostName:    p.HostName,
-				CountryCode: p.CountryCode,
-				Country:     p.Country,
+func (m *Manager) restoreQueued() {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-m.stopCh:
+			return
+		case <-ticker.C:
+		}
+		if m.admissionReason() != "" {
+			continue
+		}
+		m.mu.Lock()
+		if len(m.pendingRestore) == 0 {
+			m.mu.Unlock()
+			return
+		}
+		if len(m.tunnels) >= m.maxSlots {
+			m.mu.Unlock()
+			continue
+		}
+		starting := 0
+		for _, t := range m.tunnels {
+			if t.Status == "starting" {
+				starting++
+			}
+		}
+		if starting >= 2 {
+			m.mu.Unlock()
+			continue
+		}
+		p := m.pendingRestore[0]
+		slot := p.Slot
+		if slot < 1 || slot > absoluteExitLimit || m.tunnels[slot] != nil {
+			var err error
+			slot, err = m.freeSlot()
+			if err != nil {
+				m.mu.Unlock()
+				continue
+			}
+		}
+		node := Node{HostName: p.HostName, IP: p.IP, Proto: p.Proto, Port: p.UpstreamPort, Country: p.Country, CountryCode: p.CountryCode}
+		for _, n := range m.nodes {
+			if n.HostName == p.HostName {
+				node = n
+				break
 			}
 		}
 		node.Config = p.Config
-		// 从旧版本升上来的状态文件没有凭据字段，补一套新的
+		if p.VPNUser != "" || p.VPNPass != "" {
+			node.VPNUser = p.VPNUser
+			node.VPNPass = p.VPNPass
+		}
 		cred := SocksCred{User: p.SocksUser, Pass: p.SocksPass}
 		if cred.User == "" || cred.Pass == "" {
-			gen, err := newSocksCred()
+			var err error
+			cred, err = newSocksCred()
 			if err != nil {
-				return 0, fmt.Errorf("生成 SOCKS5 凭据失败: %w", err)
+				m.mu.Unlock()
+				log.Printf("恢复凭据失败: %v", err)
+				continue
 			}
-			cred = gen
 		}
-		t := &Tunnel{
-			Slot:         p.Slot,
-			Port:         p.Port,
-			Node:         node,
-			Status:       "starting",
-			TargetRegion: strings.ToUpper(strings.TrimSpace(node.CountryCode)),
-			TargetPolicyMode: func() string {
-				if p.TargetPolicyMode != "" {
-					return p.TargetPolicyMode
-				}
-				return p.LegacyTargetJPMode
-			}(),
-			Cred: cred,
+		policy := p.TargetPolicyMode
+		if policy == "" {
+			policy = p.LegacyTargetJPMode
 		}
-		m.mu.Lock()
-		m.tunnels[p.Slot] = t
+		t := &Tunnel{Slot: slot, Port: p.Port, Node: node, Cred: cred, Status: "starting", TargetRegion: strings.ToUpper(strings.TrimSpace(node.CountryCode)), TargetPolicyMode: policy, Since: time.Now()}
+		m.tunnels[slot] = t
+		m.pendingRestore = m.pendingRestore[1:]
+		m.lastAdmission = time.Now()
 		m.mu.Unlock()
 		go m.bringUpPersist(t, true, true)
 	}
-	return maxRestore, nil
 }

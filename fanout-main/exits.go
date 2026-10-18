@@ -34,9 +34,11 @@ type Exit struct {
 	SocksPass string        `json:"socks_pass"`
 	Inbounds  []ExitInbound `json:"inbounds"`
 
-	IPType      string `json:"ip_type,omitempty"`
-	PurityScore int    `json:"purity_score,omitempty"`
-	ISP         string `json:"isp,omitempty"`
+	IPType             string `json:"ip_type,omitempty"`
+	PurityScore        int    `json:"purity_score,omitempty"`
+	ISP                string `json:"isp,omitempty"`
+	GovernmentStatus   string `json:"government_status,omitempty"`
+	GovernmentEvidence string `json:"government_evidence,omitempty"`
 }
 
 // ExitsView 是主界面需要的全部数据。
@@ -145,7 +147,16 @@ func (m *Manager) ExitsOf() ExitsView {
 		if isp == "" || strings.EqualFold(isp, "Public Proxy") {
 			isp = "优质网络"
 		}
+		govNode := t.Node
+		if intel.IPType == "gov" {
+			govNode.IPType = "gov"
+		}
+		if isGovISP(isp) {
+			govNode.ISP = isp
+		}
+		govStatus, govEvidence := governmentClassification(govNode)
 		view.Exits = append(view.Exits, Exit{
+			GovernmentStatus: govStatus, GovernmentEvidence: govEvidence,
 			Slot: t.Slot, Port: t.Port, Host: t.Node.HostName,
 			Region: region, Country: country,
 			ExitIP: t.ExitIP, Status: t.Status, Err: t.Err, Since: t.Since,

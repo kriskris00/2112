@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -250,7 +251,12 @@ func writeXrayConfig(dir string, cfg map[string]any) (string, error) {
 // 先校验再重启：配置写坏时进程会起不来，而那时旧进程已经被杀掉，
 // 所有节点链接会一起断掉。校验能把这类错误挡在重启之前。
 func verifyXrayConfig(bin, cfgPath string) error {
-	out, err := exec.Command(bin, "run", "-test", "-c", cfgPath).CombinedOutput()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, bin, "run", "-test", "-c", cfgPath).CombinedOutput()
+	if ctx.Err() != nil {
+		return fmt.Errorf("Xray 配置校验超时（15 秒）")
+	}
 	if err != nil {
 		return fmt.Errorf("Xray 配置校验失败: %s", trimOutput(out))
 	}
