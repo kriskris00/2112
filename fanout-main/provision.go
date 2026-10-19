@@ -276,25 +276,20 @@ func cloneTemplateToTunnels(templateID int, hosts []string, tunnels []*Tunnel) (
 	if templateID <= 0 {
 		inbounds, _ := x.Inbounds(nil)
 		for _, ib := range inbounds {
-			if ib.Enable && ib.ID > 0 {
+			if ib.Enable && ib.ID > 0 && strings.EqualFold(ib.Protocol, selectedAutoProtocol()) {
 				templateID = ib.ID
 				break
 			}
 		}
-		if templateID <= 0 && len(inbounds) > 0 {
-			templateID = inbounds[0].ID
-		}
+
 		if templateID <= 0 {
 			spec := NewInboundSpec{
-				Protocol: "vmess",
+				Protocol: selectedAutoProtocol(),
 				Network:  "tcp",
 				Remark:   "fanout-template",
 			}
 			created, err := x.CreateInbound(spec, tunnels)
-			if err != nil {
-				spec.Protocol = "vmess"
-				created, err = x.CreateInbound(spec, tunnels)
-			}
+
 			if err == nil && created != nil {
 				templateID = created.ID
 			}
@@ -713,6 +708,7 @@ func (m *Manager) startAutoOrchestrate(opts AutoOrchestrateOptions) (AutoOrchest
 	if !m.tryBeginOrchestration() {
 		return m.OrchestrateProgress(), false
 	}
+	m.resetOrchestrationCancel()
 	progress := m.OrchestrateProgress()
 	go m.runAutoOrchestrate(opts)
 	return progress, true
@@ -722,11 +718,16 @@ func (m *Manager) AutoOrchestrateWithOptions(opts AutoOrchestrateOptions) {
 	if !m.tryBeginOrchestration() {
 		return
 	}
+	m.resetOrchestrationCancel()
 	m.runAutoOrchestrate(opts)
 }
 
 // The caller owns orchestrateMu and has already published the initial state.
 func (m *Manager) runAutoOrchestrate(opts AutoOrchestrateOptions) {
+	if !validAutoProtocol(opts.Protocol) {
+		opts.Protocol = "vmess"
+	}
+	setAutoProtocol(opts.Protocol)
 	if opts.HotTarget < 1 {
 		opts.HotTarget = 3
 	}
@@ -748,7 +749,11 @@ func (m *Manager) runAutoOrchestrate(opts AutoOrchestrateOptions) {
 	defer func() {
 		m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
 			p.Running = false
-			p.Stage = "done"
+			if p.StopReason == "用户手动停止" {
+				p.Stage = "stopped"
+			} else {
+				p.Stage = "done"
+			}
 			p.FinishedAt = time.Now()
 			p.Message = fmt.Sprintf("完成：验证通过 %d 个，新增正式出口 %d 个，失败 %d 个", p.Verified, p.Added, p.Failed)
 			if p.StopReason != "" {
@@ -884,6 +889,9 @@ func (m *Manager) runAutoOrchestrate(opts AutoOrchestrateOptions) {
 	probesUsed := 0
 countryLoop:
 	for _, cc := range sortedCountries {
+		if m.orchestrationCancelled() {
+			break
+		}
 		if reason := m.admissionReason(); reason != "" {
 			m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) { p.StopReason = reason })
 			break
@@ -1021,6 +1029,9 @@ countryLoop:
 		sort.SliceStable(passed, func(i, j int) bool { return passed[i].rtt < passed[j].rtt })
 
 		for _, pr := range passed {
+			if m.orchestrationCancelled() {
+				break countryLoop
+			}
 			if needed <= 0 || startsUsed >= opts.MaxStarts {
 				break
 			}
@@ -1054,7 +1065,7 @@ countryLoop:
 			})
 
 			deadline := time.Now().Add(opts.VerifyTimeout)
-			for time.Now().Before(deadline) && t.Status == "starting" {
+			for time.Now().Before(deadline) && t.Status == "starting" && !m.orchestrationCancelled() {
 				time.Sleep(500 * time.Millisecond)
 			}
 			if t.Status != "up" || strings.TrimSpace(t.ExitIP) == "" {
@@ -1065,6 +1076,27 @@ countryLoop:
 				})
 				m.markNodeFailed(pick)
 				log.Printf("[智能编排] 最终出网验证失败，移除 %s (%s): %s", pick.HostName, cc, firstLine(t.Err))
+				_ = m.Stop(t.Slot)
+				continue
+			}
+
+			if m.orchestrationCancelled() {
+				_ = m.Stop(t.Slot)
+				break countryLoop
+			}
+			if opts.CleanIPEnabled && (t.Node.PurityScore <= 0 || t.Node.PurityScore < opts.MinScore) {
+				m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
+					p.Failed++
+					p.LastError = fmt.Sprintf("项目评分未达标: %d/%d", t.Node.PurityScore, opts.MinScore)
+				})
+				_ = m.Stop(t.Slot)
+				continue
+			}
+			if opts.TypeFilterEnabled && !orchTypeAllowed(t.Node.IPType, opts.AllowedIPTypes) {
+				m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
+					p.Failed++
+					p.LastError = "IP 类型不在允许列表中: " + t.Node.IPType
+				})
 				_ = m.Stop(t.Slot)
 				continue
 			}
@@ -1169,7 +1201,7 @@ func (m *Manager) reconcilePanelBindings() {
 		} else {
 			// 使用 VMess + TCP 作为真正的“本机直连”节点：不绑定任何 VPN 出口。
 			ib, err := p.CreateInbound(NewInboundSpec{
-				Protocol:    "vmess",
+				Protocol:    selectedAutoProtocol(),
 				Network:     "tcp",
 				Security:    "none",
 				Remark:      "服务器直连 · 本机",
@@ -1240,35 +1272,27 @@ func (m *Manager) reconcilePanelBindings() {
 
 // WatchAutoOrchestrate 守护线程：定期巡检全网国家出口配额与自愈，并每 30 分钟定时拉取全网最新节点源
 func (m *Manager) WatchAutoOrchestrate() {
-	time.Sleep(10 * time.Second)
-	m.AutoOrchestrate()
-
-	// 1. 每 30 秒补一次“UP 出口 -> 入站”绑定，避免异步启动时序导致面板短暂显示“无节点”。
-	bindingTicker := time.NewTicker(30 * time.Second)
-	// 2. 每 2 分钟做一次出口配额快速巡检与健康自愈维护（稳定运行的出口绝不触动）
-	orchestrateTicker := time.NewTicker(2 * time.Minute)
-	// 3. 每 15 分钟定时拉取一次全网最新节点源（自动发现新国家直接添加，离线恢复的国家自动补齐）
-	sourceTicker := time.NewTicker(15 * time.Minute)
-
-	defer bindingTicker.Stop()
-	defer orchestrateTicker.Stop()
-	defer sourceTicker.Stop()
-
-	for {
-		select {
-		case <-bindingTicker.C:
-			m.reconcilePanelBindings()
-		case <-orchestrateTicker.C:
-			m.AutoOrchestrate()
-		case <-sourceTicker.C:
-			log.Printf("[自动拉源] 定时拉取全网最新节点源 (15 分钟周期)...")
-			_, _ = m.RefreshNodesSource("all")
-			m.AutoOrchestrate()
-		}
-	}
+	// 禁止定时编排和后台自动拉源；手动操作之后仍可按需调用绑定方法。
+	<-m.stopCh
 }
 
 func normalizeIP(ip string) string { return strings.ToLower(strings.TrimSpace(ip)) }
 func normalizeISP(isp string) string {
 	return strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(isp)), " "))
+}
+
+var protocolSetting = struct {
+	sync.RWMutex
+	value string
+}{value: "vmess"}
+
+func setAutoProtocol(s string) {
+	protocolSetting.Lock()
+	protocolSetting.value = s
+	protocolSetting.Unlock()
+}
+func selectedAutoProtocol() string {
+	protocolSetting.RLock()
+	defer protocolSetting.RUnlock()
+	return protocolSetting.value
 }

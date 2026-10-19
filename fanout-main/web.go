@@ -740,6 +740,20 @@ textarea:focus{outline:none;border-color:var(--accent)}
       <div class="hint" style="margin-bottom:12px">严格模式：<b>先测活 → 再真实建立隧道 → 再验证出口 IP → 验证通过才进入正式出口</b>。失败节点自动冷却，不会一上来批量塞一堆未经验证的节点。</div>
       <div class="hint" style="margin-bottom:12px"><b>按预算逐轮增加：</b>只加入真实验证通过的出口；同时遵守总容量、每国限额、来源筛选与资源保护。
       </div>
+      <label class="f"><span>自动创建的节点协议</span><select id="orchProtocol"><option value="vmess">VMess</option><option value="vless">VLESS</option><option value="trojan">Trojan</option><option value="shadowsocks">Shadowsocks</option></select></label>
+      <label class="f" style="display:flex;align-items:center;gap:10px"><input id="orchCleanEnabled" type="checkbox" style="width:20px;height:20px;flex:none"><span><b>启用最低评分过滤</b>（项目内置评分，默认关闭）</span></label>
+      <div id="orchCleanSettings" style="display:none"><label class="f"><span>最低纯净度评分（0–100）</span><input id="orchMinScore" type="number" min="0" max="100" value="90"></label></div>
+      <label class="f" style="display:flex;align-items:center;gap:10px"><input id="orchTypeEnabled" type="checkbox" style="width:20px;height:20px;flex:none"><span><b>启用 IP 类型过滤</b>（默认关闭）</span></label>
+      <div id="orchTypeSettings" style="display:none"><div class="orch-source-grid">
+        <label><input type="checkbox" class="orch-iptype" value="residential" checked> 住宅 / 家宽</label>
+        <label><input type="checkbox" class="orch-iptype" value="datacenter" checked> 机房 / 托管</label>
+        <label><input type="checkbox" class="orch-iptype" value="mobile" checked> 移动网络</label>
+        <label><input type="checkbox" class="orch-iptype" value="edu" checked> 教育网络</label>
+        <label><input type="checkbox" class="orch-iptype" value="gov" checked> 政府网络</label>
+        <label><input type="checkbox" class="orch-iptype" value="unknown" checked> 未知 / 其他</label>
+      </div></div>
+      <p class="hint">评分来自项目现有的 IP 情报和综合评估，不是 CleanIP 网站评分。分类无法确定的节点归入“未知 / 其他”。启用筛选后不符合条件的出口不予添加。</p>
+      <div class="hint" id="orchStatus" aria-live="polite">智能编排状态：待命</div>
       <label class="f" style="margin-top:10px"><span>本轮最多启动数量（1–20；最多测活 64 个候选）</span><input id="orchMax" type="number" min="1" max="20" value="8"></label>
       <div style="margin-top:14px">
         <div style="font-weight:700;margin-bottom:8px">候选节点源（可多选）</div>
@@ -767,7 +781,7 @@ textarea:focus{outline:none;border-color:var(--accent)}
       </div>
       <div style="margin-top:14px;padding:10px;border-radius:10px;background:rgba(2,132,199,.07);border:1px solid rgba(2,132,199,.16);font-size:12px;color:var(--dim)">测活为强制步骤。国家不设配额；只保留真实验证通过的节点。个人手动启动的节点同样会等待真实出网验证并自动创建/绑定节点链接。</div>
     </div>
-    <div class="foot"><span class="spacer"></span><button data-close="orchestrateModal">取消</button><button class="primary" id="runOrchestrate">开始智能编排</button></div>
+    <div class="foot"><span class="spacer"></span><button data-close="orchestrateModal">取消</button><button id="stopOrchestrate" style="border-color:#d9534f">停止编排</button><button class="primary" id="runOrchestrate">开始智能编排</button></div>
   </div>
 </div>
 
@@ -2678,7 +2692,13 @@ document.addEventListener('click', async e => {
     return;
   }
   if(e.target.closest('#autoOrchestrateBtn')){
+    api('/api/auto/orchestrate/status').then(p=>{ $('#orchStatus').textContent='智能编排状态：'+(p.running?'运行中':'未运行')+(p.message?' · '+p.message:''); }).catch(()=>{});
     openModal('orchestrateModal');
+    return;
+  }
+  if(e.target.closest('#orchTypeEnabled')){ $('#orchTypeSettings').style.display=$('#orchTypeEnabled').checked?'block':'none'; return; }
+  if(e.target.closest('#orchCleanEnabled')){
+    $('#orchCleanSettings').style.display=$('#orchCleanEnabled').checked?'block':'none';
     return;
   }
   if(e.target.closest('#orchAll')){
@@ -2686,11 +2706,20 @@ document.addEventListener('click', async e => {
     document.querySelectorAll('.orch-src').forEach(x => { x.checked = all; });
     return;
   }
+  if(e.target.closest('#stopOrchestrate')){
+    try { const r=await api('/api/auto/orchestrate/stop',{method:'POST'});$('#orchStatus').textContent='智能编排状态：停止中';toast(r.message||'已请求停止'); }catch(err){toast('停止失败：'+err.message,true)}
+    return;
+  }
   if(e.target.closest('#runOrchestrate')){
     const btn = e.target.closest('#runOrchestrate');
     const sources = $('#orchAll').checked ? ['all'] : Array.from(document.querySelectorAll('.orch-src:checked')).map(x => x.value);
     const maxStarts = Math.max(1, Math.min(20, parseInt($('#orchMax').value || '8', 10)));
     if(!sources.length){ toast('至少选择一个节点源', true); return; }
+    const cleanEnabled=$('#orchCleanEnabled').checked;
+    const minScore=Number($('#orchMinScore').value);if(cleanEnabled&&(!Number.isInteger(minScore)||minScore<0||minScore>100)){toast('开启 CleanIP 时，评分门槛应为 0–100',true);return;}
+    const typeEnabled=$('#orchTypeEnabled').checked;
+    const allowedTypes=Array.from(document.querySelectorAll('.orch-iptype:checked')).map(x=>x.value);
+    if(typeEnabled&&!allowedTypes.length){toast('至少选择一种 IP 类型',true);return;}
     btn.disabled = true;
     $('#orchProgress').style.display = 'block';
     $('#orchProgressStage').textContent = '启动中';
@@ -2708,6 +2737,7 @@ document.addEventListener('click', async e => {
       $('#orchProgressMsg').textContent = p.message || '处理中…';
       $('#orchProgressStats').textContent = '测活通过 ' + (p.live_passed||0) + ' · 已启动 ' + (p.started||0) + ' · 验证通过 ' + (p.verified||0) + ' · 新增 ' + (p.added||0) + ' · 失败 ' + (p.failed||0);
       if(p.current_node) $('#orchProgressMsg').textContent += '（当前：' + p.current_node + '）';
+      $('#orchStatus').textContent='智能编排状态：'+(p.running?'运行中':'未运行')+' · '+(p.message||'');
       if(!p.running && orchestrateProgressTimer){ clearInterval(orchestrateProgressTimer); orchestrateProgressTimer = null; }
     };
     const pollOrch = async () => {
@@ -2720,7 +2750,7 @@ document.addEventListener('click', async e => {
     try {
       const res = await api('/api/auto/orchestrate', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({sources:sources,max_starts:maxStarts})
+        body:JSON.stringify({sources:sources,max_starts:maxStarts,protocol:$('#orchProtocol').value,min_score:cleanEnabled?minScore:0,cleanip_enabled:cleanEnabled,type_filter_enabled:typeEnabled,allowed_ip_types:typeEnabled?allowedTypes:[]})
       });
       closeModal('orchestrateModal');
       toast(res.message || '智能编排已启动');

@@ -85,33 +85,14 @@ func main() {
 	}
 	// 服务刚启动就保证存在一个真正不走任何出口的“服务器直连 · 本机”节点，
 	// 不必等智能编排跑完几十个候选后才出现。
-	go mgr.reconcilePanelBindings()
+	// 初次安装不主动创建或绑定节点；等待用户操作。
 	initNodes, _ := mgr.Nodes()
 	log.Printf("节点底池已就绪: %d 个节点 (动态多源节点池，含 VPN Gate/筑波大学及其他公开 OpenVPN 源)", len(initNodes))
 
-	if n, err := mgr.restoreState(); err != nil {
-		log.Printf("恢复上次状态失败: %v", err)
-	} else if n > 0 {
-		log.Printf("正在恢复上次的 %d 条隧道", n)
-		// 3x-ui 模式重启不会自动重写面板出站，旧版本升上来时面板里的 socks
-		// 出站没有认证字段，端口一旦要认证就连不上，这里恢复后对账一次
-		go mgr.ReconcileOutbounds()
-	}
-	go mgr.reconcilePanelBindings()
+	// 不自动恢复旧出口；安装和重启后均待命，由用户手动操作。
 
-	// 先恢复并稳定现有状态，再拉取新源和自动编排，避免重启时“旧隧道恢复”和“新隧道编排”同时争抢出口额度。
-	go func() {
-		log.Printf("后台开始并发拉取最新官方节点源...")
-		if n, err := mgr.RefreshNodes(); err != nil {
-			log.Printf("后台拉取提示: %v", err)
-		} else {
-			log.Printf("节点池已刷新至 %d 个本轮有效候选", n)
-		}
-		mgr.AutoOrchestrate()
-	}()
-
+	// 安装/启动后保持待命：不自动拉源、不自动智能编排、不定时启动出口。
 	go mgr.WatchHealth()
-	go mgr.WatchAutoOrchestrate()
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
@@ -145,6 +126,7 @@ func main() {
 	mux.HandleFunc("/api/regions", apiRegions(mgr))
 	mux.HandleFunc("/api/auto/orchestrate", apiAutoOrchestrate(mgr))
 	mux.HandleFunc("/api/auto/orchestrate/status", apiAutoOrchestrateStatus(mgr))
+	mux.HandleFunc("/api/auto/orchestrate/stop", apiStopOrchestrate(mgr))
 	mux.HandleFunc("/api/provision", apiProvision(mgr))
 	mux.HandleFunc("/api/jobs", apiJobs(mgr))
 	mux.HandleFunc("/api/jobs/dismiss", apiJobDismiss(mgr))
@@ -359,10 +341,15 @@ func apiAutoOrchestrate(m *Manager) http.HandlerFunc {
 		opts := DefaultAutoOrchestrateOptions()
 		if r.Method == http.MethodPost {
 			var body struct {
-				Sources    []string `json:"sources"`
-				HotTarget  int      `json:"hot_target"`
-				ColdTarget int      `json:"cold_target"`
-				MaxStarts  int      `json:"max_starts"`
+				Sources           []string `json:"sources"`
+				HotTarget         int      `json:"hot_target"`
+				ColdTarget        int      `json:"cold_target"`
+				MaxStarts         int      `json:"max_starts"`
+				Protocol          string   `json:"protocol"`
+				MinScore          int      `json:"min_score"`
+				TypeFilterEnabled bool     `json:"type_filter_enabled"`
+				AllowedIPTypes    []string `json:"allowed_ip_types"`
+				CleanIPEnabled    bool     `json:"cleanip_enabled"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			if len(body.Sources) > 0 {
@@ -377,7 +364,37 @@ func apiAutoOrchestrate(m *Manager) http.HandlerFunc {
 			if body.MaxStarts > 0 {
 				opts.MaxStarts = body.MaxStarts
 			}
+			if body.Protocol != "" {
+				opts.Protocol = body.Protocol
+			}
+			if body.MinScore >= 0 && body.MinScore <= 100 {
+				opts.MinScore = body.MinScore
+			}
+			opts.TypeFilterEnabled = body.TypeFilterEnabled
+			opts.AllowedIPTypes = body.AllowedIPTypes
+			opts.CleanIPEnabled = body.CleanIPEnabled
 		}
+		if !validAutoProtocol(opts.Protocol) {
+			writeJSON(w, 400, map[string]string{"error": "协议不支持"})
+			return
+		}
+		if opts.MinScore < 0 || opts.MinScore > 100 {
+			writeJSON(w, 400, map[string]string{"error": "评分阈值无效"})
+			return
+		}
+		if opts.TypeFilterEnabled {
+			if len(opts.AllowedIPTypes) == 0 {
+				writeJSON(w, 400, map[string]string{"error": "至少选择一种 IP 类型"})
+				return
+			}
+			for _, typ := range opts.AllowedIPTypes {
+				if !validOrchIPType(typ) {
+					writeJSON(w, 400, map[string]string{"error": "不支持的 IP 类型"})
+					return
+				}
+			}
+		}
+
 		progress, started := m.startAutoOrchestrate(opts)
 		if !started {
 			writeJSON(w, http.StatusAccepted, map[string]any{"status": "busy", "message": "已有智能编排正在运行，已切换到当前任务进度；无需重复启动", "progress": progress})
@@ -1347,5 +1364,16 @@ func apiInboundCreate(m *Manager) http.HandlerFunc {
 			"network":  ib.Network,
 			"security": ib.Security,
 		})
+	}
+}
+
+func apiStopOrchestrate(m *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeJSON(w, 405, map[string]string{"error": "需要 POST"})
+			return
+		}
+		m.cancelOrchestration()
+		writeJSON(w, 200, map[string]any{"status": "ok", "message": "已请求停止，正在结束当前步骤", "progress": m.OrchestrateProgress()})
 	}
 }

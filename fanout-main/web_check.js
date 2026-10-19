@@ -1609,7 +1609,12 @@ document.addEventListener('click', async e => {
     return;
   }
   if(e.target.closest('#autoOrchestrateBtn')){
+    api('/api/auto/orchestrate/status').then(p=>{ $('#orchStatus').textContent='智能编排状态：'+(p.running?'运行中':'未运行')+(p.message?' · '+p.message:''); }).catch(()=>{});
     openModal('orchestrateModal');
+    return;
+  }
+  if(e.target.closest('#orchCleanEnabled')){
+    $('#orchCleanSettings').style.display=$('#orchCleanEnabled').checked?'block':'none';
     return;
   }
   if(e.target.closest('#orchAll')){
@@ -1617,11 +1622,17 @@ document.addEventListener('click', async e => {
     document.querySelectorAll('.orch-src').forEach(x => { x.checked = all; });
     return;
   }
+  if(e.target.closest('#stopOrchestrate')){
+    try { const r=await api('/api/auto/orchestrate/stop',{method:'POST'});$('#orchStatus').textContent='智能编排状态：停止中';toast(r.message||'已请求停止'); }catch(err){toast('停止失败：'+err.message,true)}
+    return;
+  }
   if(e.target.closest('#runOrchestrate')){
     const btn = e.target.closest('#runOrchestrate');
     const sources = $('#orchAll').checked ? ['all'] : Array.from(document.querySelectorAll('.orch-src:checked')).map(x => x.value);
     const maxStarts = Math.max(1, Math.min(20, parseInt($('#orchMax').value || '8', 10)));
     if(!sources.length){ toast('至少选择一个节点源', true); return; }
+    const cleanEnabled=$('#orchCleanEnabled').checked;
+    const minScore=Number($('#orchMinScore').value);if(cleanEnabled&&(!Number.isInteger(minScore)||minScore<1||minScore>100)){toast('开启 CleanIP 时，评分门槛应为 1–100',true);return;}
     btn.disabled = true;
     $('#orchProgress').style.display = 'block';
     $('#orchProgressStage').textContent = '启动中';
@@ -1639,6 +1650,7 @@ document.addEventListener('click', async e => {
       $('#orchProgressMsg').textContent = p.message || '处理中…';
       $('#orchProgressStats').textContent = '测活通过 ' + (p.live_passed||0) + ' · 已启动 ' + (p.started||0) + ' · 验证通过 ' + (p.verified||0) + ' · 新增 ' + (p.added||0) + ' · 失败 ' + (p.failed||0);
       if(p.current_node) $('#orchProgressMsg').textContent += '（当前：' + p.current_node + '）';
+      $('#orchStatus').textContent='智能编排状态：'+(p.running?'运行中':'未运行')+' · '+(p.message||'');
       if(!p.running && orchestrateProgressTimer){ clearInterval(orchestrateProgressTimer); orchestrateProgressTimer = null; }
     };
     const pollOrch = async () => {
@@ -1651,7 +1663,7 @@ document.addEventListener('click', async e => {
     try {
       const res = await api('/api/auto/orchestrate', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({sources:sources,max_starts:maxStarts})
+        body:JSON.stringify({sources:sources,max_starts:maxStarts,protocol:$('#orchProtocol').value,min_score:cleanEnabled?minScore:0,cleanip_enabled:cleanEnabled,cleanip_manual:cleanEnabled?$('#orchCleanManual').value.trim():''})
       });
       closeModal('orchestrateModal');
       toast(res.message || '智能编排已启动');
