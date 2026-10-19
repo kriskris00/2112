@@ -23,9 +23,6 @@ type Manager struct {
 	jobs               JobStore
 	refreshing         bool
 	orchestrateMu      sync.Mutex
-	orchCancelMu       sync.RWMutex
-	orchCancel         bool
-	autoProtocol       string
 	bindingMu          sync.Mutex
 	limitMu            sync.Mutex
 	stateMu            sync.Mutex
@@ -112,28 +109,20 @@ func (m *Manager) IsOrchestrating() bool {
 }
 
 type AutoOrchestrateOptions struct {
-	Sources           []string      `json:"sources"`
-	HotTarget         int           `json:"hot_target"`
-	ColdTarget        int           `json:"cold_target"`
-	MaxStarts         int           `json:"max_starts"`
-	Protocol          string        `json:"protocol"`
-	MinScore          int           `json:"min_score"`
-	CleanIPEnabled    bool          `json:"cleanip_enabled"`
-	TypeFilterEnabled bool          `json:"type_filter_enabled"`
-	AllowedIPTypes    []string      `json:"allowed_ip_types"`
-	VerifyTimeout     time.Duration `json:"-"`
+	Sources       []string      `json:"sources"`
+	HotTarget     int           `json:"hot_target"`
+	ColdTarget    int           `json:"cold_target"`
+	MaxStarts     int           `json:"max_starts"`
+	VerifyTimeout time.Duration `json:"-"`
 }
 
 func DefaultAutoOrchestrateOptions() AutoOrchestrateOptions {
 	return AutoOrchestrateOptions{
-		Sources:        []string{"all"},
-		HotTarget:      3,
-		ColdTarget:     1,
-		MaxStarts:      8,
-		Protocol:       "vmess",
-		MinScore:       90,
-		CleanIPEnabled: false,
-		VerifyTimeout:  30 * time.Second,
+		Sources:       []string{"all"},
+		HotTarget:     3,
+		ColdTarget:    1,
+		MaxStarts:     8,
+		VerifyTimeout: 30 * time.Second,
 	}
 }
 
@@ -322,7 +311,7 @@ func (m *Manager) refreshNodesSource(source string, triggerOrchestrate bool) (in
 
 	// 手动刷新才触发全网智能编排；故障自愈刷新只更新节点池，避免递归启动另一套编排。
 	if triggerOrchestrate {
-		// 节点刷新不再触发智能编排；必须由用户手动点击。
+		go m.AutoOrchestrate()
 	}
 
 	return len(nodes), nil
@@ -1222,34 +1211,4 @@ func (m *Manager) notifyPanel() {
 	if err := p.OnTunnelsChanged(m.Tunnels()); err != nil {
 		log.Printf("同步节点链接后端失败: %v", err)
 	}
-}
-
-func validAutoProtocol(p string) bool {
-	switch p {
-	case "vmess", "vless", "trojan", "shadowsocks":
-		return true
-	}
-	return false
-}
-func (m *Manager) cancelOrchestration() {
-	m.orchCancelMu.Lock()
-	m.orchCancel = true
-	m.orchCancelMu.Unlock()
-	m.setOrchestrateProgress(func(p *AutoOrchestrateProgress) {
-		if p.Running {
-			p.StopReason = "用户手动停止"
-			p.Message = "停止中，等待当前步骤退出…"
-		}
-	})
-}
-func (m *Manager) orchestrationCancelled() bool {
-	m.orchCancelMu.RLock()
-	v := m.orchCancel
-	m.orchCancelMu.RUnlock()
-	return v
-}
-func (m *Manager) resetOrchestrationCancel() {
-	m.orchCancelMu.Lock()
-	m.orchCancel = false
-	m.orchCancelMu.Unlock()
 }
